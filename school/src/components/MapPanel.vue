@@ -4,7 +4,16 @@ import { mapData, getChildren, getItem, setMapData } from '../data/mapData'
 import { fetchMapDataFromWorldbook } from '../utils/worldbookParser'
 import { useGameStore } from '../stores/gameStore'
 import { checkAccess } from '../utils/conditionChecker'
-import { getNpcsAtLocation, getNpcCountAtLocation, trackNpc, untrackNpc, isNpcTracked, getTrackedNpcsWithLocations, findNpcLocation } from '../utils/npcScheduleSystem'
+import { 
+  getNpcsAtLocation, 
+  getNpcCountAtLocation, 
+  trackNpc, 
+  untrackNpc, 
+  isNpcTracked, 
+  getTrackedNpcsWithLocations, 
+  findNpcLocation,
+  updateAllNpcLocations
+} from '../utils/npcScheduleSystem'
 
 const emit = defineEmits(['close'])
 const gameStore = useGameStore()
@@ -32,6 +41,13 @@ const currentAccessStatus = ref({ allowed: true, reason: '' })
 // NPC 在场面板状态
 const npcPanelExpanded = ref(true)
 const selectedNpcForTracking = ref(null)
+const npcUpdateTrigger = ref(0) // 用于强制刷新NPC数据的触发器
+
+// 监听游戏时间变化，更新NPC位置
+watch(() => gameStore.gameTime.hour, () => {
+  updateAllNpcLocations(gameStore, true)
+  npcUpdateTrigger.value++
+})
 
 // 计算当前显示的子地点
 const currentItems = computed(() => {
@@ -40,6 +56,9 @@ const currentItems = computed(() => {
 
 // 计算当前位置的NPC列表
 const currentLocationNpcs = computed(() => {
+  // 依赖触发器以确保更新
+  npcUpdateTrigger.value
+  
   // 如果当前正在查看某个地点（path的最后一项），获取该地点的NPC
   if (path.value.length > 0) {
     const currentLoc = path.value[path.value.length - 1]
@@ -50,6 +69,8 @@ const currentLocationNpcs = computed(() => {
 
 // 计算被跟踪的NPC及其位置
 const trackedNpcsInfo = computed(() => {
+  // 依赖触发器以确保更新
+  npcUpdateTrigger.value
   return getTrackedNpcsWithLocations(gameStore)
 })
 
@@ -161,6 +182,10 @@ const centerMap = () => {
 
 // 初始化路径和位置
 onMounted(async () => {
+  // 强制刷新一次NPC位置
+  updateAllNpcLocations(gameStore, true)
+  npcUpdateTrigger.value++
+
   // 尝试从世界书加载地图数据
   const worldbookData = await fetchMapDataFromWorldbook()
   if (worldbookData && worldbookData.length > 0) {

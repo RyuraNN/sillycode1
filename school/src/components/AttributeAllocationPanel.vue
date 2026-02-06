@@ -88,6 +88,49 @@ const updateValue = (category, key, delta, cost = 1) => {
   emit('update:modelValue', newValue)
 }
 
+// 设置指定加点数值（直接输入）
+const setAddedValue = (category, key, event, cost = 1) => {
+  let targetVal = parseInt(event.target.value)
+  if (isNaN(targetVal)) targetVal = 0
+  if (targetVal < 0) targetVal = 0
+
+  const currentVal = props.modelValue[category]?.[key] || 0
+  const delta = targetVal - currentVal
+  
+  if (delta === 0) return
+
+  const actualCost = delta * cost
+  
+  // 检查点数是否足够
+  if (delta > 0) {
+    if (props.remainingPoints < actualCost) {
+      // 计算最大可加点数
+      const maxAddable = Math.floor(props.remainingPoints / cost)
+      targetVal = currentVal + maxAddable
+      // 强制更新输入框显示
+      event.target.value = targetVal
+    }
+  }
+
+  // 软上限检查 (仅针对基础属性)
+  if (category === 'attributes') {
+    const base = props.baseStats[category]?.[key] || 0
+    const potentialTotal = getTotal('potentials', key)
+    
+    if (base + targetVal > potentialTotal) {
+      targetVal = potentialTotal - base
+      if (targetVal < 0) targetVal = 0
+      event.target.value = targetVal
+    }
+  }
+
+  const newValue = JSON.parse(JSON.stringify(props.modelValue))
+  if (!newValue[category]) newValue[category] = {}
+  
+  newValue[category][key] = targetVal
+  emit('update:modelValue', newValue)
+}
+
 // 获取当前总值 (基础 + 分配)
 const getTotal = (category, key) => {
   const base = props.baseStats[category]?.[key] || 0
@@ -122,7 +165,13 @@ const getTotal = (category, key) => {
               :disabled="!modelValue.attributes?.[attr.key] || (isBatchMode && modelValue.attributes?.[attr.key] < 5)"
             >-</button>
             <span class="attr-value">{{ getTotal('attributes', attr.key) }}</span>
-            <span class="attr-added" v-if="modelValue.attributes?.[attr.key]">(+{{ modelValue.attributes[attr.key] }})</span>
+            <input 
+              type="number" 
+              class="attr-input" 
+              :value="modelValue.attributes?.[attr.key] || 0" 
+              @change="e => setAddedValue('attributes', attr.key, e)"
+              min="0"
+            />
             <button 
               class="control-btn" 
               @click="updateValue('attributes', attr.key, 1)"
@@ -136,15 +185,21 @@ const getTotal = (category, key) => {
           <div class="attr-controls small">
             <button 
               class="control-btn small" 
-              @click="updateValue('potentials', attr.key, -1, 5)"
+              @click="updateValue('potentials', attr.key, -1, 2)"
               :disabled="!modelValue.potentials?.[attr.key] || (isBatchMode && modelValue.potentials?.[attr.key] < 5)"
             >-</button>
             <span class="attr-value small">{{ getTotal('potentials', attr.key) }}</span>
-            <span class="attr-added small" v-if="modelValue.potentials?.[attr.key]">(+{{ modelValue.potentials[attr.key] }})</span>
+            <input 
+              type="number" 
+              class="attr-input small" 
+              :value="modelValue.potentials?.[attr.key] || 0" 
+              @change="e => setAddedValue('potentials', attr.key, e, 2)"
+              min="0"
+            />
             <button 
               class="control-btn small" 
-              @click="updateValue('potentials', attr.key, 1, 5)"
-              :disabled="remainingPoints < (isBatchMode ? 25 : 5)"
+              @click="updateValue('potentials', attr.key, 1, 2)"
+              :disabled="remainingPoints < (isBatchMode ? 10 : 2)"
             >+</button>
           </div>
         </div>
@@ -164,7 +219,13 @@ const getTotal = (category, key) => {
                 :disabled="!modelValue.subjects?.[subj.key] || (isBatchMode && modelValue.subjects?.[subj.key] < 5)"
               >-</button>
               <span class="attr-value">{{ getTotal('subjects', subj.key) }}</span>
-              <span class="attr-added" v-if="modelValue.subjects?.[subj.key]">(+{{ modelValue.subjects[subj.key] }})</span>
+              <input 
+                type="number" 
+                class="attr-input" 
+                :value="modelValue.subjects?.[subj.key] || 0" 
+                @change="e => setAddedValue('subjects', subj.key, e)"
+                min="0"
+              />
               <button 
                 class="control-btn" 
                 @click="updateValue('subjects', subj.key, 1)"
@@ -185,7 +246,13 @@ const getTotal = (category, key) => {
                 :disabled="!modelValue.skills?.[skill.key] || (isBatchMode && modelValue.skills?.[skill.key] < 5)"
               >-</button>
               <span class="attr-value">{{ getTotal('skills', skill.key) }}</span>
-              <span class="attr-added" v-if="modelValue.skills?.[skill.key]">(+{{ modelValue.skills[skill.key] }})</span>
+              <input 
+                type="number" 
+                class="attr-input" 
+                :value="modelValue.skills?.[skill.key] || 0" 
+                @change="e => setAddedValue('skills', skill.key, e)"
+                min="0"
+              />
               <button 
                 class="control-btn" 
                 @click="updateValue('skills', skill.key, 1)"
@@ -392,5 +459,30 @@ const getTotal = (category, key) => {
   margin: 15px 0 10px 0;
   border-left: 3px solid #d32f2f;
   padding-left: 10px;
+}
+
+.attr-input {
+  width: 45px;
+  height: 24px;
+  padding: 0 2px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  text-align: center;
+  font-size: 0.95rem;
+  background-color: rgba(255, 255, 255, 0.8);
+  font-weight: bold;
+  color: #2e7d32; /* Match the original added text color */
+}
+
+.attr-input:focus {
+  border-color: #d32f2f;
+  outline: none;
+  background-color: #fff;
+}
+
+.attr-input.small {
+  width: 35px;
+  height: 20px;
+  font-size: 0.85rem;
 }
 </style>
