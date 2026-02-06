@@ -652,7 +652,7 @@ const handleHomeClick = () => {
                       <div class="credits-body">
                         <p>原作者：墨沈</p>
                         <p>重置：Elyrene</p>
-                        <p>版本号 V0.5β</p>
+                        <p>版本号 V1.0β</p>
                         <p>免费发布于DC类脑社区</p>
                       </div>
                     </div>
