@@ -1392,7 +1392,7 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
           <!-- 消息列表 -->
           <div 
             v-for="(log, index) in displayLog" 
-            :key="log.id || (gameLog.length - displayLog.length + index)" 
+            :key="gameLog.length - displayLog.length + index" 
             class="log-item" 
             :class="log.type"
           >

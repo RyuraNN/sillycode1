@@ -39,9 +39,10 @@ const processImageLoadQueue = async () => {
   activeImageLoads++
   
   try {
-    const base64 = await getImageFromDB(id)
-    if (base64) {
-      const url = await base64ToBlobUrl(base64)
+    const blob = await getImageFromDB(id)
+    if (blob) {
+      // blob is now a Blob object (migrated or new)
+      const url = URL.createObjectURL(blob)
       imageCacheMap.set(id, url)
     }
   } catch (e) {
@@ -104,12 +105,13 @@ export function useImageCache() {
   /**
    * 保存图片并添加到缓存
    * @param {string} id - 图片 ID
-   * @param {string} base64 - Base64 编码的图片
+   * @param {string|Blob} data - Base64 编码的图片或 Blob
    * @returns {Promise<string>} Blob URL
    */
-  const saveAndCache = async (id, base64) => {
-    await saveImageToDB(id, base64)
-    const url = await base64ToBlobUrl(base64)
+  const saveAndCache = async (id, data) => {
+    // saveImageToDB handles conversion to Blob if needed and returns the stored Blob
+    const blob = await saveImageToDB(id, data)
+    const url = URL.createObjectURL(blob)
     imageCacheMap.set(id, url)
     return url
   }
