@@ -228,6 +228,182 @@ function formatClubData(club) {
 }
 
 /**
+ * 将 NPC 添加到社团（更新世界书部员列表）
+ * @param {string} clubId 社团ID
+ * @param {string} npcName NPC 名字
+ * @param {Object} clubData 社团数据（包含 _bookName 等元信息）
+ * @param {string} runId 当前存档ID
+ * @returns {Promise<boolean>} 是否成功
+ */
+export async function addNpcToClubInWorldbook(clubId, npcName, clubData, runId) {
+  if (typeof window.updateWorldbookWith !== 'function') {
+    console.warn('[WorldbookParser] updateWorldbookWith API not available')
+    return false
+  }
+
+  if (!clubData || !clubData._bookName) {
+    console.warn('[WorldbookParser] Invalid club data, missing _bookName')
+    return false
+  }
+
+  try {
+    const bookName = clubData._bookName
+    console.log(`[WorldbookParser] Adding NPC ${npcName} to club ${clubId} in run ${runId}`)
+
+    await window.updateWorldbookWith(bookName, (entries) => {
+      const newEntries = [...entries]
+      
+      // 查找当前 RunID 的副本条目，或者原始条目
+      const specificEntryNamePrefix = `[Club:${clubId}:${runId}]`
+      let targetEntryIndex = newEntries.findIndex(e => e.name && e.name.startsWith(specificEntryNamePrefix))
+      
+      // 如果没有特定 RunID 的条目，找原始条目
+      if (targetEntryIndex === -1) {
+        targetEntryIndex = newEntries.findIndex(e => e.name && e.name.includes(`[Club:${clubId}]`) && !e.name.includes(`[Club:${clubId}:`))
+      }
+      
+      if (targetEntryIndex === -1) {
+        console.warn(`[WorldbookParser] Club entry not found for ${clubId}`)
+        return entries
+      }
+
+      const targetEntry = newEntries[targetEntryIndex]
+      const currentData = parseClubData(targetEntry.content)
+      
+      // 添加 NPC 到部员列表
+      if (!currentData.members) currentData.members = []
+      if (!currentData.members.includes(npcName)) {
+        currentData.members.push(npcName)
+      }
+
+      // 更新关键词
+      let newKeys = targetEntry.key || []
+      if (typeof newKeys === 'string') {
+        newKeys = newKeys.split(',').map(k => k.trim())
+      }
+      if (!newKeys.includes(npcName)) {
+        newKeys.push(npcName)
+      }
+
+      // 如果是原始条目，需要创建 RunID 特定的副本
+      if (!targetEntry.name.startsWith(specificEntryNamePrefix)) {
+        const originalEntry = targetEntry
+        const specificEntryName = `[Club:${clubId}:${runId}]` + (originalEntry.name.split(']')[1] || '')
+        
+        const newEntry = {
+          ...originalEntry,
+          id: undefined,
+          name: specificEntryName,
+          content: formatClubData(currentData),
+          key: newKeys,
+          strategy: {
+            ...originalEntry.strategy,
+            type: 'constant'
+          },
+          enabled: true
+        }
+        
+        newEntries.push(newEntry)
+        
+        // 禁用原始条目
+        newEntries[targetEntryIndex] = {
+          ...originalEntry,
+          enabled: false
+        }
+      } else {
+        // 直接更新现有的特定 RunID 条目
+        newEntries[targetEntryIndex] = {
+          ...targetEntry,
+          content: formatClubData(currentData),
+          key: newKeys
+        }
+      }
+
+      return newEntries
+    })
+
+    return true
+
+  } catch (e) {
+    console.error('[WorldbookParser] Error adding NPC to club:', e)
+    return false
+  }
+}
+
+/**
+ * 创建新社团（在世界书中创建条目）
+ * @param {Object} clubInfo 社团信息 { id, name, description, coreSkill, activityDay, location, president }
+ * @param {string} runId 当前存档ID
+ * @returns {Promise<Object|null>} 创建的社团数据，失败返回 null
+ */
+export async function createClubInWorldbook(clubInfo, runId) {
+  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
+    console.warn('[WorldbookParser] Worldbook API not available')
+    return null
+  }
+
+  try {
+    const books = window.getCharWorldbookNames('current')
+    const bookName = books.primary || (books.additional && books.additional[0])
+    
+    if (!bookName) {
+      console.warn('[WorldbookParser] No worldbook available')
+      return null
+    }
+
+    console.log(`[WorldbookParser] Creating new club ${clubInfo.id} in worldbook: ${bookName}`)
+
+    const club = {
+      id: clubInfo.id,
+      name: clubInfo.name,
+      advisor: '',
+      president: clubInfo.president || '',
+      vicePresident: '',
+      members: clubInfo.president ? [clubInfo.president] : [],
+      coreSkill: clubInfo.coreSkill || '',
+      activityDay: clubInfo.activityDay || '',
+      location: clubInfo.location || '',
+      description: clubInfo.description || '',
+      _bookName: bookName
+    }
+
+    await window.updateWorldbookWith(bookName, (entries) => {
+      const newEntries = [...entries]
+      
+      const entryName = `[Club:${clubInfo.id}:${runId}] ${clubInfo.name}`
+      
+      const newEntry = {
+        name: entryName,
+        content: formatClubData(club),
+        key: [clubInfo.name, clubInfo.president].filter(k => k),
+        strategy: {
+          type: 'constant'
+        },
+        position: {
+          type: 'before_character_definition',
+          order: 50
+        },
+        probability: 100,
+        enabled: true,
+        recursion: {
+          prevent_outgoing: true
+        }
+      }
+      
+      newEntries.push(newEntry)
+      return newEntries
+    })
+
+    console.log(`[WorldbookParser] Club ${clubInfo.id} created successfully`)
+    return club
+
+  } catch (e) {
+    console.error('[WorldbookParser] Error creating club:', e)
+    return null
+  }
+}
+
+/**
  * 将玩家添加到社团（更新世界书 - 存档隔离版）
  * @param {string} clubId 社团ID
  * @param {string} playerName 玩家名字

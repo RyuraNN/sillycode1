@@ -4,7 +4,23 @@ import { mapData, getChildren, getItem, setMapData, addMapItem } from '../data/m
 import { fetchMapDataFromWorldbook, saveMapDataToWorldbook } from '../utils/worldbookParser'
 import { useGameStore } from '../stores/gameStore'
 
-const emit = defineEmits(['close', 'open-event-editor'])
+// 支持选择模式的 props
+const props = defineProps({
+  selectionMode: {
+    type: Boolean,
+    default: false
+  },
+  selectionTitle: {
+    type: String,
+    default: '选择地点'
+  },
+  occupiedLocations: {
+    type: Array,
+    default: () => []
+  }
+})
+
+const emit = defineEmits(['close', 'open-event-editor', 'location-selected'])
 const gameStore = useGameStore()
 
 // 编辑状态
@@ -612,11 +628,26 @@ const createItem = () => {
     return
   }
   
+  // 检查是否与已占用的活动室冲突
+  if (props.selectionMode && props.occupiedLocations.includes(editingItem.value.name)) {
+    alert(`"${editingItem.value.name}" 已被其他社团占用，请使用其他名称`)
+    return
+  }
+  
   addMapItem({ ...editingItem.value })
   showCreateModal.value = false
   
   if (editingItem.value.parentId === currentParentId.value) {
     selectedItem.value = getItem(editingItem.value.id)
+  }
+  
+  // 如果是选择模式，创建后立即回传并关闭
+  if (props.selectionMode) {
+    emit('location-selected', {
+      id: editingItem.value.id,
+      name: editingItem.value.name
+    })
+    emit('close')
   }
 }
 
@@ -675,12 +706,12 @@ const itemFromPoint = (x, y) => {
   <div class="editor-overlay">
     <div class="editor-panel">
       <!-- 顶部工具栏 -->
-      <div class="editor-header">
+      <div class="editor-header" :class="{ 'selection-mode': props.selectionMode }">
         <div class="header-left">
-          <div class="header-icon">🗺️</div>
+          <div class="header-icon">{{ props.selectionMode ? '📍' : '🗺️' }}</div>
           <div class="header-content">
             <div class="title-row">
-              <h2 class="header-title">地图编辑器</h2>
+              <h2 class="header-title">{{ props.selectionMode ? props.selectionTitle : '地图编辑器' }}</h2>
               <button class="breadcrumb-toggle show-on-narrow" @click="isBreadcrumbExpanded = !isBreadcrumbExpanded">
                 {{ isBreadcrumbExpanded ? '▲' : '▼' }} 路径
               </button>
@@ -807,8 +838,9 @@ const itemFromPoint = (x, y) => {
         </div>
         
         <!-- 提示信息 -->
-        <div class="help-tip">
-          <span>💡 点击空白处创建地点 · 长按拖动 · 双击进入/编辑</span>
+        <div class="help-tip" :class="{ 'selection-tip': props.selectionMode }">
+          <span v-if="props.selectionMode">📍 点击空白处创建社团活动室，创建后将自动选中该地点</span>
+          <span v-else>💡 点击空白处创建地点 · 长按拖动 · 双击进入/编辑</span>
         </div>
       </div>
 
@@ -1215,6 +1247,17 @@ const itemFromPoint = (x, y) => {
   background: linear-gradient(135deg, #4CAF50 0%, #43A047 100%);
   color: white;
   box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+}
+
+/* 选择模式样式 */
+.editor-header.selection-mode {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.help-tip.selection-tip {
+  background: rgba(102, 126, 234, 0.8);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .btn.primary:hover {

@@ -18,6 +18,7 @@ export function createInitialState(): GameState {
     allClubs: {},
     clubApplication: null,
     clubRejection: null,
+    clubInvitation: null,
     npcRelationships: {},
     player: {
       name: 'Player',

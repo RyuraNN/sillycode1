@@ -130,122 +130,226 @@
 
     <!-- 社团标签页内容 -->
     <div v-if="activeTab === 'clubs'" class="tab-content clubs-content">
-      <!-- 我的社团 -->
+      <!-- 我的社团区域 -->
       <div v-if="joinedClubsCount > 0" class="my-clubs-section">
-        <div class="section-title">
-          <span class="section-icon">⭐</span>
-          <span>我的社团</span>
+        <div class="section-header">
+          <div class="section-icon-wrapper">
+            <span class="section-icon">⭐</span>
+          </div>
+          <span class="section-title">我的社团</span>
+          <span class="section-count">{{ joinedClubsCount }}个</span>
         </div>
-        <div class="club-cards">
+        <div class="club-cards-grid">
           <div 
             v-for="club in joinedClubs" 
             :key="club.id" 
-            class="club-card joined"
+            class="club-card my-club"
             @click="selectedClub = club"
           >
-            <div class="club-icon">🎭</div>
-            <div class="club-info">
-              <div class="club-name">{{ club.name }}</div>
-              <div class="club-meta">
-                <span class="member-count">{{ club.members?.length || 0 }}人</span>
-                <span class="activity-day">{{ club.activityDay }}</span>
+            <div class="club-card-bg"></div>
+            <div class="club-card-content">
+              <div class="club-avatar">
+                <span class="club-emoji">🎭</span>
+              </div>
+              <div class="club-details">
+                <div class="club-name">{{ club.name }}</div>
+                <div class="club-stats">
+                  <span class="stat-item">
+                    <span class="stat-icon">👥</span>
+                    {{ club.members?.length || 0 }}人
+                  </span>
+                  <span class="stat-item">
+                    <span class="stat-icon">📅</span>
+                    {{ club.activityDay || '未定' }}
+                  </span>
+                </div>
+                <div v-if="club.location" class="club-location">
+                  <span class="location-icon">📍</span>
+                  {{ club.location }}
+                </div>
+              </div>
+              <div class="club-role-badge president" v-if="club.president === gameStore.player.name">
+                <span>部长</span>
+              </div>
+              <div class="club-role-badge member" v-else>
+                <span>成员</span>
               </div>
             </div>
-            <div class="club-badge joined-badge">已加入</div>
           </div>
         </div>
       </div>
 
-      <!-- 社团列表 -->
-      <div class="clubs-list-section">
-        <div class="section-title">
-          <span class="section-icon">📋</span>
-          <span>{{ joinedClubsCount > 0 ? '其他社团' : '社团列表' }}</span>
+      <!-- 创建社团横幅 -->
+      <div class="create-club-section">
+        <div class="create-club-card" @click="showCreateClubModal = true">
+          <div class="create-card-glow"></div>
+          <div class="create-card-content">
+            <div class="create-icon-wrapper">
+              <span class="create-icon">✨</span>
+              <div class="create-icon-ring"></div>
+            </div>
+            <div class="create-text">
+              <div class="create-title">创建新社团</div>
+              <div class="create-desc">召集志同道合的伙伴，开启你的社团传奇！</div>
+            </div>
+            <div class="create-arrow">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M5 12h14M12 5l7 7-7 7"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 其他社团列表 -->
+      <div class="other-clubs-section">
+        <div class="section-header">
+          <div class="section-icon-wrapper">
+            <span class="section-icon">📋</span>
+          </div>
+          <span class="section-title">{{ joinedClubsCount > 0 ? '其他社团' : '社团列表' }}</span>
         </div>
         
         <div v-if="loading" class="loading-state">
           <div class="loading-spinner"></div>
-          <div>加载中...</div>
+          <div class="loading-text">加载中...</div>
         </div>
 
         <div v-else-if="availableClubs.length === 0" class="empty-state">
-          <div class="empty-icon">🎭</div>
+          <div class="empty-illustration">
+            <span class="empty-icon">🎭</span>
+            <div class="empty-particles">
+              <span></span><span></span><span></span>
+            </div>
+          </div>
           <div class="empty-text">暂无可加入的社团</div>
+          <div class="empty-hint">创建一个属于你的社团吧！</div>
         </div>
 
-        <div v-else class="club-cards">
+        <div v-else class="club-cards-list">
           <div 
             v-for="club in availableClubs" 
             :key="club.id" 
-            class="club-card"
+            class="club-card available"
             :class="{ 'disabled': !canJoinClub(club.id) }"
             @click="selectedClub = club"
           >
-            <div class="club-icon">🎭</div>
-            <div class="club-info">
-              <div class="club-name">{{ club.name }}</div>
-              <div class="club-meta">
-                <span class="member-count">{{ club.members?.length || 0 }}人</span>
-                <span class="activity-day">{{ club.activityDay }}</span>
+            <div class="club-card-content">
+              <div class="club-avatar">
+                <span class="club-emoji">🎭</span>
               </div>
-              <div class="club-desc">{{ truncate(club.description, 30) }}</div>
-            </div>
-            <div class="club-action">
-              <button 
-                v-if="canJoinClub(club.id)"
-                class="join-btn"
-                @click.stop="handleJoinClub(club.id)"
-              >
-                申请加入
-              </button>
-              <span v-else class="disabled-hint">需邀请</span>
+              <div class="club-details">
+                <div class="club-name">{{ club.name }}</div>
+                <div class="club-stats">
+                  <span class="stat-item">
+                    <span class="stat-icon">👥</span>
+                    {{ club.members?.length || 0 }}人
+                  </span>
+                  <span class="stat-item">
+                    <span class="stat-icon">📅</span>
+                    {{ club.activityDay || '未定' }}
+                  </span>
+                </div>
+                <div class="club-desc">{{ truncate(club.description, 40) }}</div>
+              </div>
+              <div class="club-action">
+                <button 
+                  v-if="canJoinClub(club.id)"
+                  class="join-btn"
+                  @click.stop="handleJoinClub(club.id)"
+                >
+                  <span class="btn-icon">✋</span>
+                  申请
+                </button>
+                <span v-else class="disabled-hint">
+                  <span class="lock-icon">🔒</span>
+                  需邀请
+                </span>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
       <!-- 社团详情弹窗 -->
-      <div v-if="selectedClub" class="club-detail-modal" @click.self="selectedClub = null">
-        <div class="club-detail-content">
-          <div class="detail-header">
-            <div class="detail-icon">🎭</div>
-            <div class="detail-title">{{ selectedClub.name }}</div>
-            <button class="close-btn" @click="selectedClub = null">×</button>
+      <div v-if="selectedClub" class="club-modal-overlay" @click.self="selectedClub = null">
+        <div class="club-modal">
+          <div class="modal-header-bg"></div>
+          <div class="modal-header">
+            <div class="modal-club-avatar">
+              <span class="club-emoji-lg">🎭</span>
+            </div>
+            <div class="modal-club-title">{{ selectedClub.name }}</div>
+            <button class="modal-close" @click="selectedClub = null">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
           </div>
           
-          <div class="detail-body">
-            <div class="detail-row">
-              <span class="detail-label">指导老师</span>
-              <span class="detail-value">{{ selectedClub.advisor || '无' }}</span>
+          <div class="modal-body">
+            <div class="info-grid">
+              <div class="info-item">
+                <span class="info-icon">👨‍🏫</span>
+                <div class="info-content">
+                  <span class="info-label">指导老师</span>
+                  <span class="info-value">{{ selectedClub.advisor || '无' }}</span>
+                </div>
+              </div>
+              <div class="info-item">
+                <span class="info-icon">👑</span>
+                <div class="info-content">
+                  <span class="info-label">部长</span>
+                  <span class="info-value">{{ selectedClub.president || '无' }}</span>
+                </div>
+              </div>
+              <div class="info-item" v-if="selectedClub.vicePresident">
+                <span class="info-icon">🎖️</span>
+                <div class="info-content">
+                  <span class="info-label">副部长</span>
+                  <span class="info-value">{{ selectedClub.vicePresident }}</span>
+                </div>
+              </div>
+              <div class="info-item">
+                <span class="info-icon">🎯</span>
+                <div class="info-content">
+                  <span class="info-label">核心技能</span>
+                  <span class="info-value">{{ selectedClub.coreSkill || '无' }}</span>
+                </div>
+              </div>
+              <div class="info-item">
+                <span class="info-icon">📅</span>
+                <div class="info-content">
+                  <span class="info-label">活动日</span>
+                  <span class="info-value">{{ selectedClub.activityDay || '未定' }}</span>
+                </div>
+              </div>
+              <div class="info-item">
+                <span class="info-icon">📍</span>
+                <div class="info-content">
+                  <span class="info-label">活动地点</span>
+                  <span class="info-value">{{ selectedClub.location || '未定' }}</span>
+                </div>
+              </div>
             </div>
-            <div class="detail-row">
-              <span class="detail-label">部长</span>
-              <span class="detail-value">{{ selectedClub.president || '无' }}</span>
+
+            <div class="info-section">
+              <div class="section-label">
+                <span class="label-icon">📝</span>
+                社团介绍
+              </div>
+              <div class="section-content desc-box">
+                {{ selectedClub.description || '暂无介绍' }}
+              </div>
             </div>
-            <div class="detail-row" v-if="selectedClub.vicePresident">
-              <span class="detail-label">副部长</span>
-              <span class="detail-value">{{ selectedClub.vicePresident }}</span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">核心技能</span>
-              <span class="detail-value">{{ selectedClub.coreSkill || '无' }}</span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">活动日</span>
-              <span class="detail-value">{{ selectedClub.activityDay || '未定' }}</span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">活动地点</span>
-              <span class="detail-value">{{ selectedClub.location || '未定' }}</span>
-            </div>
-            <div class="detail-row full">
-              <span class="detail-label">社团介绍</span>
-              <div class="detail-desc">{{ selectedClub.description || '暂无介绍' }}</div>
-            </div>
-            <div class="detail-row full">
-              <span class="detail-label">现有成员 ({{ selectedClub.members?.length || 0 }}人)</span>
-              <div class="member-list">
-                <span v-for="member in selectedClub.members" :key="member" class="member-tag">
+
+            <div class="info-section">
+              <div class="section-label">
+                <span class="label-icon">👥</span>
+                现有成员 ({{ selectedClub.members?.length || 0 }}人)
+              </div>
+              <div class="member-chips">
+                <span v-for="member in selectedClub.members" :key="member" class="member-chip">
                   {{ member }}
                 </span>
                 <span v-if="!selectedClub.members?.length" class="no-members">暂无成员</span>
@@ -253,29 +357,40 @@
             </div>
           </div>
 
-          <div class="detail-footer">
+          <div class="modal-footer">
             <template v-if="isClubMember(selectedClub.id)">
-              <div class="joined-status">✅ 你已是该社团成员</div>
-              <div class="leave-hint">退出社团需通过剧情进行</div>
+              <div class="status-box success">
+                <span class="status-icon">✅</span>
+                <div class="status-text">
+                  <div class="status-title">你已是该社团成员</div>
+                  <div class="status-hint">退出社团需通过剧情进行</div>
+                </div>
+              </div>
+              <button v-if="selectedClub.president === gameStore.player.name" class="action-btn invite" @click="openInviteModal">
+                <span>💌</span> 邀请成员
+              </button>
             </template>
             <template v-else-if="isApplyingTo(selectedClub.id)">
-              <div class="applying-status">
-                <div class="status-text">⏳ 申请审核中...</div>
-                <div class="status-hint">社长正在审核您的申请，请继续进行剧情对话。</div>
-                <div class="status-timer">剩余有效期: {{ gameStore.clubApplication.remainingTurns }} 回合</div>
+              <div class="status-box pending">
+                <span class="status-icon">⏳</span>
+                <div class="status-text">
+                  <div class="status-title">申请审核中...</div>
+                  <div class="status-hint">社长正在审核，请继续剧情对话 (剩余: {{ gameStore.clubApplication.remainingTurns }}回合)</div>
+                </div>
               </div>
             </template>
             <template v-else-if="canJoinClub(selectedClub.id)">
-              <button class="apply-btn" @click="handleJoinClub(selectedClub.id)">
-                申请加入
+              <button class="action-btn primary" @click="handleJoinClub(selectedClub.id)">
+                <span>✋</span> 申请加入
               </button>
             </template>
             <template v-else>
-              <div class="cannot-join">
-                <div class="cannot-join-icon">🔒</div>
-                <div class="cannot-join-text">
-                  <span v-if="gameStore.clubApplication">正在申请其他社团，暂无法同时申请</span>
-                  <span v-else>你已加入其他社团，只能通过成员邀请加入更多社团</span>
+              <div class="status-box locked">
+                <span class="status-icon">🔒</span>
+                <div class="status-text">
+                  <div class="status-title">暂时无法加入</div>
+                  <div class="status-hint" v-if="gameStore.clubApplication">正在申请其他社团</div>
+                  <div class="status-hint" v-else>已加入社团，需通过成员邀请加入更多</div>
                 </div>
               </div>
             </template>
@@ -283,9 +398,151 @@
         </div>
       </div>
 
+      <!-- 创建社团弹窗 -->
+      <div v-if="showCreateClubModal" class="club-modal-overlay" @click.self="showCreateClubModal = false">
+        <div class="club-modal create-modal">
+          <div class="modal-header-bg create-bg"></div>
+          <div class="modal-header">
+            <div class="modal-club-avatar">
+              <span class="club-emoji-lg">✨</span>
+            </div>
+            <div class="modal-club-title">创建新社团</div>
+            <button class="modal-close" @click="showCreateClubModal = false">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+          
+          <div class="modal-body form-body">
+            <div class="form-group">
+              <label class="form-label">
+                <span class="label-icon">📛</span>
+                社团名称
+              </label>
+              <input v-model="createClubForm.name" placeholder="请输入社团名称" class="form-input" />
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">
+                <span class="label-icon">🎯</span>
+                核心技能
+              </label>
+              <select v-model="createClubForm.coreSkill" class="form-select">
+                <option value="">无</option>
+                <option v-for="(name, key) in skillNames" :key="key" :value="name">{{ name }}</option>
+              </select>
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">
+                <span class="label-icon">📅</span>
+                活动日
+              </label>
+              <select v-model="createClubForm.activityDay" class="form-select">
+                <option value="未定">未定</option>
+                <option value="每日">每日</option>
+                <option value="周一">周一</option>
+                <option value="周二">周二</option>
+                <option value="周三">周三</option>
+                <option value="周四">周四</option>
+                <option value="周五">周五</option>
+              </select>
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">
+                <span class="label-icon">📍</span>
+                活动地点
+              </label>
+              <div class="location-input-group">
+                <input 
+                  v-model="createClubForm.location" 
+                  placeholder="点击右侧按钮在地图上创建" 
+                  class="form-input location-input" 
+                  readonly
+                />
+                <button class="map-select-btn" @click="openMapForLocationSelect">
+                  <span class="btn-icon">🗺️</span>
+                  <span class="btn-text">选择</span>
+                </button>
+              </div>
+              <div v-if="createClubForm.location" class="location-preview">
+                <span class="preview-icon">📍</span>
+                <span class="preview-text">{{ createClubForm.location }}</span>
+                <button class="clear-btn" @click="createClubForm.location = ''">×</button>
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">
+                <span class="label-icon">📝</span>
+                社团介绍
+              </label>
+              <textarea v-model="createClubForm.description" placeholder="简单介绍一下你的社团..." class="form-textarea"></textarea>
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button class="action-btn secondary" @click="showCreateClubModal = false">取消</button>
+            <button class="action-btn primary" @click="handleCreateClub" :disabled="!createClubForm.name">
+              <span>✨</span> 立即创建
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 邀请成员弹窗 -->
+      <div v-if="showInviteModal" class="club-modal-overlay" @click.self="showInviteModal = false">
+        <div class="club-modal invite-modal">
+          <div class="modal-header-bg invite-bg"></div>
+          <div class="modal-header">
+            <div class="modal-club-avatar">
+              <span class="club-emoji-lg">💌</span>
+            </div>
+            <div class="modal-club-title">邀请加入{{ selectedClub?.name }}</div>
+            <button class="modal-close" @click="showInviteModal = false">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+          
+          <div class="modal-body form-body">
+            <div class="form-group">
+              <label class="form-label">
+                <span class="label-icon">👤</span>
+                选择邀请对象
+              </label>
+              <select v-model="inviteTarget" class="form-select">
+                <option value="" disabled>请选择角色</option>
+                <option 
+                  v-for="npc in availableNpcs" 
+                  :key="npc.id" 
+                  :value="npc.name"
+                >
+                  {{ npc.name }} ({{ npc.relationship }}好感)
+                </option>
+              </select>
+            </div>
+            <div class="invite-hint" v-if="inviteTarget">
+              <div class="hint-icon">💡</div>
+              <div class="hint-text">邀请将作为剧情指令发送，对方会根据好感度和性格决定是否接受。</div>
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button class="action-btn secondary" @click="showInviteModal = false">取消</button>
+            <button class="action-btn primary" @click="handleInviteMember" :disabled="!inviteTarget">
+              <span>💌</span> 发送邀请
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- 拒绝通知弹窗 -->
-      <div v-if="gameStore.clubRejection" class="rejection-modal" @click.self="gameStore.confirmClubRejection()">
-        <div class="rejection-content">
+      <div v-if="gameStore.clubRejection" class="rejection-modal-overlay" @click.self="gameStore.confirmClubRejection()">
+        <div class="rejection-modal">
           <div class="rejection-icon">❌</div>
           <div class="rejection-title">申请被拒绝</div>
           <div class="rejection-info">
@@ -302,9 +559,22 @@
       </div>
 
       <!-- 操作提示 -->
-      <div v-if="actionMessage" class="action-message" :class="actionMessage.type">
-        {{ actionMessage.text }}
-      </div>
+      <transition name="toast">
+        <div v-if="actionMessage" class="action-toast" :class="actionMessage.type">
+          <span class="toast-icon">{{ actionMessage.type === 'success' ? '✅' : '❌' }}</span>
+          <span class="toast-text">{{ actionMessage.text }}</span>
+        </div>
+      </transition>
+
+      <!-- 地图编辑器 (选择模式) -->
+      <MapEditorPanel 
+        v-if="showMapEditor"
+        :selection-mode="true"
+        selection-title="创建社团活动室"
+        :occupied-locations="occupiedLocations"
+        @close="showMapEditor = false"
+        @location-selected="handleLocationSelected"
+      />
     </div>
 
     <!-- 论坛标签页内容 -->
@@ -402,6 +672,7 @@ import { useGameStore } from '../stores/gameStore'
 import { TIME_SLOTS, getWeekdayEnglish, getTermInfo } from '../utils/scheduleGenerator'
 import ForumApp from './ForumApp.vue'
 import ElectiveCourseSelector from './ElectiveCourseSelector.vue'
+import MapEditorPanel from './MapEditorPanel.vue'
 
 const gameStore = useGameStore()
 
@@ -410,6 +681,17 @@ const activeTab = ref('schedule')
 const loading = ref(false)
 const selectedClub = ref(null)
 const actionMessage = ref(null)
+const showCreateClubModal = ref(false)
+const showInviteModal = ref(false)
+const showMapEditor = ref(false)
+const createClubForm = ref({
+  name: '',
+  description: '',
+  coreSkill: '',
+  activityDay: '未定',
+  location: ''
+})
+const inviteTarget = ref('')
 
 // 星期配置
 const weekdays = [
@@ -522,6 +804,17 @@ const availableClubs = computed(() => {
   )
 })
 
+// 已被占用的活动室名称列表
+const occupiedLocations = computed(() => {
+  const locations = []
+  Object.values(gameStore.allClubs).forEach(club => {
+    if (club.location && club.location.trim()) {
+      locations.push(club.location.trim())
+    }
+  })
+  return locations
+})
+
 // 判断是否正在申请该社团
 function isApplyingTo(clubId) {
   return gameStore.clubApplication && gameStore.clubApplication.clubId === clubId
@@ -615,6 +908,101 @@ function getClassInfo(dayEn, periodNum) {
 function isEmptySlot(dayEn, periodNum) {
   const info = getClassInfo(dayEn, periodNum)
   return !info
+}
+
+// 过滤掉已加入社团或未认识的 NPC
+const availableNpcs = computed(() => {
+  if (!selectedClub.value) return []
+  return gameStore.npcs
+    .filter(npc => {
+      // 必须是已认识的（有好感度数据）
+      const hasRelation = gameStore.npcRelationships[npc.name]
+      if (!hasRelation) return false
+      
+      // 不能是当前社团成员
+      if (selectedClub.value.members && selectedClub.value.members.includes(npc.name)) return false
+      
+      return true
+    })
+    .map(npc => ({
+      id: npc.id,
+      name: npc.name,
+      relationship: npc.relationship || 0
+    }))
+})
+
+// 打开邀请弹窗
+function openInviteModal() {
+  inviteTarget.value = ''
+  showInviteModal.value = true
+}
+
+// 打开地图选择活动室
+function openMapForLocationSelect() {
+  showMapEditor.value = true
+}
+
+// 处理地图选择结果
+function handleLocationSelected(location) {
+  createClubForm.value.location = location.name
+  showMapEditor.value = false
+}
+
+async function handleCreateClub() {
+  if (!createClubForm.value.name) return
+  
+  // 检查活动室是否已被占用
+  if (createClubForm.value.location && occupiedLocations.value.includes(createClubForm.value.location)) {
+    actionMessage.value = {
+      type: 'error',
+      text: `活动室"${createClubForm.value.location}"已被其他社团占用`
+    }
+    setTimeout(() => { actionMessage.value = null }, 3000)
+    return
+  }
+  
+  const result = await gameStore.createClub(createClubForm.value)
+  
+  actionMessage.value = {
+    type: result.success ? 'success' : 'error',
+    text: result.message
+  }
+  
+  if (result.success) {
+    showCreateClubModal.value = false
+    // 重置表单
+    createClubForm.value = {
+      name: '',
+      description: '',
+      coreSkill: '',
+      activityDay: '未定',
+      location: ''
+    }
+  }
+  
+  setTimeout(() => {
+    actionMessage.value = null
+  }, 3000)
+}
+
+async function handleInviteMember() {
+  if (!inviteTarget.value || !selectedClub.value) return
+  
+  const result = await gameStore.inviteNpcToClub(selectedClub.value.id, inviteTarget.value)
+  
+  actionMessage.value = {
+    type: result.success ? 'success' : 'error',
+    text: result.message
+  }
+  
+  if (result.success) {
+    showInviteModal.value = false
+    inviteTarget.value = ''
+  }
+  
+  setTimeout(() => {
+    actionMessage.value = null
+  }, 3000)
 }
 
 // 加载社团数据
@@ -909,169 +1297,440 @@ onMounted(async () => {
   border-bottom: 2px solid rgba(255, 215, 0, 0.5);
 }
 
-/* 社团相关样式 */
+/* ==================== 社团页面样式 (全新设计) ==================== */
 .clubs-content {
-  padding: 12px;
+  padding: 16px;
+  background: linear-gradient(180deg, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.2) 100%);
 }
 
-.section-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 14px;
-  font-weight: bold;
-  margin-bottom: 10px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.section-icon {
-  font-size: 16px;
-}
-
-.my-clubs-section {
-  margin-bottom: 16px;
-}
-
-.club-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.club-card {
+/* 区域标题 */
+.section-header {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: rgba(255, 255, 255, 0.1);
+  margin-bottom: 14px;
+}
+
+.section-icon-wrapper {
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.1) 100%);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.section-icon {
+  font-size: 18px;
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.section-count {
+  font-size: 12px;
+  opacity: 0.7;
+  background: rgba(255,255,255,0.1);
+  padding: 2px 8px;
   border-radius: 10px;
-  padding: 10px 12px;
+}
+
+/* 我的社团区域 */
+.my-clubs-section {
+  margin-bottom: 20px;
+}
+
+.club-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+/* 社团卡片 */
+.club-card {
+  position: relative;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  overflow: hidden;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .club-card:hover {
-  background: rgba(255, 255, 255, 0.15);
-  transform: translateX(4px);
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
 }
 
-.club-card.joined {
-  background: rgba(76, 175, 80, 0.2);
-  border: 1px solid rgba(76, 175, 80, 0.4);
+.club-card.my-club {
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.2) 0%, rgba(56, 142, 60, 0.15) 100%);
+  border-color: rgba(76, 175, 80, 0.3);
+}
+
+.club-card.my-club:hover {
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.25) 0%, rgba(56, 142, 60, 0.2) 100%);
+}
+
+.club-card-bg {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 120px;
+  height: 120px;
+  background: radial-gradient(circle at top right, rgba(255,255,255,0.1) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.club-card-content {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  padding: 16px;
+  gap: 14px;
+}
+
+.club-avatar {
+  width: 52px;
+  height: 52px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.club-emoji {
+  font-size: 26px;
+}
+
+.club-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.club-name {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.club-stats {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.stat-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.stat-icon {
+  font-size: 12px;
+}
+
+.club-location {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  opacity: 0.7;
+  margin-top: 4px;
+}
+
+.location-icon {
+  font-size: 11px;
+}
+
+.club-desc {
+  font-size: 12px;
+  opacity: 0.7;
+  margin-top: 6px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.club-role-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.club-role-badge.president {
+  background: linear-gradient(135deg, #ffd93d 0%, #ff9800 100%);
+  color: #333;
+}
+
+.club-role-badge.member {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.club-action {
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.join-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.join-btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
+}
+
+.btn-icon {
+  font-size: 14px;
+}
+
+.disabled-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #ffd93d;
+  opacity: 0.8;
+}
+
+.lock-icon {
+  font-size: 12px;
 }
 
 .club-card.disabled {
   opacity: 0.6;
 }
 
-.club-icon {
-  font-size: 28px;
-  flex-shrink: 0;
+/* 创建社团区域 */
+.create-club-section {
+  margin-bottom: 20px;
 }
 
-.club-info {
-  flex: 1;
-  min-width: 0;
+.create-club-card {
+  position: relative;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%);
+  border-radius: 16px;
+  padding: 20px;
+  cursor: pointer;
+  overflow: hidden;
+  border: 1px dashed rgba(255, 255, 255, 0.3);
+  transition: all 0.3s;
 }
 
-.club-name {
-  font-size: 14px;
-  font-weight: bold;
-  margin-bottom: 2px;
+.create-club-card:hover {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.3) 0%, rgba(118, 75, 162, 0.3) 100%);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: translateY(-2px);
 }
 
-.club-meta {
+.create-card-glow {
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 50%);
+  animation: pulse 3s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+.create-card-content {
+  position: relative;
   display: flex;
-  gap: 8px;
-  font-size: 11px;
+  align-items: center;
+  gap: 16px;
+}
+
+.create-icon-wrapper {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.create-icon {
+  font-size: 32px;
+  z-index: 1;
+  animation: sparkle 2s ease-in-out infinite;
+}
+
+@keyframes sparkle {
+  0%, 100% { transform: scale(1) rotate(0deg); }
+  50% { transform: scale(1.1) rotate(5deg); }
+}
+
+.create-icon-ring {
+  position: absolute;
+  inset: 0;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  animation: ring-pulse 2s ease-in-out infinite;
+}
+
+@keyframes ring-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.2); opacity: 0.5; }
+}
+
+.create-text {
+  flex: 1;
+}
+
+.create-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.create-desc {
+  font-size: 12px;
   opacity: 0.8;
 }
 
-.club-desc {
-  font-size: 11px;
-  opacity: 0.7;
-  margin-top: 3px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.create-arrow {
+  color: rgba(255, 255, 255, 0.6);
+  transition: transform 0.2s;
 }
 
-.club-badge {
-  font-size: 10px;
-  padding: 3px 8px;
-  border-radius: 12px;
-  flex-shrink: 0;
-}
-
-.joined-badge {
-  background: rgba(76, 175, 80, 0.8);
-}
-
-.club-action {
-  flex-shrink: 0;
-}
-
-.join-btn {
-  background: linear-gradient(135deg, #667eea, #764ba2);
+.create-club-card:hover .create-arrow {
+  transform: translateX(4px);
   color: white;
-  border: none;
-  padding: 6px 12px;
-  border-radius: 15px;
-  font-size: 11px;
-  cursor: pointer;
-  transition: all 0.2s;
 }
 
-.join-btn:hover {
-  transform: scale(1.05);
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.5);
+/* 其他社团列表 */
+.other-clubs-section {
+  margin-top: 8px;
 }
 
-.disabled-hint {
-  font-size: 10px;
-  opacity: 0.6;
-  color: #ffd93d;
+.club-cards-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.club-card.available .club-card-content {
+  padding: 14px 16px;
 }
 
 /* 加载和空状态 */
 .loading-state,
 .empty-state {
   text-align: center;
-  padding: 30px;
-  opacity: 0.7;
+  padding: 40px 20px;
 }
 
 .loading-spinner {
-  width: 30px;
-  height: 30px;
-  border: 3px solid rgba(255, 255, 255, 0.3);
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(255, 255, 255, 0.2);
   border-top-color: white;
   border-radius: 50%;
   animation: spin 1s linear infinite;
-  margin: 0 auto 10px;
+  margin: 0 auto 12px;
 }
 
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
 
+.loading-text {
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+.empty-illustration {
+  position: relative;
+  display: inline-block;
+  margin-bottom: 16px;
+}
+
 .empty-icon {
-  font-size: 40px;
-  margin-bottom: 8px;
+  font-size: 56px;
+  opacity: 0.5;
+}
+
+.empty-particles {
+  position: absolute;
+  inset: 0;
+}
+
+.empty-particles span {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  animation: particle-float 3s ease-in-out infinite;
+}
+
+.empty-particles span:nth-child(1) { top: 0; left: 20%; animation-delay: 0s; }
+.empty-particles span:nth-child(2) { top: 30%; right: 10%; animation-delay: 0.5s; }
+.empty-particles span:nth-child(3) { bottom: 10%; left: 30%; animation-delay: 1s; }
+
+@keyframes particle-float {
+  0%, 100% { transform: translateY(0) scale(1); opacity: 0.3; }
+  50% { transform: translateY(-10px) scale(1.2); opacity: 0.6; }
 }
 
 .empty-text {
-  font-size: 14px;
+  font-size: 15px;
+  font-weight: 500;
+  margin-bottom: 6px;
 }
 
-/* 社团详情弹窗 */
-.club-detail-modal {
+.empty-hint {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+/* ==================== 社团弹窗样式 ==================== */
+.club-modal-overlay,
+.rejection-modal-overlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1079,217 +1738,444 @@ onMounted(async () => {
   padding: 20px;
 }
 
-.club-detail-content {
-  background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-  border-radius: 16px;
+.club-modal {
   width: 100%;
-  max-width: 350px;
-  max-height: 80vh;
+  max-width: 420px;
+  max-height: 85vh;
+  background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+  border-radius: 20px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: modal-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
-.detail-header {
+@keyframes modal-pop {
+  from { opacity: 0; transform: scale(0.9) translateY(20px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.modal-header-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 120px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  pointer-events: none;
+}
+
+.modal-header-bg.create-bg {
+  background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+}
+
+.modal-header-bg.invite-bg {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
+
+.modal-header {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 16px;
-  background: rgba(0, 0, 0, 0.2);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  gap: 14px;
+  padding: 20px;
+  z-index: 1;
 }
 
-.detail-icon {
+.modal-club-avatar {
+  width: 60px;
+  height: 60px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.club-emoji-lg {
   font-size: 32px;
 }
 
-.detail-title {
+.modal-club-title {
   flex: 1;
-  font-size: 18px;
-  font-weight: bold;
+  font-size: 20px;
+  font-weight: 600;
 }
 
-.close-btn {
-  background: none;
+.modal-close {
+  width: 36px;
+  height: 36px;
+  background: rgba(255, 255, 255, 0.15);
   border: none;
+  border-radius: 50%;
   color: white;
-  font-size: 24px;
   cursor: pointer;
-  opacity: 0.7;
-  padding: 0 8px;
-}
-
-.close-btn:hover {
-  opacity: 1;
-}
-
-.detail-body {
-  flex: 1;
-  overflow: auto;
-  padding: 16px;
-}
-
-.detail-row {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.modal-close:hover {
+  background: rgba(255, 255, 255, 0.25);
+  transform: scale(1.1);
+}
+
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.info-item {
+  display: flex;
   align-items: flex-start;
-  padding: 8px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 12px;
+  border-radius: 12px;
 }
 
-.detail-row.full {
+.info-icon {
+  font-size: 20px;
+}
+
+.info-content {
+  display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
 }
 
-.detail-label {
-  font-size: 12px;
+.info-label {
+  font-size: 11px;
   opacity: 0.7;
 }
 
-.detail-value {
+.info-value {
   font-size: 13px;
   font-weight: 500;
-  text-align: right;
 }
 
-.detail-desc {
+.info-section {
+  margin-bottom: 16px;
+}
+
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  opacity: 0.9;
+}
+
+.label-icon {
+  font-size: 14px;
+}
+
+.section-content {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 12px;
+  border-radius: 12px;
+}
+
+.desc-box {
+  font-size: 13px;
+  line-height: 1.6;
+  opacity: 0.9;
+}
+
+.member-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.member-chip {
+  background: rgba(255, 255, 255, 0.12);
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+}
+
+.no-members {
+  font-size: 12px;
+  opacity: 0.5;
+}
+
+.modal-footer {
+  padding: 16px 20px;
+  background: rgba(0, 0, 0, 0.2);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.status-box {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+}
+
+.status-box.success {
+  background: rgba(76, 175, 80, 0.2);
+}
+
+.status-box.pending {
+  background: rgba(255, 193, 7, 0.2);
+}
+
+.status-box.locked {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.status-icon {
+  font-size: 20px;
+}
+
+.status-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.status-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.status-hint {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.action-btn.primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+
+.action-btn.primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+}
+
+.action-btn.primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.action-btn.secondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.action-btn.secondary:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.action-btn.invite {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  color: white;
+}
+
+/* 表单样式 */
+.form-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.form-input,
+.form-select,
+.form-textarea {
+  width: 100%;
+  padding: 12px 14px;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  color: white;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.form-input:focus,
+.form-select:focus,
+.form-textarea:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+}
+
+.form-input::placeholder,
+.form-textarea::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.form-textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+.form-select option {
+  background: #2a5298;
+  color: white;
+}
+
+/* 活动室选择 */
+.location-input-group {
+  display: flex;
+  gap: 8px;
+}
+
+.location-input {
+  flex: 1;
+  cursor: pointer;
+}
+
+.map-select-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.map-select-btn:hover {
+  transform: scale(1.02);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.location-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(76, 175, 80, 0.2);
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(76, 175, 80, 0.3);
+}
+
+.preview-icon {
+  font-size: 16px;
+}
+
+.preview-text {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.clear-btn {
+  width: 24px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  border-radius: 50%;
+  color: white;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.clear-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* 邀请提示 */
+.invite-hint {
+  display: flex;
+  gap: 10px;
+  background: rgba(255, 193, 7, 0.15);
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 193, 7, 0.3);
+}
+
+.hint-icon {
+  font-size: 18px;
+}
+
+.hint-text {
   font-size: 12px;
   line-height: 1.5;
   opacity: 0.9;
 }
 
-.member-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.member-tag {
-  background: rgba(255, 255, 255, 0.15);
-  padding: 3px 8px;
-  border-radius: 12px;
-  font-size: 11px;
-}
-
-.no-members {
-  opacity: 0.5;
-  font-size: 12px;
-}
-
-.detail-footer {
-  padding: 16px;
-  background: rgba(0, 0, 0, 0.2);
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  text-align: center;
-}
-
-.joined-status {
-  color: #4caf50;
-  font-size: 14px;
-  font-weight: bold;
-  margin-bottom: 4px;
-}
-
-.leave-hint {
-  font-size: 11px;
-  opacity: 0.6;
-}
-
-.apply-btn {
-  width: 100%;
-  background: linear-gradient(135deg, #667eea, #764ba2);
-  color: white;
-  border: none;
-  padding: 12px;
-  border-radius: 20px;
-  font-size: 14px;
-  font-weight: bold;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.apply-btn:hover {
-  transform: scale(1.02);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
-}
-
-.cannot-join {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  color: #ffd93d;
-}
-
-.cannot-join-icon {
-  font-size: 24px;
-}
-
-.cannot-join-text {
-  font-size: 12px;
-  text-align: center;
-  line-height: 1.4;
-}
-
-.applying-status {
-  text-align: center;
-  color: #ffd93d;
-}
-
-.status-text {
-  font-size: 14px;
-  font-weight: bold;
-  margin-bottom: 4px;
-}
-
-.status-hint {
-  font-size: 11px;
-  opacity: 0.8;
-  margin-bottom: 4px;
-}
-
-.status-timer {
-  font-size: 10px;
-  opacity: 0.6;
-}
-
 /* 拒绝弹窗 */
 .rejection-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1100;
-}
-
-.rejection-content {
   background: white;
   color: #333;
-  padding: 24px;
-  border-radius: 16px;
-  width: 280px;
+  padding: 28px;
+  border-radius: 20px;
+  width: 300px;
   text-align: center;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-  animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  animation: modal-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
 .rejection-icon {
-  font-size: 48px;
-  margin-bottom: 12px;
+  font-size: 56px;
+  margin-bottom: 16px;
 }
 
 .rejection-title {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: bold;
   margin-bottom: 12px;
-  color: #f44336;
+  color: #ef5350;
 }
 
 .rejection-info {
@@ -1301,82 +2187,85 @@ onMounted(async () => {
 .rejection-club {
   font-weight: bold;
   color: #333;
+  font-size: 15px;
 }
 
 .rejection-reason {
   background: #f5f5f5;
-  padding: 12px;
-  border-radius: 8px;
+  padding: 14px;
+  border-radius: 12px;
   font-size: 14px;
   line-height: 1.5;
   margin-bottom: 20px;
   font-style: italic;
   color: #555;
-  border-left: 3px solid #f44336;
+  border-left: 4px solid #ef5350;
 }
 
 .confirm-btn {
   width: 100%;
-  padding: 10px;
-  background: #f44336;
+  padding: 12px;
+  background: linear-gradient(135deg, #ef5350 0%, #e53935 100%);
   color: white;
   border: none;
-  border-radius: 20px;
-  font-size: 14px;
+  border-radius: 12px;
+  font-size: 15px;
   font-weight: bold;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .confirm-btn:hover {
-  background: #d32f2f;
   transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(239, 83, 80, 0.4);
 }
 
-@keyframes popIn {
-  from { opacity: 0; transform: scale(0.8); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-/* 操作提示 */
-.action-message {
+/* Toast 提示 */
+.action-toast {
   position: fixed;
-  bottom: 80px;
+  bottom: 100px;
   left: 50%;
   transform: translateX(-50%);
-  padding: 10px 20px;
-  border-radius: 20px;
-  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 24px;
+  border-radius: 16px;
+  font-size: 14px;
   font-weight: 500;
   z-index: 1001;
-  animation: slideUp 0.3s ease;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
 }
 
-.action-message.success {
-  background: rgba(76, 175, 80, 0.9);
+.action-toast.success {
+  background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
   color: white;
 }
 
-.action-message.error {
-  background: rgba(244, 67, 54, 0.9);
+.action-toast.error {
+  background: linear-gradient(135deg, #ef5350 0%, #e53935 100%);
   color: white;
 }
 
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-  }
+.toast-icon {
+  font-size: 18px;
+}
+
+.toast-enter-active,
+.toast-leave-active {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(20px);
 }
 
 /* 档案页面样式 */
 .profile-content {
   padding: 16px;
-  background: #f0f2f5; /* 浅灰色背景，突出卡片 */
+  background: #f0f2f5;
   color: #333;
 }
 
@@ -1463,20 +2352,20 @@ onMounted(async () => {
   gap: 8px;
 }
 
-.info-row {
+.student-info .info-row {
   display: flex;
   align-items: center;
   border-bottom: 1px dashed #eee;
   padding-bottom: 4px;
 }
 
-.info-label {
+.student-info .info-label {
   font-size: 11px;
   color: #888;
   width: 50px;
 }
 
-.info-value {
+.student-info .info-value {
   font-size: 13px;
   font-weight: bold;
   color: #333;
@@ -1514,8 +2403,15 @@ onMounted(async () => {
 }
 
 .skills-section .section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: bold;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #eee;
   color: #333;
-  border-bottom-color: #eee;
 }
 
 .skills-grid {

@@ -12,7 +12,7 @@ const emit = defineEmits(['close'])
 const gameStore = useGameStore()
 
 // ==================== 标签页状态 ====================
-const activeTab = ref('filter') // 'filter' | 'composer' | 'allCharacters'
+const activeTab = ref('filter') // 'filter' | 'composer' | 'characterEditor'
 
 // ==================== 筛选面板状态 ====================
 const loading = ref(true)
@@ -47,11 +47,12 @@ const composerTargetClass = ref('')
 const composerClassData = ref({})
 const availableCharacters = ref([])
 const composerSearchQuery = ref('')
+const composerRoleFilter = ref('all') // 'all' | 'student' | 'teacher'
 const showAddClassModal = ref(false)
 const newClassForm = ref({ id: '', name: '' })
 
-// ==================== 全部角色管理状态 ====================
-const allCharactersPool = ref([])
+// ==================== 角色编辑器状态（原"全部角色"标签页，现升级为完整编辑器） ====================
+const characterPool = ref([]) // 待选角色池（包含所有可用角色）
 const showCharacterEditor = ref(false)
 const editingCharacter = ref(null)
 const characterEditForm = ref({
@@ -60,11 +61,14 @@ const characterEditForm = ref({
   origin: '',
   classId: '',
   role: 'student',
+  subject: '', // 教师专属
+  isHeadTeacher: false, // 教师专属
   electivePreference: 'general',
   scheduleTag: '',
   personality: { order: 0, altruism: 0, tradition: 0, peace: 50 }
 })
-const allCharSearchQuery = ref('')
+const charEditorSearchQuery = ref('')
+const charEditorRoleFilter = ref('all') // 'all' | 'student' | 'teacher'
 
 // ==================== 预设配置 ====================
 const ROSTER_PRESETS = {
@@ -72,10 +76,15 @@ const ROSTER_PRESETS = {
   blank: { name: '空白名册', description: '清空所有班级学生，从头开始组合', icon: '📄' }
 }
 
+// ==================== 辅助函数：深拷贝响应式数据 ====================
+const deepClone = (data) => {
+  return JSON.parse(JSON.stringify(toRaw(data)))
+}
+
 // ==================== 初始化 ====================
 onMounted(async () => {
   await loadData()
-  await loadAllCharactersPool()
+  await loadCharacterPool()
 })
 
 // ==================== 数据加载 ====================
@@ -90,7 +99,6 @@ const loadData = async () => {
       backupData = JSON.parse(JSON.stringify(currentData))
       await saveRosterBackup(backupData)
       
-      // 同时创建备份世界书
       const hasBackup = await hasBackupWorldbook()
       if (!hasBackup) {
         await createDefaultRosterBackupWorldbook(backupData)
@@ -103,16 +111,48 @@ const loadData = async () => {
           backupData[classId] = JSON.parse(JSON.stringify(classInfo))
           hasChanges = true
         } else {
-          const backupStudents = backupData[classId].students || []
-          const currentStudents = classInfo.students || []
+          // 合并学生时保留所有字段（包括 electivePreference）
+          // 修复：使用 Array.isArray 确保是数组
+          const backupStudents = Array.isArray(backupData[classId].students) ? backupData[classId].students : []
+          const currentStudents = Array.isArray(classInfo.students) ? classInfo.students : []
           
           currentStudents.forEach(curr => {
-            if (!backupStudents.find(b => b.name === curr.name)) {
+            const existing = backupStudents.find(b => b.name === curr.name)
+            if (!existing) {
+              // 新学生，完整复制（保留所有字段）
               backupStudents.push(JSON.parse(JSON.stringify(toRaw(curr))))
               hasChanges = true
+            } else {
+              // 已存在的学生，更新可能丢失的字段
+              if (curr.electivePreference && !existing.electivePreference) {
+                existing.electivePreference = curr.electivePreference
+                hasChanges = true
+              }
+              if (curr.scheduleTag && !existing.scheduleTag) {
+                existing.scheduleTag = curr.scheduleTag
+                hasChanges = true
+              }
             }
           })
           backupData[classId].students = backupStudents
+          
+          // 同样合并教师
+          // 修复：使用 Array.isArray 确保是数组
+          const backupTeachers = Array.isArray(backupData[classId].teachers) ? backupData[classId].teachers : []
+          const currentTeachers = Array.isArray(classInfo.teachers) ? classInfo.teachers : []
+          currentTeachers.forEach(curr => {
+            if (curr.name && !backupTeachers.find(b => b.name === curr.name)) {
+              backupTeachers.push(JSON.parse(JSON.stringify(toRaw(curr))))
+              hasChanges = true
+            }
+          })
+          backupData[classId].teachers = backupTeachers
+          
+          // 合并班主任
+          if (classInfo.headTeacher?.name && !backupData[classId].headTeacher?.name) {
+            backupData[classId].headTeacher = JSON.parse(JSON.stringify(classInfo.headTeacher))
+            hasChanges = true
+          }
         }
       }
       if (hasChanges) {
@@ -127,14 +167,20 @@ const loadData = async () => {
     const groups = {}
     
     for (const [classId, classInfo] of Object.entries(backupData)) {
-      if (!classInfo.students) continue
+      // 修复：使用 Array.isArray 确保是数组
+      const students = Array.isArray(classInfo.students) ? classInfo.students : []
+      if (students.length === 0) continue
       
       const currentClassInfo = currentData[classId]
-      const currentStudentNames = new Set((currentClassInfo?.students || []).map(s => s.name))
+      const currentStudentNames = new Set(
+        Array.isArray(currentClassInfo?.students) 
+          ? currentClassInfo.students.map(s => s.name) 
+          : []
+      )
       
       state[classId] = {}
       
-      classInfo.students.forEach(student => {
+      students.forEach(student => {
         state[classId][student.name] = currentStudentNames.has(student.name)
         
         let origin = '未知'
@@ -163,6 +209,8 @@ const loadData = async () => {
     })
     originGroups.value = sortedGroupsObj
     
+    console.log('[RosterFilter] Data loaded, classes:', Object.keys(backupData).length)
+    
   } catch (e) {
     console.error('[RosterFilter] Error loading data:', e)
   } finally {
@@ -170,95 +218,135 @@ const loadData = async () => {
   }
 }
 
-// 加载全部角色池 (每次均从最新数据构建并合并)
-const loadAllCharactersPool = async () => {
+// 加载角色池（从快照构建，合并已保存的自定义角色）
+const loadCharacterPool = async () => {
   try {
-    // 1. 获取持久化存储的池子 (包含可能的自定义/额外角色)
-    let savedPool = await getFullCharacterPool() || []
+    console.log('[RosterFilter] Loading character pool...')
+    
+    // 1. 获取持久化的角色池
+    let savedPool = await getFullCharacterPool()
+    // 修复：确保 savedPool 是数组
+    if (!Array.isArray(savedPool)) {
+      savedPool = []
+    }
     const savedMap = new Map(savedPool.map(c => [c.name, c]))
     
-    // 2. 从当前的快照 (Source of Truth) 构建基础池子
+    // 2. 从快照构建基础角色池
     const currentPool = []
+    const addedNames = new Set() // 用于去重，避免同一老师重复计入
+    const snapshot = fullRosterSnapshot.value
     
-    // 遍历所有班级
-    for (const [classId, classInfo] of Object.entries(fullRosterSnapshot.value)) {
-      // 添加班主任
-      if (classInfo.headTeacher?.name) {
+    if (!snapshot || Object.keys(snapshot).length === 0) {
+      console.log('[RosterFilter] Snapshot is empty, waiting...')
+      characterPool.value = savedPool
+      return
+    }
+    
+    for (const [classId, classInfo] of Object.entries(snapshot)) {
+      // 添加班主任（优先级最高，先添加）
+      if (classInfo.headTeacher?.name && !addedNames.has(classInfo.headTeacher.name)) {
         const char = {
-          ...classInfo.headTeacher,
+          name: classInfo.headTeacher.name,
+          gender: classInfo.headTeacher.gender || 'female',
+          origin: classInfo.headTeacher.origin || '',
           classId,
           role: 'teacher',
-          isHeadTeacher: true
+          subject: '',
+          isHeadTeacher: true,
+          electivePreference: 'general',
+          scheduleTag: '',
+          personality: { order: 0, altruism: 0, tradition: 0, peace: 50 }
         }
-        // 如果已保存的数据中有额外属性(如性格)，合并进来
+        // 合并已保存的额外属性
         if (savedMap.has(char.name)) {
-          Object.assign(char, savedMap.get(char.name))
-          // 强制更新核心身份信息，防止不同步
-          char.classId = classId
-          char.role = 'teacher'
-          char.isHeadTeacher = true
+          const saved = savedMap.get(char.name)
+          char.personality = saved.personality || char.personality
+          savedMap.delete(char.name)
         }
         currentPool.push(char)
-        savedMap.delete(char.name) // 标记为已处理
+        addedNames.add(char.name)
       }
       
-      // 添加科任教师
-      (classInfo.teachers || []).forEach(t => {
-        if (t.name) {
+      // 添加科任教师（跳过已作为班主任添加的）
+      // 修复：使用 Array.isArray 确保是数组
+      const teachers = Array.isArray(classInfo.teachers) ? classInfo.teachers : []
+      teachers.forEach(t => {
+        if (t.name && !addedNames.has(t.name)) {
           const char = {
-            ...t,
+            name: t.name,
+            gender: t.gender || 'female',
+            origin: t.origin || '',
             classId,
             role: 'teacher',
-            isHeadTeacher: false
+            subject: t.subject || '',
+            isHeadTeacher: false,
+            electivePreference: 'general',
+            scheduleTag: '',
+            personality: { order: 0, altruism: 0, tradition: 0, peace: 50 }
           }
           if (savedMap.has(char.name)) {
-            Object.assign(char, savedMap.get(char.name))
-            char.classId = classId
-            char.role = 'teacher'
+            const saved = savedMap.get(char.name)
+            char.personality = saved.personality || char.personality
+            savedMap.delete(char.name)
           }
           currentPool.push(char)
-          savedMap.delete(char.name)
+          addedNames.add(char.name)
         }
       })
       
-      // 添加学生
-      (classInfo.students || []).forEach(s => {
-        if (s.name) {
+      // 添加学生（同样去重）
+      // 修复：使用 Array.isArray 确保是数组
+      const students = Array.isArray(classInfo.students) ? classInfo.students : []
+      students.forEach(s => {
+        if (s.name && !addedNames.has(s.name)) {
           const char = {
-            ...s,
+            name: s.name,
+            gender: s.gender || 'female',
+            origin: s.origin || '',
             classId,
-            role: 'student'
+            role: 'student',
+            subject: '',
+            isHeadTeacher: false,
+            electivePreference: s.electivePreference || 'general',
+            scheduleTag: s.scheduleTag || '',
+            personality: { order: 0, altruism: 0, tradition: 0, peace: 50 }
           }
           if (savedMap.has(char.name)) {
-            Object.assign(char, savedMap.get(char.name))
-            char.classId = classId
-            char.role = 'student'
+            const saved = savedMap.get(char.name)
+            char.personality = saved.personality || char.personality
+            // 保留已保存的选课倾向（如果当前没有）
+            if (!s.electivePreference && saved.electivePreference) {
+              char.electivePreference = saved.electivePreference
+            }
+            savedMap.delete(char.name)
           }
           currentPool.push(char)
-          savedMap.delete(char.name)
+          addedNames.add(char.name)
         }
       })
     }
     
-    // 3. 添加剩余的自定义角色 (不在当前班级名册中的)
+    // 3. 添加剩余的自定义角色（不在班级中的，同样去重）
     for (const [name, char] of savedMap) {
-      // 标记为无班级
-      char.classId = ''
-      currentPool.push(char)
+      if (!addedNames.has(name)) {
+        char.classId = char.classId || ''
+        currentPool.push(char)
+        addedNames.add(name)
+      }
     }
     
-    // 更新状态并保存
-    allCharactersPool.value = currentPool
-    await saveFullCharacterPool(currentPool)
+    characterPool.value = currentPool
+    // 修复：保存时使用深拷贝避免 Proxy 问题
+    await saveFullCharacterPool(deepClone(currentPool))
     
-    console.log('[RosterFilter] Loaded character pool:', currentPool.length, 'characters')
+    console.log('[RosterFilter] Character pool loaded:', currentPool.length, 'characters')
     
   } catch (e) {
     console.error('[RosterFilter] Error loading character pool:', e)
   }
 }
 
-// 获取学生所属社团 (增加去重逻辑，解决副本条目导致的重复显示)
+// 获取学生所属社团
 const getStudentClubs = (studentName) => {
   const clubs = []
   if (gameStore.allClubs) {
@@ -277,12 +365,11 @@ const getStudentClubs = (studentName) => {
       }
     }
     
-    // 按名称去重，优先保留有职位的条目
+    // 去重
     const uniqueMap = new Map()
     for (const c of clubs) {
       if (uniqueMap.has(c.name)) {
         const existing = uniqueMap.get(c.name)
-        // 如果当前有职位且已存在的没有，则替换
         if (c.role && !existing.role) {
           uniqueMap.set(c.name, c)
         }
@@ -332,7 +419,6 @@ const availableClubs = computed(() => {
 const filteredGroups = computed(() => {
   let result = originGroups.value
   
-  // 搜索过滤
   if (searchQuery.value) {
     const query = searchQuery.value.toLowerCase()
     const filtered = {}
@@ -351,7 +437,6 @@ const filteredGroups = computed(() => {
     result = filtered
   }
   
-  // 社团过滤
   if (clubFilter.value) {
     const filtered = {}
     for (const [workName, students] of Object.entries(result)) {
@@ -365,7 +450,6 @@ const filteredGroups = computed(() => {
     result = filtered
   }
   
-  // 选课倾向过滤
   if (electiveFilter.value) {
     const filtered = {}
     for (const [workName, students] of Object.entries(result)) {
@@ -406,7 +490,9 @@ const allTeachers = computed(() => {
         isHeadTeacher: true
       })
     }
-    (classInfo.teachers || []).forEach(t => {
+    // 修复：使用 Array.isArray 确保是数组
+    const classTeachers = Array.isArray(classInfo.teachers) ? classInfo.teachers : []
+    classTeachers.forEach(t => {
       if (t.name) {
         teachers.push({
           ...t,
@@ -468,7 +554,6 @@ const saveTeacherEdit = () => {
     if (!classData.teachers) classData.teachers = []
     
     if (editingTeacher.value) {
-      // 编辑现有
       const idx = classData.teachers.findIndex(t => t.name === editingTeacher.value.name)
       if (idx !== -1) {
         classData.teachers[idx] = {
@@ -480,7 +565,6 @@ const saveTeacherEdit = () => {
         }
       }
     } else {
-      // 添加新教师
       classData.teachers.push({
         name: form.name,
         gender: form.gender,
@@ -492,6 +576,7 @@ const saveTeacherEdit = () => {
   }
   
   showTeacherEditor.value = false
+  loadCharacterPool() // 刷新角色池
 }
 
 const deleteTeacher = (teacher) => {
@@ -508,13 +593,14 @@ const deleteTeacher = (teacher) => {
       classData.teachers.splice(idx, 1)
     }
   }
+  loadCharacterPool() // 刷新角色池
 }
 
 // ==================== 班级组合器 ====================
 const initComposer = async () => {
   // 确保角色池已加载
-  if (allCharactersPool.value.length === 0) {
-    await loadAllCharactersPool()
+  if (characterPool.value.length === 0) {
+    await loadCharacterPool()
   }
   
   if (!composerTargetClass.value && Object.keys(fullRosterSnapshot.value).length > 0) {
@@ -526,40 +612,63 @@ const initComposer = async () => {
 const loadComposerClassData = () => {
   if (!composerTargetClass.value) return
   
+  const source = fullRosterSnapshot.value[composerTargetClass.value]
+  if (!source) return
+  
   if (selectedPreset.value === 'blank') {
     composerClassData.value = {
-      ...fullRosterSnapshot.value[composerTargetClass.value],
+      name: source.name,
+      headTeacher: { name: '', gender: 'female', origin: '', role: 'teacher' },
+      teachers: [],
       students: []
     }
   } else {
-    composerClassData.value = JSON.parse(JSON.stringify(fullRosterSnapshot.value[composerTargetClass.value]))
+    composerClassData.value = JSON.parse(JSON.stringify(source))
   }
   
-  // 构建可用角色列表
   updateAvailableCharacters()
 }
 
-// 更新可用角色列表，标记已分配到其他班级的角色
+// 更新可用角色列表
 const updateAvailableCharacters = () => {
-  const inCurrentClassNames = new Set((composerClassData.value.students || []).map(s => s.name))
+  const currentMembers = new Set()
   
-  // 构建所有班级的学生分配映射
+  // 当前班级的所有成员
+  if (composerClassData.value.headTeacher?.name) {
+    currentMembers.add(composerClassData.value.headTeacher.name)
+  }
+  // 修复：使用 Array.isArray 确保是数组
+  const composerTeachers = Array.isArray(composerClassData.value.teachers) ? composerClassData.value.teachers : []
+  composerTeachers.forEach(t => {
+    if (t.name) currentMembers.add(t.name)
+  })
+  const composerStudents = Array.isArray(composerClassData.value.students) ? composerClassData.value.students : []
+  composerStudents.forEach(s => {
+    if (s.name) currentMembers.add(s.name)
+  })
+  
+  // 构建所有班级的成员分配映射
   const assignmentMap = new Map()
   for (const [classId, classInfo] of Object.entries(fullRosterSnapshot.value)) {
-    if (classId === composerTargetClass.value) continue // 跳过当前班级
-    for (const student of (classInfo.students || [])) {
-      if (student.name) {
-        assignmentMap.set(student.name, {
-          classId,
-          className: classInfo.name || classId
-        })
-      }
+    if (classId === composerTargetClass.value) continue
+    
+    if (classInfo.headTeacher?.name) {
+      assignmentMap.set(classInfo.headTeacher.name, { classId, className: classInfo.name || classId })
     }
+    // 修复：使用 Array.isArray 确保是数组
+    const classTeachers = Array.isArray(classInfo.teachers) ? classInfo.teachers : []
+    classTeachers.forEach(t => {
+      if (t.name) assignmentMap.set(t.name, { classId, className: classInfo.name || classId })
+    })
+    const classStudents = Array.isArray(classInfo.students) ? classInfo.students : []
+    classStudents.forEach(s => {
+      if (s.name) assignmentMap.set(s.name, { classId, className: classInfo.name || classId })
+    })
   }
   
   // 过滤和标记角色
-  availableCharacters.value = allCharactersPool.value
-    .filter(c => c.role === 'student' && !inCurrentClassNames.has(c.name))
+  availableCharacters.value = characterPool.value
+    .filter(c => !currentMembers.has(c.name))
     .map(c => {
       const assignment = assignmentMap.get(c.name)
       return {
@@ -578,40 +687,90 @@ watch(selectedPreset, () => {
   loadComposerClassData()
 })
 
-// 添加角色到班级
-const addCharacterToClass = (char) => {
-  if (!composerClassData.value.students) composerClassData.value.students = []
+// 过滤可用角色
+const filteredAvailableCharacters = computed(() => {
+  let result = availableCharacters.value
   
-  const newStudent = {
-    name: char.name,
-    gender: char.gender,
-    origin: char.origin,
-    role: 'student',
-    classId: composerTargetClass.value,
-    electivePreference: char.electivePreference || 'general',
-    scheduleTag: char.scheduleTag || ''
+  // 角色类型筛选
+  if (composerRoleFilter.value !== 'all') {
+    result = result.filter(c => c.role === composerRoleFilter.value)
   }
   
-  composerClassData.value.students.push(newStudent)
+  // 搜索筛选
+  if (composerSearchQuery.value) {
+    const query = composerSearchQuery.value.toLowerCase()
+    result = result.filter(c => 
+      c.name.toLowerCase().includes(query) || 
+      (c.origin && c.origin.toLowerCase().includes(query))
+    )
+  }
+  
+  return result
+})
+
+// 添加角色到班级
+const addCharacterToClass = (char) => {
+  if (char.role === 'teacher') {
+    // 教师
+    if (!composerClassData.value.teachers) composerClassData.value.teachers = []
+    composerClassData.value.teachers.push({
+      name: char.name,
+      gender: char.gender,
+      origin: char.origin,
+      subject: char.subject || '',
+      role: 'teacher'
+    })
+  } else {
+    // 学生
+    if (!composerClassData.value.students) composerClassData.value.students = []
+    composerClassData.value.students.push({
+      name: char.name,
+      gender: char.gender,
+      origin: char.origin,
+      role: 'student',
+      classId: composerTargetClass.value,
+      electivePreference: char.electivePreference || 'general',
+      scheduleTag: char.scheduleTag || ''
+    })
+  }
   updateAvailableCharacters()
 }
 
-// 从班级移除角色
-const removeCharacterFromClass = (index) => {
+// 从班级移除学生
+const removeStudentFromClass = (index) => {
   composerClassData.value.students.splice(index, 1)
   updateAvailableCharacters()
 }
 
-// 过滤可用角色
-const filteredAvailableCharacters = computed(() => {
-  if (!composerSearchQuery.value) return availableCharacters.value
-  
-  const query = composerSearchQuery.value.toLowerCase()
-  return availableCharacters.value.filter(c => 
-    c.name.toLowerCase().includes(query) || 
-    (c.origin && c.origin.toLowerCase().includes(query))
-  )
-})
+// 从班级移除教师
+const removeTeacherFromClass = (index) => {
+  composerClassData.value.teachers.splice(index, 1)
+  updateAvailableCharacters()
+}
+
+// 设置班主任
+const setHeadTeacher = (char) => {
+  composerClassData.value.headTeacher = {
+    name: char.name,
+    gender: char.gender,
+    origin: char.origin,
+    role: 'teacher'
+  }
+  updateAvailableCharacters()
+}
+
+// 清除班主任
+const clearHeadTeacher = () => {
+  composerClassData.value.headTeacher = { name: '', gender: 'female', origin: '', role: 'teacher' }
+  updateAvailableCharacters()
+}
+
+// 设置教师科目
+const setTeacherSubject = (index, subject) => {
+  if (composerClassData.value.teachers[index]) {
+    composerClassData.value.teachers[index].subject = subject
+  }
+}
 
 // 应用组合器更改
 const applyComposerChanges = async () => {
@@ -622,14 +781,18 @@ const applyComposerChanges = async () => {
     // 更新内存
     gameStore.allClassData[composerTargetClass.value] = JSON.parse(JSON.stringify(composerClassData.value))
     
+    // 更新快照
+    fullRosterSnapshot.value[composerTargetClass.value] = JSON.parse(JSON.stringify(composerClassData.value))
+    // 修复：保存时使用深拷贝避免 Proxy 问题
+    await saveRosterBackup(deepClone(fullRosterSnapshot.value))
+    
     // 同步到世界书
     const success = await updateClassDataInWorldbook(composerTargetClass.value, composerClassData.value)
     
     if (success) {
       alert('班级名册已更新！')
-      // 刷新数据
       await loadData()
-      await loadAllCharactersPool()
+      await loadCharacterPool()
     } else {
       alert('保存失败，请检查控制台')
     }
@@ -659,7 +822,6 @@ const addClass = async () => {
     return
   }
   
-  // 创建新班级
   const newClass = {
     name,
     headTeacher: { name: '', gender: 'female', origin: '', role: 'teacher' },
@@ -670,10 +832,8 @@ const addClass = async () => {
   fullRosterSnapshot.value[id] = newClass
   gameStore.allClassData[id] = JSON.parse(JSON.stringify(newClass))
   
-  // 保存到备份
-  await saveRosterBackup(fullRosterSnapshot.value)
-  
-  // 同步到世界书
+  // 修复：保存时使用深拷贝避免 Proxy 问题
+  await saveRosterBackup(deepClone(fullRosterSnapshot.value))
   await updateClassDataInWorldbook(id, newClass)
   
   showAddClassModal.value = false
@@ -690,14 +850,12 @@ const deleteClass = async () => {
   
   const classId = composerTargetClass.value
   
-  // 从内存中删除
   delete fullRosterSnapshot.value[classId]
   delete gameStore.allClassData[classId]
   
-  // 保存到备份
-  await saveRosterBackup(fullRosterSnapshot.value)
+  // 修复：保存时使用深拷贝避免 Proxy 问题
+  await saveRosterBackup(deepClone(fullRosterSnapshot.value))
   
-  // 切换到另一个班级
   const remainingClasses = Object.keys(fullRosterSnapshot.value)
   composerTargetClass.value = remainingClasses[0] || ''
   
@@ -710,16 +868,35 @@ const deleteClass = async () => {
   alert(`班级 "${className}" 已删除`)
 }
 
-// ==================== 全部角色管理 ====================
-const filteredAllCharacters = computed(() => {
-  if (!allCharSearchQuery.value) return allCharactersPool.value
+// ==================== 角色编辑器 ====================
+const filteredCharacterPool = computed(() => {
+  let result = characterPool.value
   
-  const query = allCharSearchQuery.value.toLowerCase()
-  return allCharactersPool.value.filter(c =>
-    c.name.toLowerCase().includes(query) ||
-    (c.origin && c.origin.toLowerCase().includes(query)) ||
-    (c.classId && c.classId.toLowerCase().includes(query))
-  )
+  // 角色类型筛选
+  if (charEditorRoleFilter.value !== 'all') {
+    result = result.filter(c => c.role === charEditorRoleFilter.value)
+  }
+  
+  // 搜索筛选
+  if (charEditorSearchQuery.value) {
+    const query = charEditorSearchQuery.value.toLowerCase()
+    result = result.filter(c =>
+      c.name.toLowerCase().includes(query) ||
+      (c.origin && c.origin.toLowerCase().includes(query)) ||
+      (c.classId && c.classId.toLowerCase().includes(query))
+    )
+  }
+  
+  return result
+})
+
+const charPoolStats = computed(() => {
+  const pool = characterPool.value
+  return {
+    total: pool.length,
+    students: pool.filter(c => c.role === 'student').length,
+    teachers: pool.filter(c => c.role === 'teacher').length
+  }
 })
 
 const startEditCharacter = (char) => {
@@ -730,9 +907,11 @@ const startEditCharacter = (char) => {
     origin: char.origin || '',
     classId: char.classId || '',
     role: char.role || 'student',
+    subject: char.subject || '',
+    isHeadTeacher: char.isHeadTeacher || false,
     electivePreference: char.electivePreference || 'general',
     scheduleTag: char.scheduleTag || '',
-    personality: char.personality || { order: 0, altruism: 0, tradition: 0, peace: 50 }
+    personality: char.personality ? { ...char.personality } : { order: 0, altruism: 0, tradition: 0, peace: 50 }
   }
   showCharacterEditor.value = true
 }
@@ -745,6 +924,8 @@ const addNewCharacter = () => {
     origin: '',
     classId: '',
     role: 'student',
+    subject: '',
+    isHeadTeacher: false,
     electivePreference: 'general',
     scheduleTag: '',
     personality: { order: 0, altruism: 0, tradition: 0, peace: 50 }
@@ -765,39 +946,44 @@ const saveCharacterEdit = async () => {
     origin: form.origin,
     classId: form.classId,
     role: form.role,
-    electivePreference: form.electivePreference,
-    scheduleTag: form.scheduleTag,
+    subject: form.role === 'teacher' ? form.subject : '',
+    isHeadTeacher: form.role === 'teacher' ? form.isHeadTeacher : false,
+    electivePreference: form.role === 'student' ? form.electivePreference : 'general',
+    scheduleTag: form.role === 'student' ? form.scheduleTag : '',
     personality: { ...form.personality }
   }
   
   if (editingCharacter.value) {
     // 编辑现有
-    const idx = allCharactersPool.value.findIndex(c => c.name === editingCharacter.value.name)
+    const idx = characterPool.value.findIndex(c => c.name === editingCharacter.value.name)
     if (idx !== -1) {
-      allCharactersPool.value[idx] = charData
+      characterPool.value[idx] = charData
     }
   } else {
     // 添加新角色
-    if (allCharactersPool.value.find(c => c.name === form.name)) {
+    if (characterPool.value.find(c => c.name === form.name)) {
       alert('已存在同名角色')
       return
     }
-    allCharactersPool.value.push(charData)
+    characterPool.value.push(charData)
   }
   
-  // 保存到 IndexedDB
-  await saveFullCharacterPool(allCharactersPool.value)
+  // 修复：保存到 IndexedDB 时使用深拷贝避免 Proxy 问题
+  await saveFullCharacterPool(deepClone(characterPool.value))
   
   showCharacterEditor.value = false
+  updateAvailableCharacters()
 }
 
 const deleteCharacter = async (char) => {
-  if (!confirm(`确定要删除角色 ${char.name} 吗？`)) return
+  if (!confirm(`确定要从待选池中删除角色 ${char.name} 吗？`)) return
   
-  const idx = allCharactersPool.value.findIndex(c => c.name === char.name)
+  const idx = characterPool.value.findIndex(c => c.name === char.name)
   if (idx !== -1) {
-    allCharactersPool.value.splice(idx, 1)
-    await saveFullCharacterPool(allCharactersPool.value)
+    characterPool.value.splice(idx, 1)
+    // 修复：保存时使用深拷贝避免 Proxy 问题
+    await saveFullCharacterPool(deepClone(characterPool.value))
+    updateAvailableCharacters()
   }
 }
 
@@ -811,10 +997,27 @@ const handleSave = async () => {
       const fullClass = fullRosterSnapshot.value[classId]
       if (!fullClass) continue
       
-      const activeStudents = fullClass.students.filter(s => studentStateMap[s.name])
+      // 修复：使用 Array.isArray 确保是数组
+      const fullClassStudents = Array.isArray(fullClass.students) ? fullClass.students : []
+      
+      // 过滤学生时保留所有字段（关键修复：保留 electivePreference）
+      const activeStudents = fullClassStudents
+        .filter(s => studentStateMap[s.name])
+        .map(s => ({
+          name: s.name,
+          gender: s.gender,
+          origin: s.origin,
+          role: 'student',
+          classId: classId,
+          electivePreference: s.electivePreference || 'general',
+          scheduleTag: s.scheduleTag || ''
+        }))
       
       if (gameStore.allClassData[classId]) {
-        gameStore.allClassData[classId].students = JSON.parse(JSON.stringify(toRaw(activeStudents)))
+        gameStore.allClassData[classId].students = activeStudents
+        // 同时保留班主任和教师
+        gameStore.allClassData[classId].headTeacher = fullClass.headTeacher
+        gameStore.allClassData[classId].teachers = fullClass.teachers
         changes.push(classId)
       }
     }
@@ -834,16 +1037,36 @@ const handleSave = async () => {
         const fullClass = fullRosterSnapshot.value[classId]
         if (!fullClass) continue
         
-        const keepStudents = fullClass.students.filter(s => studentStateMap[s.name])
+        // 修复：使用 Array.isArray 确保是数组
+        const fullClassStudents = Array.isArray(fullClass.students) ? fullClass.students : []
         
-        if (keepStudents.length > 0) {
-          const rawClass = toRaw(fullClass)
-          newBackup[classId] = JSON.parse(JSON.stringify(rawClass))
-          newBackup[classId].students = JSON.parse(JSON.stringify(toRaw(keepStudents)))
+        const keepStudents = fullClassStudents
+          .filter(s => studentStateMap[s.name])
+          .map(s => ({
+            name: s.name,
+            gender: s.gender,
+            origin: s.origin,
+            role: 'student',
+            classId: classId,
+            electivePreference: s.electivePreference || 'general',
+            scheduleTag: s.scheduleTag || ''
+          }))
+        
+        // 修复：使用 Array.isArray 确保是数组
+        const fullClassTeachers = Array.isArray(fullClass.teachers) ? fullClass.teachers : []
+        
+        if (keepStudents.length > 0 || fullClass.headTeacher?.name || fullClassTeachers.length > 0) {
+          newBackup[classId] = {
+            name: fullClass.name,
+            headTeacher: fullClass.headTeacher,
+            teachers: fullClassTeachers,
+            students: keepStudents
+          }
         }
       }
       
-      await saveRosterBackup(newBackup)
+      // 修复：保存时使用深拷贝避免 Proxy 问题
+      await saveRosterBackup(deepClone(newBackup))
       fullRosterSnapshot.value = newBackup
     }
     
@@ -879,7 +1102,7 @@ const refreshData = async () => {
     try {
       await gameStore.loadClassData()
       await loadData()
-      await loadAllCharactersPool()
+      await loadCharacterPool()
       alert('名册数据已更新')
     } catch (e) {
       console.error('[RosterFilter] Error refreshing data:', e)
@@ -890,7 +1113,6 @@ const refreshData = async () => {
   }
 }
 
-// 从备份世界书恢复
 const restoreFromBackup = async () => {
   if (!confirm('确定要从备份世界书恢复所有角色数据吗？这将覆盖当前的修改。')) return
   
@@ -901,18 +1123,16 @@ const restoreFromBackup = async () => {
       fullRosterSnapshot.value = backupData
       await saveRosterBackup(backupData)
       
-      // 更新内存数据
       for (const [classId, classInfo] of Object.entries(backupData)) {
         gameStore.allClassData[classId] = JSON.parse(JSON.stringify(classInfo))
       }
       
-      // 同步到世界书
       for (const classId of Object.keys(backupData)) {
         await updateClassDataInWorldbook(classId, backupData[classId])
       }
       
       await loadData()
-      await loadAllCharactersPool()
+      await loadCharacterPool()
       alert('已从备份恢复所有角色数据')
     } else {
       alert('未找到备份数据')
@@ -925,13 +1145,13 @@ const restoreFromBackup = async () => {
   }
 }
 
-// 创建备份世界书
 const createBackup = async () => {
   if (!confirm('确定要创建/更新备份世界书吗？这将保存当前的所有角色数据。')) return
   
   loading.value = true
   try {
-    await createDefaultRosterBackupWorldbook(fullRosterSnapshot.value)
+    // 修复：传递时使用深拷贝避免 Proxy 问题
+    await createDefaultRosterBackupWorldbook(deepClone(fullRosterSnapshot.value))
     alert('备份世界书已创建/更新')
   } catch (e) {
     console.error('[RosterFilter] Error creating backup:', e)
@@ -941,7 +1161,6 @@ const createBackup = async () => {
   }
 }
 
-// 展开/收起
 const toggleExpand = (work) => {
   expandedWorks.value[work] = !expandedWorks.value[work]
 }
@@ -972,8 +1191,8 @@ const expandAll = () => {
 watch(activeTab, async (newTab) => {
   if (newTab === 'composer') {
     await initComposer()
-  } else if (newTab === 'allCharacters') {
-    await loadAllCharactersPool()
+  } else if (newTab === 'characterEditor') {
+    await loadCharacterPool()
   }
 })
 </script>
@@ -983,7 +1202,7 @@ watch(activeTab, async (newTab) => {
     <div class="filter-panel-overlay" @click.self="$emit('close')">
       <div class="filter-panel">
         <div class="panel-header">
-          <div class="header-left">
+          <div class="header">
             <span class="header-icon">🎭</span>
             <h3>全校名册管理</h3>
           </div>
@@ -1008,10 +1227,10 @@ watch(activeTab, async (newTab) => {
           </button>
           <button 
             class="tab-btn" 
-            :class="{ active: activeTab === 'allCharacters' }"
-            @click="activeTab = 'allCharacters'"
+            :class="{ active: activeTab === 'characterEditor' }"
+            @click="activeTab = 'characterEditor'"
           >
-            👥 全部角色
+            ✏️ 角色编辑器
           </button>
         </div>
         
@@ -1031,12 +1250,8 @@ watch(activeTab, async (newTab) => {
                 <button v-if="searchQuery" class="clear-search" @click="searchQuery = ''">×</button>
               </div>
               <div class="toolbar-actions">
-                <button class="toolbar-btn" @click="showFilters = !showFilters" title="筛选器">
-                  🔧
-                </button>
-                <button class="toolbar-btn" @click="expandAll" title="全部展开/收起">
-                  📂
-                </button>
+                <button class="toolbar-btn" @click="showFilters = !showFilters" title="筛选器">🔧</button>
+                <button class="toolbar-btn" @click="expandAll" title="全部展开/收起">📂</button>
               </div>
             </div>
             
@@ -1167,18 +1382,11 @@ watch(activeTab, async (newTab) => {
                       <div class="card-content">
                         <span class="student-name">{{ student.name }}</span>
                         <span class="class-tag">{{ student.classId }}</span>
-                        <!-- 社团标签 -->
                         <div v-if="student.clubs && student.clubs.length > 0" class="club-tags">
-                          <span 
-                            v-for="club in student.clubs" 
-                            :key="club.id" 
-                            class="club-tag"
-                            :title="club.role || '部员'"
-                          >
+                          <span v-for="club in student.clubs" :key="club.id" class="club-tag" :title="club.role || '部员'">
                             {{ club.name }}
                           </span>
                         </div>
-                        <!-- 选课倾向 -->
                         <span v-if="student.electivePref && ELECTIVE_PREFERENCES[student.electivePref]" class="elective-tag">
                           {{ ELECTIVE_PREFERENCES[student.electivePref].icon }}
                         </span>
@@ -1224,49 +1432,103 @@ watch(activeTab, async (newTab) => {
             <div class="composer-layout">
               <!-- 当前班级成员 -->
               <div class="composer-panel current-class">
-                <h4>当前班级成员 ({{ composerClassData.students?.length || 0 }}人)</h4>
-                <div class="composer-list">
-                  <div 
-                    v-for="(student, index) in composerClassData.students" 
-                    :key="student.name"
-                    class="composer-item"
-                  >
-                    <span class="item-name">{{ student.name }}</span>
-                    <span class="item-meta">{{ student.gender === 'female' ? '♀' : '♂' }} {{ student.origin }}</span>
-                    <button class="remove-btn" @click="removeCharacterFromClass(index)">×</button>
+                <h4>当前班级配置</h4>
+                
+                <!-- 班主任 -->
+                <div class="composer-section">
+                  <div class="section-title">👩‍🏫 班主任</div>
+                  <div v-if="composerClassData.headTeacher?.name" class="composer-item head-teacher">
+                    <span class="item-name">{{ composerClassData.headTeacher.name }}</span>
+                    <span class="item-meta">{{ composerClassData.headTeacher.gender === 'female' ? '♀' : '♂' }} {{ composerClassData.headTeacher.origin }}</span>
+                    <button class="remove-btn" @click="clearHeadTeacher">×</button>
                   </div>
-                  <div v-if="!composerClassData.students?.length" class="empty-hint">
-                    暂无成员，从右侧添加角色
+                  <div v-else class="empty-slot">未设置班主任（从右侧教师中选择）</div>
+                </div>
+                
+                <!-- 科任教师 -->
+                <div class="composer-section">
+                  <div class="section-title">📚 科任教师 ({{ composerClassData.teachers?.length || 0 }})</div>
+                  <div class="composer-list compact">
+                    <div 
+                      v-for="(teacher, index) in composerClassData.teachers" 
+                      :key="teacher.name"
+                      class="composer-item teacher-item"
+                    >
+                      <span class="item-name">{{ teacher.name }}</span>
+                      <input 
+                        type="text" 
+                        v-model="teacher.subject" 
+                        placeholder="科目"
+                        class="subject-input"
+                        @click.stop
+                      />
+                      <button class="remove-btn" @click="removeTeacherFromClass(index)">×</button>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- 学生 -->
+                <div class="composer-section">
+                  <div class="section-title">👨‍🎓 学生 ({{ composerClassData.students?.length || 0 }})</div>
+                  <div class="composer-list">
+                    <div 
+                      v-for="(student, index) in composerClassData.students" 
+                      :key="student.name"
+                      class="composer-item"
+                    >
+                      <span class="item-name">{{ student.name }}</span>
+                      <span class="item-meta">{{ student.gender === 'female' ? '♀' : '♂' }} {{ student.origin }}</span>
+                      <span v-if="student.electivePreference && ELECTIVE_PREFERENCES[student.electivePreference]" class="pref-icon">
+                        {{ ELECTIVE_PREFERENCES[student.electivePreference].icon }}
+                      </span>
+                      <button class="remove-btn" @click="removeStudentFromClass(index)">×</button>
+                    </div>
+                    <div v-if="!composerClassData.students?.length" class="empty-hint">
+                      暂无学生，从右侧添加
+                    </div>
                   </div>
                 </div>
               </div>
               
               <!-- 可用角色池 -->
               <div class="composer-panel available-pool">
-                <h4>可用角色池 ({{ availableCharacters.length }}人)</h4>
-                <div class="pool-search">
+                <h4>可用角色池 ({{ availableCharacters.length }})</h4>
+                <div class="pool-toolbar">
                   <input 
                     type="text" 
                     v-model="composerSearchQuery" 
                     placeholder="搜索角色..."
                     class="pool-search-input"
                   />
+                  <select v-model="composerRoleFilter" class="role-filter-select">
+                    <option value="all">全部</option>
+                    <option value="student">学生</option>
+                    <option value="teacher">教师</option>
+                  </select>
                 </div>
                 <div class="composer-list">
                   <div 
                     v-for="char in filteredAvailableCharacters" 
                     :key="char.name"
                     class="composer-item available"
-                    :class="{ 'is-assigned': char.isAssigned }"
-                    @click="addCharacterToClass(char)"
+                    :class="{ 'is-assigned': char.isAssigned, 'is-teacher': char.role === 'teacher' }"
                   >
+                    <span class="item-role-badge">{{ char.role === 'teacher' ? '师' : '生' }}</span>
                     <span class="item-name">{{ char.name }}</span>
                     <span class="item-meta">{{ char.gender === 'female' ? '♀' : '♂' }} {{ char.origin }}</span>
                     <span v-if="char.isAssigned" class="assigned-tag" :title="`已分配到 ${char.assignedTo}`">{{ char.assignedTo }}</span>
-                    <span class="add-icon">+</span>
+                    <div class="item-actions">
+                      <button 
+                        v-if="char.role === 'teacher'" 
+                        class="action-icon" 
+                        @click="setHeadTeacher(char)" 
+                        title="设为班主任"
+                      >👑</button>
+                      <button class="action-icon add" @click="addCharacterToClass(char)" title="添加到班级">+</button>
+                    </div>
                   </div>
                   <div v-if="availableCharacters.length === 0" class="empty-hint">
-                    暂无可用角色
+                    暂无可用角色，请在"角色编辑器"中添加
                   </div>
                 </div>
               </div>
@@ -1280,33 +1542,42 @@ watch(activeTab, async (newTab) => {
             </div>
           </div>
           
-          <!-- ========== 全部角色管理面板 ========== -->
-          <div v-if="activeTab === 'allCharacters'" class="tab-content">
-            <div class="all-char-toolbar">
+          <!-- ========== 角色编辑器面板 ========== -->
+          <div v-if="activeTab === 'characterEditor'" class="tab-content">
+            <div class="char-editor-toolbar">
               <input 
                 type="text" 
-                v-model="allCharSearchQuery" 
+                v-model="charEditorSearchQuery" 
                 placeholder="搜索角色..." 
                 class="search-input"
               />
-              <button class="add-btn" @click="addNewCharacter">+ 添加新角色</button>
+              <select v-model="charEditorRoleFilter" class="role-filter-select">
+                <option value="all">全部</option>
+                <option value="student">学生</option>
+                <option value="teacher">教师</option>
+              </select>
+              <button class="add-btn" @click="addNewCharacter">+ 新增角色</button>
             </div>
             
-            <div class="all-char-stats">
-              <span>总计 {{ allCharactersPool.length }} 个角色</span>
-              <span>学生 {{ allCharactersPool.filter(c => c.role === 'student').length }} 人</span>
-              <span>教师 {{ allCharactersPool.filter(c => c.role === 'teacher').length }} 人</span>
+            <div class="char-editor-stats">
+              <span>总计 {{ charPoolStats.total }} 个角色</span>
+              <span>学生 {{ charPoolStats.students }} 人</span>
+              <span>教师 {{ charPoolStats.teachers }} 人</span>
             </div>
             
-            <div v-if="allCharactersPool.length === 0" class="empty-state">
+            <div class="char-editor-hint">
+              💡 提示：在此编辑的角色会存入待选池，可在"班级组合器"中使用
+            </div>
+            
+            <div v-if="characterPool.length === 0" class="empty-state">
               <span class="empty-icon">👤</span>
               <p>暂无角色数据</p>
-              <p class="empty-hint-text">角色数据将从班级名册中自动加载</p>
+              <p class="empty-hint-text">请点击"新增角色"创建角色，或切换到"筛选名册"加载世界书数据</p>
             </div>
             
-            <div v-else class="all-char-list">
+            <div v-else class="char-editor-list">
               <div 
-                v-for="char in filteredAllCharacters" 
+                v-for="char in filteredCharacterPool" 
                 :key="char.name"
                 class="char-card"
                 @click="startEditCharacter(char)"
@@ -1315,13 +1586,15 @@ watch(activeTab, async (newTab) => {
                   <span class="char-name">{{ char.name }}</span>
                   <span class="char-gender">{{ char.gender === 'female' ? '♀' : '♂' }}</span>
                   <span class="char-role" :class="char.role">{{ char.role === 'teacher' ? '教师' : '学生' }}</span>
+                  <span v-if="char.isHeadTeacher" class="head-teacher-badge">班主任</span>
                 </div>
                 <div class="char-meta">
                   <span class="char-origin">{{ char.origin }}</span>
-                  <span class="char-class">{{ char.classId }}</span>
+                  <span v-if="char.classId" class="char-class">{{ char.classId }}</span>
+                  <span v-if="char.subject" class="char-subject">{{ char.subject }}</span>
                 </div>
                 <div class="char-tags">
-                  <span v-if="char.electivePreference && ELECTIVE_PREFERENCES[char.electivePreference]" class="pref-tag">
+                  <span v-if="char.role === 'student' && char.electivePreference && ELECTIVE_PREFERENCES[char.electivePreference]" class="pref-tag">
                     {{ ELECTIVE_PREFERENCES[char.electivePreference].icon }} {{ ELECTIVE_PREFERENCES[char.electivePreference].name }}
                   </span>
                 </div>
@@ -1333,18 +1606,10 @@ watch(activeTab, async (newTab) => {
         
         <div class="panel-footer">
           <div class="left-actions">
-            <button class="action-btn text-btn" @click="handleReset">
-              🔄 重置全选
-            </button>
-            <button class="action-btn text-btn" @click="refreshData">
-              📥 读取新名册
-            </button>
-            <button class="action-btn text-btn" @click="createBackup">
-              💾 创建备份
-            </button>
-            <button class="action-btn text-btn" @click="restoreFromBackup">
-              📤 从备份恢复
-            </button>
+            <button class="action-btn text-btn" @click="handleReset">🔄 重置全选</button>
+            <button class="action-btn text-btn" @click="refreshData">📥 读取新名册</button>
+            <button class="action-btn text-btn" @click="createBackup">💾 创建备份</button>
+            <button class="action-btn text-btn" @click="restoreFromBackup">📤 从备份恢复</button>
             <div class="lock-wrapper">
               <button 
                 class="action-btn icon-btn" 
@@ -1412,7 +1677,7 @@ watch(activeTab, async (newTab) => {
         <!-- 角色编辑弹窗 -->
         <div v-if="showCharacterEditor" class="modal-overlay" @click.self="showCharacterEditor = false">
           <div class="modal large-modal">
-            <h3>{{ editingCharacter ? '编辑角色' : '添加角色' }}</h3>
+            <h3>{{ editingCharacter ? '编辑角色' : '新增角色' }}</h3>
             <div class="form-row">
               <label>姓名：</label>
               <input type="text" v-model="characterEditForm.name" class="input-field" />
@@ -1435,32 +1700,52 @@ watch(activeTab, async (newTab) => {
                 <option value="teacher">教师</option>
               </select>
             </div>
+            
+            <!-- 教师专属字段 -->
+            <template v-if="characterEditForm.role === 'teacher'">
+              <div class="form-row">
+                <label>科目：</label>
+                <input type="text" v-model="characterEditForm.subject" class="input-field" placeholder="如：数学" />
+              </div>
+              <div class="form-row">
+                <label>
+                  <input type="checkbox" v-model="characterEditForm.isHeadTeacher" />
+                  是班主任
+                </label>
+              </div>
+            </template>
+            
+            <!-- 学生专属字段 -->
+            <template v-if="characterEditForm.role === 'student'">
+              <div class="form-row">
+                <label>选课倾向：</label>
+                <select v-model="characterEditForm.electivePreference" class="input-field">
+                  <option v-for="(pref, key) in ELECTIVE_PREFERENCES" :key="key" :value="key">
+                    {{ pref.icon }} {{ pref.name }}
+                  </option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label>日程模板：</label>
+                <select v-model="characterEditForm.scheduleTag" class="input-field">
+                  <option value="">自动推断</option>
+                  <option v-for="(tpl, key) in DEFAULT_TEMPLATES" :key="key" :value="key">
+                    {{ tpl.name }}
+                  </option>
+                </select>
+              </div>
+            </template>
+            
             <div class="form-row">
-              <label>班级：</label>
+              <label>班级（可选）：</label>
               <select v-model="characterEditForm.classId" class="input-field">
-                <option value="">无</option>
+                <option value="">无（待分配）</option>
                 <option v-for="(classInfo, classId) in fullRosterSnapshot" :key="classId" :value="classId">
                   {{ classInfo.name || classId }}
                 </option>
               </select>
             </div>
-            <div v-if="characterEditForm.role === 'student'" class="form-row">
-              <label>选课倾向：</label>
-              <select v-model="characterEditForm.electivePreference" class="input-field">
-                <option v-for="(pref, key) in ELECTIVE_PREFERENCES" :key="key" :value="key">
-                  {{ pref.icon }} {{ pref.name }}
-                </option>
-              </select>
-            </div>
-            <div v-if="characterEditForm.role === 'student'" class="form-row">
-              <label>日程模板：</label>
-              <select v-model="characterEditForm.scheduleTag" class="input-field">
-                <option value="">自动推断</option>
-                <option v-for="(tpl, key) in DEFAULT_TEMPLATES" :key="key" :value="key">
-                  {{ tpl.name }}
-                </option>
-              </select>
-            </div>
+            
             <!-- 性格滑条 -->
             <div class="personality-section">
               <h4>性格倾向</h4>
@@ -1470,6 +1755,7 @@ watch(activeTab, async (newTab) => {
                 <span class="axis-value">{{ characterEditForm.personality[key] }}</span>
               </div>
             </div>
+            
             <div class="modal-actions">
               <button class="action-btn primary" @click="saveCharacterEdit">保存</button>
               <button class="action-btn secondary" @click="showCharacterEditor = false">取消</button>
@@ -1483,11 +1769,11 @@ watch(activeTab, async (newTab) => {
             <h3>添加新班级</h3>
             <div class="form-row">
               <label>班级ID：</label>
-              <input type="text" v-model="newClassForm.id" class="input-field" placeholder="如：class_3_1" />
+              <input type="text" v-model="newClassForm.id" class="input-field" placeholder="如：3-A" />
             </div>
             <div class="form-row">
               <label>班级名称：</label>
-              <input type="text" v-model="newClassForm.name" class="input-field" placeholder="如：高三一班" />
+              <input type="text" v-model="newClassForm.name" class="input-field" placeholder="如：3年A班" />
             </div>
             <div class="modal-actions">
               <button class="action-btn primary" @click="addClass">创建</button>
@@ -1514,7 +1800,6 @@ watch(activeTab, async (newTab) => {
   --transition-normal: 0.3s ease;
 }
 
-/* 遮罩层 */
 .filter-panel-overlay {
   position: fixed;
   top: 0;
@@ -1531,7 +1816,6 @@ watch(activeTab, async (newTab) => {
   box-sizing: border-box;
 }
 
-/* 主面板 */
 .filter-panel {
   width: 100%;
   max-width: 1000px;
@@ -1545,7 +1829,6 @@ watch(activeTab, async (newTab) => {
   overflow: hidden;
 }
 
-/* 头部 */
 .panel-header {
   padding: 16px 20px;
   background: linear-gradient(135deg, #ffecb3 0%, #ffe082 100%);
@@ -1562,9 +1845,7 @@ watch(activeTab, async (newTab) => {
   gap: 10px;
 }
 
-.header-icon {
-  font-size: 1.5rem;
-}
+.header-icon { font-size: 1.5rem; }
 
 .panel-header h3 {
   margin: 0;
@@ -1615,9 +1896,7 @@ watch(activeTab, async (newTab) => {
   border-bottom: 3px solid transparent;
 }
 
-.tab-btn:hover {
-  background: #f0f0f0;
-}
+.tab-btn:hover { background: #f0f0f0; }
 
 .tab-btn.active {
   color: var(--primary-color);
@@ -1625,16 +1904,13 @@ watch(activeTab, async (newTab) => {
   background: white;
 }
 
-/* 内容区 */
 .panel-body {
   flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
 
-.tab-content {
-  padding: 20px;
-}
+.tab-content { padding: 20px; }
 
 /* 工具栏 */
 .toolbar {
@@ -1770,24 +2046,10 @@ watch(activeTab, async (newTab) => {
   gap: 8px;
 }
 
-.stat-icon {
-  font-size: 1.2rem;
-}
-
-.stat-label {
-  color: #666;
-  font-size: 0.9rem;
-}
-
-.stat-value {
-  font-weight: 600;
-  color: #333;
-  font-size: 1.1rem;
-}
-
-.stat-value.highlight {
-  color: var(--primary-color);
-}
+.stat-icon { font-size: 1.2rem; }
+.stat-label { color: #666; font-size: 0.9rem; }
+.stat-value { font-weight: 600; color: #333; font-size: 1.1rem; }
+.stat-value.highlight { color: var(--primary-color); }
 
 .stat-progress {
   flex: 1;
@@ -1806,9 +2068,7 @@ watch(activeTab, async (newTab) => {
 }
 
 /* 区块 */
-.section {
-  margin-bottom: 24px;
-}
+.section { margin-bottom: 24px; }
 
 .section-header {
   display: flex;
@@ -1819,9 +2079,7 @@ watch(activeTab, async (newTab) => {
   border-bottom: 2px solid #f0f0f0;
 }
 
-.section-icon {
-  font-size: 1.2rem;
-}
+.section-icon { font-size: 1.2rem; }
 
 .section h4 {
   margin: 0;
@@ -1891,14 +2149,8 @@ watch(activeTab, async (newTab) => {
   margin-bottom: 4px;
 }
 
-.teacher-name {
-  font-weight: 600;
-}
-
-.teacher-meta {
-  color: #888;
-  font-size: 0.9rem;
-}
+.teacher-name { font-weight: 600; }
+.teacher-meta { color: #888; font-size: 0.9rem; }
 
 .teacher-role {
   font-size: 0.8rem;
@@ -1908,10 +2160,7 @@ watch(activeTab, async (newTab) => {
   border-radius: 4px;
 }
 
-.teacher-class {
-  font-size: 0.8rem;
-  color: #888;
-}
+.teacher-class { font-size: 0.8rem; color: #888; }
 
 .delete-btn-small {
   position: absolute;
@@ -1975,7 +2224,6 @@ watch(activeTab, async (newTab) => {
   flex: 1;
 }
 
-/* 复选框 */
 .checkbox-wrapper {
   position: relative;
   display: inline-flex;
@@ -2027,11 +2275,7 @@ watch(activeTab, async (newTab) => {
   font-weight: bold;
 }
 
-.work-name {
-  font-weight: 600;
-  font-size: 1rem;
-  color: #333;
-}
+.work-name { font-weight: 600; font-size: 1rem; color: #333; }
 
 .count-badge {
   background: rgba(0, 0, 0, 0.08);
@@ -2054,12 +2298,8 @@ watch(activeTab, async (newTab) => {
   padding: 8px;
 }
 
-.expand-icon {
-  font-size: 0.8rem;
-  color: #888;
-}
+.expand-icon { font-size: 0.8rem; color: #888; }
 
-/* 学生网格 */
 .student-grid {
   padding: 16px;
   display: grid;
@@ -2105,11 +2345,7 @@ watch(activeTab, async (newTab) => {
   gap: 4px;
 }
 
-.student-name {
-  font-weight: 600;
-  color: #333;
-  font-size: 0.95rem;
-}
+.student-name { font-weight: 600; color: #333; font-size: 0.95rem; }
 
 .class-tag {
   font-size: 0.75rem;
@@ -2135,12 +2371,8 @@ watch(activeTab, async (newTab) => {
   border-radius: 8px;
 }
 
-.elective-tag {
-  font-size: 0.9rem;
-  margin-top: 4px;
-}
+.elective-tag { font-size: 0.9rem; margin-top: 4px; }
 
-/* 空状态 */
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -2149,17 +2381,8 @@ watch(activeTab, async (newTab) => {
   color: #888;
 }
 
-.empty-icon {
-  font-size: 3rem;
-  margin-bottom: 12px;
-  opacity: 0.5;
-}
-
-.empty-hint-text {
-  font-size: 0.85rem;
-  color: #aaa;
-  margin-top: 8px;
-}
+.empty-icon { font-size: 3rem; margin-bottom: 12px; opacity: 0.5; }
+.empty-hint-text { font-size: 0.85rem; color: #aaa; margin-top: 8px; }
 
 .clear-btn {
   margin-top: 16px;
@@ -2170,7 +2393,6 @@ watch(activeTab, async (newTab) => {
   cursor: pointer;
 }
 
-/* 加载状态 */
 .loading-state {
   display: flex;
   flex-direction: column;
@@ -2201,25 +2423,20 @@ watch(activeTab, async (newTab) => {
   flex-wrap: wrap;
 }
 
-.preset-selector,
-.class-selector {
+.preset-selector, .class-selector {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.preset-select,
-.class-select {
+.preset-select, .class-select {
   padding: 8px 12px;
   border: 2px solid #e0e0e0;
   border-radius: 8px;
   font-size: 1rem;
 }
 
-.preset-desc {
-  color: #888;
-  font-size: 0.85rem;
-}
+.preset-desc { color: #888; font-size: 0.85rem; }
 
 .composer-layout {
   display: grid;
@@ -2241,50 +2458,74 @@ watch(activeTab, async (newTab) => {
   font-size: 1rem;
 }
 
+.composer-section {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.composer-section:last-child { border-bottom: none; margin-bottom: 0; }
+
+.section-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #666;
+  margin-bottom: 8px;
+}
+
 .composer-list {
-  max-height: 400px;
+  max-height: 250px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
+
+.composer-list.compact { max-height: 120px; }
 
 .composer-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px;
+  padding: 8px 10px;
   background: #f9f9f9;
   border-radius: 8px;
   transition: all var(--transition-fast);
 }
 
-.composer-item.available {
-  cursor: pointer;
+.composer-item.head-teacher {
+  background: #fff3e0;
+  border: 1px solid #ffe0b2;
 }
 
-.composer-item.available:hover {
-  background: #e8f5e9;
-}
+.composer-item.teacher-item { background: #e3f2fd; }
+
+.composer-item.available { cursor: pointer; }
+
+.composer-item.available:hover { background: #e8f5e9; }
 
 .composer-item.is-assigned {
-  opacity: 0.6;
+  opacity: 0.7;
   background: #f5f5f5;
 }
 
-.composer-item.is-assigned:hover {
-  background: #fff3e0;
-}
+.composer-item.is-assigned:hover { background: #fff3e0; }
 
-.item-name {
+.composer-item.is-teacher { background: #e8eaf6; }
+
+.item-role-badge {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #e0e0e0;
+  color: #666;
   font-weight: 600;
-  flex: 1;
 }
 
-.item-meta {
-  color: #888;
-  font-size: 0.85rem;
-}
+.item-name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-meta { color: #888; font-size: 0.85rem; white-space: nowrap; }
+
+.pref-icon { font-size: 0.9rem; }
 
 .assigned-tag {
   font-size: 0.7rem;
@@ -2301,29 +2542,66 @@ watch(activeTab, async (newTab) => {
   color: #ff5252;
   cursor: pointer;
   font-size: 1.2rem;
+  padding: 0 4px;
 }
 
-.add-icon {
-  color: var(--success-color);
-  font-size: 1.2rem;
-  font-weight: bold;
+.item-actions {
+  display: flex;
+  gap: 4px;
 }
 
-.pool-search {
+.action-icon {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all var(--transition-fast);
+}
+
+.action-icon:hover { background: rgba(0,0,0,0.1); }
+.action-icon.add { color: var(--success-color); font-weight: bold; }
+
+.subject-input {
+  width: 60px;
+  padding: 4px 6px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.pool-toolbar {
+  display: flex;
+  gap: 8px;
   margin-bottom: 12px;
 }
 
 .pool-search-input {
-  width: 100%;
+  flex: 1;
   padding: 8px 12px;
   border: 1px solid #ddd;
   border-radius: 8px;
 }
 
-.empty-hint {
+.role-filter-select {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.empty-hint, .empty-slot {
   color: #888;
   text-align: center;
-  padding: 20px;
+  padding: 16px;
+  font-size: 0.9rem;
+}
+
+.empty-slot {
+  background: #f9f9f9;
+  border-radius: 8px;
+  border: 1px dashed #ddd;
 }
 
 .composer-actions {
@@ -2332,16 +2610,20 @@ watch(activeTab, async (newTab) => {
   gap: 16px;
 }
 
-/* 全部角色管理 */
-.all-char-toolbar {
+/* 角色编辑器 */
+.char-editor-toolbar {
   display: flex;
-  gap: 16px;
+  gap: 12px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 
-.all-char-toolbar .search-input {
+.char-editor-toolbar .search-input {
   flex: 1;
+  min-width: 200px;
   padding: 10px 16px;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
 }
 
 .add-btn {
@@ -2352,19 +2634,29 @@ watch(activeTab, async (newTab) => {
   border-radius: 8px;
   cursor: pointer;
   font-size: 1rem;
+  white-space: nowrap;
 }
 
-.all-char-stats {
+.char-editor-stats {
   display: flex;
   gap: 24px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
   color: #666;
   font-size: 0.9rem;
 }
 
-.all-char-list {
+.char-editor-hint {
+  background: #e3f2fd;
+  padding: 10px 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-size: 0.9rem;
+  color: #1565c0;
+}
+
+.char-editor-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 12px;
 }
 
@@ -2388,16 +2680,11 @@ watch(activeTab, async (newTab) => {
   align-items: center;
   gap: 8px;
   margin-bottom: 6px;
+  flex-wrap: wrap;
 }
 
-.char-name {
-  font-weight: 600;
-  font-size: 1rem;
-}
-
-.char-gender {
-  color: #888;
-}
+.char-name { font-weight: 600; font-size: 1rem; }
+.char-gender { color: #888; }
 
 .char-role {
   font-size: 0.75rem;
@@ -2415,13 +2702,24 @@ watch(activeTab, async (newTab) => {
   color: #e65100;
 }
 
+.head-teacher-badge {
+  font-size: 0.7rem;
+  background: #ffc107;
+  color: #333;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
 .char-meta {
   display: flex;
   gap: 12px;
   font-size: 0.85rem;
   color: #888;
   margin-bottom: 6px;
+  flex-wrap: wrap;
 }
+
+.char-subject { color: #1976d2; }
 
 .char-tags {
   display: flex;
@@ -2509,9 +2807,7 @@ watch(activeTab, async (newTab) => {
   font-size: 0.9rem;
 }
 
-.text-btn:hover {
-  background: rgba(25, 118, 210, 0.1);
-}
+.text-btn:hover { background: rgba(25, 118, 210, 0.1); }
 
 .icon-btn {
   font-size: 0.85rem;
@@ -2566,9 +2862,7 @@ watch(activeTab, async (newTab) => {
   box-shadow: 0 10px 40px rgba(0,0,0,0.3);
 }
 
-.modal.large-modal {
-  width: 500px;
-}
+.modal.large-modal { width: 500px; }
 
 .modal h3 {
   margin: 0 0 20px 0;
@@ -2576,9 +2870,7 @@ watch(activeTab, async (newTab) => {
   font-family: 'Ma Shan Zheng', cursive;
 }
 
-.form-row {
-  margin-bottom: 16px;
-}
+.form-row { margin-bottom: 16px; }
 
 .form-row label {
   display: block;
@@ -2626,9 +2918,7 @@ watch(activeTab, async (newTab) => {
   margin-bottom: 0;
 }
 
-.axis-row input[type="range"] {
-  flex: 1;
-}
+.axis-row input[type="range"] { flex: 1; }
 
 .axis-value {
   width: 30px;
@@ -2644,7 +2934,7 @@ watch(activeTab, async (newTab) => {
   margin-top: 24px;
 }
 
-/* 自定义滚动条 */
+/* 滚动条 */
 .panel-body::-webkit-scrollbar,
 .composer-list::-webkit-scrollbar,
 .modal::-webkit-scrollbar {
@@ -2670,7 +2960,7 @@ watch(activeTab, async (newTab) => {
   background: #aaa;
 }
 
-/* 响应式适配 */
+/* 响应式 */
 @media (max-width: 768px) {
   .filter-panel {
     height: 100vh;
@@ -2678,40 +2968,16 @@ watch(activeTab, async (newTab) => {
     border-radius: 0;
   }
   
-  .tab-btn {
-    font-size: 0.9rem;
-    padding: 10px 8px;
-  }
+  .tab-btn { font-size: 0.9rem; padding: 10px 8px; }
   
-  .toolbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
+  .toolbar { flex-direction: column; align-items: stretch; }
+  .search-wrapper { max-width: none; }
   
-  .search-wrapper {
-    max-width: none;
-  }
+  .composer-layout { grid-template-columns: 1fr; }
+  .student-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
   
-  .composer-layout {
-    grid-template-columns: 1fr;
-  }
-  
-  .student-grid {
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  }
-  
-  .panel-footer {
-    padding: 12px 16px;
-  }
-  
-  .left-actions {
-    width: 100%;
-    margin-bottom: 8px;
-  }
-  
-  .right-actions {
-    width: 100%;
-    justify-content: space-between;
-  }
+  .panel-footer { padding: 12px 16px; }
+  .left-actions { width: 100%; margin-bottom: 8px; }
+  .right-actions { width: 100%; justify-content: space-between; }
 }
 </style>

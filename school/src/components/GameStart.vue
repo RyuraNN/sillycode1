@@ -645,7 +645,7 @@ const confirmSignature = async () => {
         <div class="header-actions">
           <button class="action-btn small" @click="showCourseEditor = true">编辑课程表</button>
           <button class="action-btn small" @click="showFilterPanel = true">筛选全校名册</button>
-          <button class="action-btn small" @click="showScheduleEditor = true">NPC日程编辑器</button>
+          <button class="action-btn small" @click="showScheduleEditor = true">角色日程编辑器</button>
           <button class="action-btn small" @click="showEventEditor = true">事件编辑器</button>
         </div>
         <img src="https://files.catbox.moe/efg1xe.png" alt="School Logo" class="school-logo" />

@@ -555,6 +555,12 @@ export interface GameState {
     from: string
     reason: string
   } | null
+  clubInvitation: {
+    clubId: string
+    clubName: string
+    targetName: string
+    remainingTurns: number
+  } | null
   currentRunId: string
   currentFloor: number
   mapSelectionMode: boolean

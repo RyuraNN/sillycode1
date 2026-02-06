@@ -54,11 +54,12 @@ export const TIME_PERIODS = {
  * 默认模板 - 包含不同类型学生的基础日程
  */
 export const DEFAULT_TEMPLATES = {
-  // 普通学生：标准的上课-社团-回家流程
+  // ============ 普通学生：标准的上课-社团-回家流程 ============
   student_normal: {
     id: 'student_normal',
     name: '普通学生',
     slots: [
+      // 工作日日程
       { period: 'early_morning', weekdays: ['weekday'], locations: [
         { id: 'home', weight: 70 }, 
         { id: 'th_main_gate', weight: 20 },
@@ -75,171 +76,897 @@ export const DEFAULT_TEMPLATES = {
         { id: '{classroom}', weight: 30 },
         { id: 'school_store', weight: 10 },
         { id: 'th_courtyard', weight: 10 },
-        { id: 'th_teaching_area', weight: 10 } // 随机漫游
+        { id: 'th_teaching_area', weight: 10 }
       ]},
       { period: 'afternoon_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
       { period: 'club_time', weekdays: ['weekday'], locations: [
         { id: '{club}', weight: 60 },
-        { id: 'th_arts_area', weight: 10 }, // 闲逛看看社团
+        { id: 'th_arts_area', weight: 10 },
         { id: 'city_library', weight: 10 },
         { id: 'home', weight: 20 }
       ]},
+      // 周末日程
+      { period: 'early_morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 100 }
+      ]},
+      { period: 'morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 70 },
+        { id: 'convenience_store', weight: 30 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 40 },
+        { id: 'shopping_street', weight: 30 },
+        { id: 'central_park', weight: 20 },
+        { id: 'city_library', weight: 10 }
+      ]},
+      { period: 'lunch', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 40 },
+        { id: 'shopping_street', weight: 30 },
+        { id: 'cafe_maisy', weight: 20 },
+        { id: 'convenience_store', weight: 10 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekend'], locations: [
+        { id: 'shopping_street', weight: 30 },
+        { id: 'game_center', weight: 20 },
+        { id: 'central_park', weight: 20 },
+        { id: 'home', weight: 30 }
+      ]},
+      { period: 'club_time', weekdays: ['weekend'], locations: [
+        { id: 'shopping_street', weight: 40 },
+        { id: 'home', weight: 30 },
+        { id: 'karaoke_box', weight: 15 },
+        { id: 'department_store', weight: 15 }
+      ]},
+      // 通用时段
       { period: 'evening', weekdays: ['all'], locations: [
-        { id: 'shopping_street', weight: 40 }, // 区域漫游
+        { id: 'shopping_street', weight: 40 },
         { id: 'central_park', weight: 10 },
         { id: 'home', weight: 50 }
       ]},
-      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
+      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
     ]
   },
 
-  // 体育生：热衷于运动和训练
+  // ============ 体育生：热衷于运动和训练 ============
   student_athletic: {
     id: 'student_athletic',
     name: '体育特长生',
     slots: [
+      // 工作日日程
       { period: 'early_morning', weekdays: ['weekday'], locations: [
-        { id: 'th_sports_area', weight: 70 }, // 晨练
+        { id: 'track_and_field', weight: 50 },
+        { id: 'main_gymnasium', weight: 20 },
         { id: 'home', weight: 30 }
       ]},
-      { period: 'morning', weekdays: ['weekday'], locations: [{ id: '{classroom}', weight: 70 }, { id: 'cafeteria', weight: 30 }] },
+      { period: 'morning', weekdays: ['weekday'], locations: [
+        { id: '{classroom}', weight: 70 }, 
+        { id: 'cafeteria', weight: 30 }
+      ]},
       { period: 'morning_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
       { period: 'lunch', weekdays: ['weekday'], locations: [
         { id: 'cafeteria', weight: 60 }, 
-        { id: 'school_store', weight: 30 },
-        { id: 'th_sports_area', weight: 10 }
+        { id: 'school_store', weight: 25 },
+        { id: 'th_sports_area', weight: 15 }
       ]},
       { period: 'afternoon_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
       { period: 'club_time', weekdays: ['weekday'], locations: [
-        { id: '{sport_spot}', weight: 60 },
-        { id: '{club}', weight: 40 }
+        { id: '{sport_spot}', weight: 50 },
+        { id: '{club}', weight: 40 },
+        { id: 'sub_gymnasium', weight: 10 }
       ]},
+      // 周末日程 - 也在训练
+      { period: 'early_morning', weekdays: ['weekend'], locations: [
+        { id: 'track_and_field', weight: 40 },
+        { id: 'home', weight: 60 }
+      ]},
+      { period: 'morning', weekdays: ['weekend'], locations: [
+        { id: 'track_and_field', weight: 30 },
+        { id: 'main_gymnasium', weight: 30 },
+        { id: 'home', weight: 40 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekend'], locations: [
+        { id: '{sport_spot}', weight: 50 },
+        { id: 'swimming_pool_building', weight: 20 },
+        { id: 'home', weight: 30 }
+      ]},
+      { period: 'lunch', weekdays: ['weekend'], locations: [
+        { id: 'cafeteria', weight: 30 },
+        { id: 'convenience_store', weight: 40 },
+        { id: 'home', weight: 30 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekend'], locations: [
+        { id: '{sport_spot}', weight: 40 },
+        { id: 'shopping_street', weight: 20 },
+        { id: 'seaside_promenade', weight: 20 },
+        { id: 'home', weight: 20 }
+      ]},
+      { period: 'club_time', weekdays: ['weekend'], locations: [
+        { id: 'riverbank', weight: 30 },
+        { id: 'shopping_street', weight: 30 },
+        { id: 'home', weight: 40 }
+      ]},
+      // 通用时段
       { period: 'evening', weekdays: ['all'], locations: [
         { id: 'home', weight: 50 }, 
-        { id: 'convenience_store', weight: 30 }, 
-        { id: 'riverbank', weight: 20 }
+        { id: 'convenience_store', weight: 25 }, 
+        { id: 'riverbank', weight: 25 }
       ]},
-      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
+      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
     ]
   },
 
-  // 优等生：喜爱学习和安静
+  // ============ 优等生：喜爱学习和安静 ============
   student_honor: {
     id: 'student_honor',
     name: '优等生',
     slots: [
-      { period: 'early_morning', weekdays: ['weekday'], locations: [{ id: 'home', weight: 90 }, { id: '{classroom}', weight: 10 }] },
-      { period: 'morning', weekdays: ['weekday'], locations: [{ id: '{classroom}', weight: 80 }, { id: 'library', weight: 20 }] },
+      // 工作日日程
+      { period: 'early_morning', weekdays: ['weekday'], locations: [
+        { id: 'home', weight: 85 }, 
+        { id: '{classroom}', weight: 15 }
+      ]},
+      { period: 'morning', weekdays: ['weekday'], locations: [
+        { id: '{classroom}', weight: 80 }, 
+        { id: 'library', weight: 20 }
+      ]},
       { period: 'morning_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
-      { period: 'lunch', weekdays: ['weekday'], locations: [{ id: '{classroom}', weight: 60 }, { id: 'library', weight: 30 }, { id: 'th_courtyard', weight: 10 }] },
+      { period: 'lunch', weekdays: ['weekday'], locations: [
+        { id: '{classroom}', weight: 50 }, 
+        { id: 'library', weight: 30 }, 
+        { id: 'th_courtyard', weight: 10 },
+        { id: 'cafeteria', weight: 10 }
+      ]},
       { period: 'afternoon_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
       { period: 'club_time', weekdays: ['weekday'], locations: [
-        { id: 'library', weight: 40 },
+        { id: 'library', weight: 35 },
         { id: 'city_library', weight: 20 },
         { id: '{club}', weight: 30 },
-        { id: 'student_council_room', weight: 10 }
+        { id: 'mb_student_council_room', weight: 15 }
       ]},
-      { period: 'evening', weekdays: ['all'], locations: [{ id: 'home', weight: 80 }, { id: 'bookstore', weight: 20 }] },
-      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
+      // 周末日程 - 在图书馆学习
+      { period: 'early_morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 100 }
+      ]},
+      { period: 'morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 60 },
+        { id: 'city_library', weight: 40 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekend'], locations: [
+        { id: 'city_library', weight: 50 },
+        { id: 'home', weight: 30 },
+        { id: 'bookstore', weight: 20 }
+      ]},
+      { period: 'lunch', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 40 },
+        { id: 'cafe_maisy', weight: 30 },
+        { id: 'city_library', weight: 30 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekend'], locations: [
+        { id: 'city_library', weight: 40 },
+        { id: 'bookstore', weight: 20 },
+        { id: 'home', weight: 40 }
+      ]},
+      { period: 'club_time', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 50 },
+        { id: 'cram_school', weight: 30 },
+        { id: 'bookstore', weight: 20 }
+      ]},
+      // 通用时段
+      { period: 'evening', weekdays: ['all'], locations: [
+        { id: 'home', weight: 80 }, 
+        { id: 'bookstore', weight: 20 }
+      ]},
+      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
     ]
   },
 
-  // 社团狂热者：几乎住在社团活动室
+  // ============ 社团狂热者：几乎住在社团活动室 ============
   student_club_addict: {
     id: 'student_club_addict',
     name: '社团狂热者',
     slots: [
-      { period: 'early_morning', weekdays: ['weekday'], locations: [{ id: '{club}', weight: 50 }, { id: 'home', weight: 50 }] },
-      { period: 'morning', weekdays: ['weekday'], locations: [{ id: '{club}', weight: 60 }, { id: '{classroom}', weight: 40 }] },
+      // 工作日日程
+      { period: 'early_morning', weekdays: ['weekday'], locations: [
+        { id: '{club}', weight: 50 }, 
+        { id: 'home', weight: 50 }
+      ]},
+      { period: 'morning', weekdays: ['weekday'], locations: [
+        { id: '{club}', weight: 60 }, 
+        { id: '{classroom}', weight: 40 }
+      ]},
       { period: 'morning_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
-      { period: 'lunch', weekdays: ['weekday'], locations: [{ id: '{club}', weight: 70 }, { id: 'cafeteria', weight: 30 }] },
+      { period: 'lunch', weekdays: ['weekday'], locations: [
+        { id: '{club}', weight: 70 }, 
+        { id: 'cafeteria', weight: 30 }
+      ]},
       { period: 'afternoon_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
       { period: 'club_time', weekdays: ['weekday'], locations: [{ id: '{club}', weight: 100 }] },
-      { period: 'evening', weekdays: ['all'], locations: [{ id: 'home', weight: 60 }, { id: 'shopping_street', weight: 40 }] },
-      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
+      // 周末日程 - 依然去社团
+      { period: 'early_morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 100 }
+      ]},
+      { period: 'morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 50 },
+        { id: '{club}', weight: 50 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekend'], locations: [
+        { id: '{club}', weight: 60 },
+        { id: 'home', weight: 40 }
+      ]},
+      { period: 'lunch', weekdays: ['weekend'], locations: [
+        { id: '{club}', weight: 40 },
+        { id: 'convenience_store', weight: 30 },
+        { id: 'home', weight: 30 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekend'], locations: [
+        { id: '{club}', weight: 60 },
+        { id: 'home', weight: 40 }
+      ]},
+      { period: 'club_time', weekdays: ['weekend'], locations: [
+        { id: '{club}', weight: 50 },
+        { id: 'shopping_street', weight: 30 },
+        { id: 'home', weight: 20 }
+      ]},
+      // 通用时段
+      { period: 'evening', weekdays: ['all'], locations: [
+        { id: 'home', weight: 60 }, 
+        { id: 'shopping_street', weight: 40 }
+      ]},
+      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
     ]
   },
 
-  // 偶像科学生：特殊的课程和演艺活动
+  // ============ 偶像科学生：特殊的课程和演艺活动 ============
   student_idol: {
     id: 'student_idol',
     name: '偶像科学生',
     slots: [
-      { period: 'early_morning', weekdays: ['weekday'], locations: [{ id: 'track_and_field', weight: 40 }, { id: 'sub_gymnasium', weight: 40 }, { id: 'home', weight: 20 }] },
+      // 工作日日程
+      { period: 'early_morning', weekdays: ['weekday'], locations: [
+        { id: 'track_and_field', weight: 30 }, 
+        { id: 'sub_gymnasium', weight: 40 }, 
+        { id: 'home', weight: 30 }
+      ]},
       { period: 'morning', weekdays: ['weekday'], locations: [{ id: '{classroom}', weight: 100 }] },
       { period: 'morning_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
-      { period: 'lunch', weekdays: ['weekday'], locations: [{ id: 'cafeteria', weight: 30 }, { id: 'mb_rooftop', weight: 30 }, { id: 'idol_activity_room', weight: 40 }] },
+      { period: 'lunch', weekdays: ['weekday'], locations: [
+        { id: 'cafeteria', weight: 25 }, 
+        { id: 'mb_rooftop', weight: 30 }, 
+        { id: 'idol_activity_room', weight: 35 },
+        { id: 'th_courtyard', weight: 10 }
+      ]},
       { period: 'afternoon_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
       { period: 'club_time', weekdays: ['weekday'], locations: [
-        { id: 'idol_activity_room', weight: 50 },
-        { id: 'sub_gymnasium', weight: 30 },
+        { id: 'idol_activity_room', weight: 40 },
+        { id: 'sub_gymnasium', weight: 25 },
+        { id: 'music_room_1', weight: 15 },
         { id: 'live_house_starry', weight: 20 }
       ]},
-      { period: 'evening', weekdays: ['all'], locations: [{ id: 'live_house_starry', weight: 40 }, { id: 'home', weight: 60 }] },
-      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
+      // 周末日程 - 练习和演出
+      { period: 'early_morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 60 },
+        { id: 'sub_gymnasium', weight: 40 }
+      ]},
+      { period: 'morning', weekdays: ['weekend'], locations: [
+        { id: 'sub_gymnasium', weight: 40 },
+        { id: 'home', weight: 40 },
+        { id: 'idol_activity_room', weight: 20 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekend'], locations: [
+        { id: 'idol_activity_room', weight: 40 },
+        { id: 'sub_gymnasium', weight: 30 },
+        { id: 'home', weight: 30 }
+      ]},
+      { period: 'lunch', weekdays: ['weekend'], locations: [
+        { id: 'cafe_maisy', weight: 30 },
+        { id: 'convenience_store', weight: 30 },
+        { id: 'home', weight: 40 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekend'], locations: [
+        { id: 'idol_activity_room', weight: 30 },
+        { id: 'live_house_starry', weight: 30 },
+        { id: 'shopping_street', weight: 20 },
+        { id: 'home', weight: 20 }
+      ]},
+      { period: 'club_time', weekdays: ['weekend'], locations: [
+        { id: 'live_house_starry', weight: 40 },
+        { id: 'department_store', weight: 20 },
+        { id: 'shopping_street', weight: 20 },
+        { id: 'home', weight: 20 }
+      ]},
+      // 通用时段
+      { period: 'evening', weekdays: ['all'], locations: [
+        { id: 'live_house_starry', weight: 40 }, 
+        { id: 'home', weight: 60 }
+      ]},
+      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
     ]
   },
 
-  // 不良/逃课生：经常旷课，出没于娱乐场所
+  // ============ 不良/逃课生：经常旷课，出没于娱乐场所 ============
   student_delinquent: {
     id: 'student_delinquent',
     name: '不良学生',
     slots: [
+      // 工作日日程 - 经常逃课
       { period: 'early_morning', weekdays: ['weekday'], locations: [{ id: 'home', weight: 100 }] },
-      { period: 'morning', weekdays: ['weekday'], locations: [{ id: 'th_main_gate', weight: 40 }, { id: 'convenience_store', weight: 60 }] },
+      { period: 'morning', weekdays: ['weekday'], locations: [
+        { id: 'th_main_gate', weight: 30 }, 
+        { id: 'convenience_store', weight: 50 },
+        { id: 'home', weight: 20 }
+      ]},
       { period: 'morning_class', weekdays: ['weekday'], locations: [
-        { id: '{class_location}', weight: 30 }, 
+        { id: '{class_location}', weight: 25 }, 
         { id: 'mb_rooftop', weight: 30 }, 
-        { id: 'game_center', weight: 20 },
+        { id: 'game_center', weight: 25 },
         { id: 'abandoned_factory', weight: 20 }
       ]},
       { period: 'lunch', weekdays: ['weekday'], locations: [
-        { id: 'school_store', weight: 40 }, 
-        { id: 'mb_rooftop', weight: 40 },
-        { id: 'th_support_area', weight: 20 } // 在生活区游荡
+        { id: 'school_store', weight: 30 }, 
+        { id: 'mb_rooftop', weight: 35 },
+        { id: 'convenience_store', weight: 25 },
+        { id: 'th_support_area', weight: 10 }
       ]},
       { period: 'afternoon_class', weekdays: ['weekday'], locations: [
-        { id: '{class_location}', weight: 30 }, 
-        { id: 'game_center', weight: 40 },
-        { id: 'karaoke_box', weight: 20 },
-        { id: 'tianhua_seaside_park', weight: 10 } // 去海边玩
+        { id: '{class_location}', weight: 20 }, 
+        { id: 'game_center', weight: 35 },
+        { id: 'karaoke_box', weight: 25 },
+        { id: 'tianhua_seaside_park', weight: 20 }
       ]},
       { period: 'club_time', weekdays: ['weekday'], locations: [
         { id: 'game_center', weight: 30 },
-        { id: 'karaoke_box', weight: 30 },
+        { id: 'karaoke_box', weight: 25 },
         { id: 'convenience_store', weight: 20 },
+        { id: 'shopping_street', weight: 25 }
+      ]},
+      // 周末日程 - 在外面混
+      { period: 'early_morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 100 }
+      ]},
+      { period: 'morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 80 },
+        { id: 'convenience_store', weight: 20 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 40 },
+        { id: 'game_center', weight: 30 },
+        { id: 'convenience_store', weight: 30 }
+      ]},
+      { period: 'lunch', weekdays: ['weekend'], locations: [
+        { id: 'convenience_store', weight: 40 },
+        { id: 'shopping_street', weight: 30 },
+        { id: 'home', weight: 30 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekend'], locations: [
+        { id: 'game_center', weight: 35 },
+        { id: 'karaoke_box', weight: 25 },
+        { id: 'abandoned_factory', weight: 20 },
         { id: 'shopping_street', weight: 20 }
       ]},
-      { period: 'evening', weekdays: ['all'], locations: [
-        { id: 'shopping_street', weight: 60 }, 
-        { id: 'abandoned_factory', weight: 20 }, 
-        { id: 'home', weight: 20 }
+      { period: 'club_time', weekdays: ['weekend'], locations: [
+        { id: 'game_center', weight: 30 },
+        { id: 'karaoke_box', weight: 30 },
+        { id: 'shopping_street', weight: 25 },
+        { id: 'riverbank', weight: 15 }
       ]},
-      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 70 }, { id: 'shopping_street', weight: 30 }] }
+      // 通用时段
+      { period: 'evening', weekdays: ['all'], locations: [
+        { id: 'shopping_street', weight: 50 }, 
+        { id: 'abandoned_factory', weight: 20 }, 
+        { id: 'home', weight: 30 }
+      ]},
+      { period: 'night', weekdays: ['all'], locations: [
+        { id: 'home', weight: 70 }, 
+        { id: 'shopping_street', weight: 20 },
+        { id: 'abandoned_factory', weight: 10 }
+      ]},
+      { period: 'late_night', weekdays: ['all'], locations: [
+        { id: 'home', weight: 85 },
+        { id: 'convenience_store', weight: 15 }
+      ]}
     ]
   },
   
-  // 学生会成员
+  // ============ 学生会成员：勤勉且责任感强 ============
   student_council: {
     id: 'student_council',
     name: '学生会成员',
     slots: [
-      { period: 'early_morning', weekdays: ['weekday'], locations: [{ id: 'mb_student_council_room', weight: 60 }, { id: '{classroom}', weight: 40 }] },
-      { period: 'morning', weekdays: ['weekday'], locations: [{ id: 'mb_student_council_room', weight: 50 }, { id: '{classroom}', weight: 50 }] },
-      { period: 'morning_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 90 }, { id: 'mb_student_council_room', weight: 10 }] },
-      { period: 'lunch', weekdays: ['weekday'], locations: [{ id: 'mb_student_council_room', weight: 70 }, { id: 'cafeteria', weight: 30 }] },
-      { period: 'afternoon_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 90 }, { id: 'mb_student_council_room', weight: 10 }] },
-      { period: 'club_time', weekdays: ['weekday'], locations: [{ id: 'mb_student_council_room', weight: 90 }, { id: 'home', weight: 10 }] },
-      { period: 'evening', weekdays: ['all'], locations: [{ id: 'home', weight: 70 }, { id: 'shopping_street', weight: 30 }] },
-      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
+      // 工作日日程
+      { period: 'early_morning', weekdays: ['weekday'], locations: [
+        { id: 'mb_student_council_room', weight: 60 }, 
+        { id: '{classroom}', weight: 40 }
+      ]},
+      { period: 'morning', weekdays: ['weekday'], locations: [
+        { id: 'mb_student_council_room', weight: 50 }, 
+        { id: '{classroom}', weight: 50 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekday'], locations: [
+        { id: '{class_location}', weight: 85 }, 
+        { id: 'mb_student_council_room', weight: 15 }
+      ]},
+      { period: 'lunch', weekdays: ['weekday'], locations: [
+        { id: 'mb_student_council_room', weight: 60 }, 
+        { id: 'cafeteria', weight: 30 },
+        { id: 'th_courtyard', weight: 10 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekday'], locations: [
+        { id: '{class_location}', weight: 85 }, 
+        { id: 'mb_student_council_room', weight: 15 }
+      ]},
+      { period: 'club_time', weekdays: ['weekday'], locations: [
+        { id: 'mb_student_council_room', weight: 85 }, 
+        { id: 'ab_staff_room', weight: 10 },
+        { id: 'home', weight: 5 }
+      ]},
+      // 周末日程 - 可能有活动准备
+      { period: 'early_morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 100 }
+      ]},
+      { period: 'morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 70 },
+        { id: 'mb_student_council_room', weight: 30 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekend'], locations: [
+        { id: 'mb_student_council_room', weight: 40 },
+        { id: 'city_library', weight: 30 },
+        { id: 'home', weight: 30 }
+      ]},
+      { period: 'lunch', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 40 },
+        { id: 'cafe_maisy', weight: 30 },
+        { id: 'convenience_store', weight: 30 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekend'], locations: [
+        { id: 'mb_student_council_room', weight: 30 },
+        { id: 'shopping_street', weight: 30 },
+        { id: 'home', weight: 40 }
+      ]},
+      { period: 'club_time', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 50 },
+        { id: 'shopping_street', weight: 30 },
+        { id: 'cafe_maisy', weight: 20 }
+      ]},
+      // 通用时段
+      { period: 'evening', weekdays: ['all'], locations: [
+        { id: 'home', weight: 70 }, 
+        { id: 'shopping_street', weight: 30 }
+      ]},
+      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
     ]
   },
 
-  // 教师
+  // ============ 音乐系学生：沉浸于音乐创作和练习 ============
+  student_musician: {
+    id: 'student_musician',
+    name: '音乐系学生',
+    slots: [
+      // 工作日日程
+      { period: 'early_morning', weekdays: ['weekday'], locations: [
+        { id: 'music_room_1', weight: 30 },
+        { id: 'music_building', weight: 20 },
+        { id: 'home', weight: 50 }
+      ]},
+      { period: 'morning', weekdays: ['weekday'], locations: [
+        { id: '{classroom}', weight: 70 },
+        { id: 'music_room_1', weight: 30 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
+      { period: 'lunch', weekdays: ['weekday'], locations: [
+        { id: 'music_room_1', weight: 35 },
+        { id: 'light_music_club_room', weight: 25 },
+        { id: 'cafeteria', weight: 25 },
+        { id: 'mb_rooftop', weight: 15 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
+      { period: 'club_time', weekdays: ['weekday'], locations: [
+        { id: '{club}', weight: 40 },
+        { id: 'music_room_1', weight: 25 },
+        { id: 'recording_studio', weight: 20 },
+        { id: 'live_house_starry', weight: 15 }
+      ]},
+      // 周末日程 - 练习和演出
+      { period: 'early_morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 100 }
+      ]},
+      { period: 'morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 60 },
+        { id: 'music_building', weight: 40 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekend'], locations: [
+        { id: 'music_room_1', weight: 40 },
+        { id: 'recording_studio', weight: 20 },
+        { id: 'home', weight: 40 }
+      ]},
+      { period: 'lunch', weekdays: ['weekend'], locations: [
+        { id: 'cafe_maisy', weight: 35 },
+        { id: 'convenience_store', weight: 30 },
+        { id: 'home', weight: 35 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekend'], locations: [
+        { id: 'live_house_starry', weight: 30 },
+        { id: 'music_building', weight: 25 },
+        { id: 'shopping_street', weight: 25 },
+        { id: 'home', weight: 20 }
+      ]},
+      { period: 'club_time', weekdays: ['weekend'], locations: [
+        { id: 'live_house_starry', weight: 40 },
+        { id: 'shopping_street', weight: 25 },
+        { id: 'home', weight: 35 }
+      ]},
+      // 通用时段
+      { period: 'evening', weekdays: ['all'], locations: [
+        { id: 'live_house_starry', weight: 35 },
+        { id: 'home', weight: 50 },
+        { id: 'karaoke_box', weight: 15 }
+      ]},
+      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
+    ]
+  },
+
+  // ============ 艺术创作型学生：沉浸于创作 ============
+  student_artist: {
+    id: 'student_artist',
+    name: '艺术创作型',
+    slots: [
+      // 工作日日程
+      { period: 'early_morning', weekdays: ['weekday'], locations: [
+        { id: 'home', weight: 80 },
+        { id: 'th_sakura_avenue', weight: 20 }
+      ]},
+      { period: 'morning', weekdays: ['weekday'], locations: [
+        { id: '{classroom}', weight: 80 },
+        { id: 'art_room_1', weight: 20 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
+      { period: 'lunch', weekdays: ['weekday'], locations: [
+        { id: 'art_room_1', weight: 30 },
+        { id: 'arts_building', weight: 25 },
+        { id: 'th_courtyard', weight: 20 },
+        { id: 'cafeteria', weight: 25 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
+      { period: 'club_time', weekdays: ['weekday'], locations: [
+        { id: '{club}', weight: 35 },
+        { id: 'art_room_1', weight: 25 },
+        { id: 'photo_darkroom', weight: 15 },
+        { id: 'arts_building', weight: 25 }
+      ]},
+      // 周末日程 - 寻找灵感
+      { period: 'early_morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 100 }
+      ]},
+      { period: 'morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 70 },
+        { id: 'central_park', weight: 30 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekend'], locations: [
+        { id: 'central_park', weight: 25 },
+        { id: 'seaside_promenade', weight: 25 },
+        { id: 'home', weight: 30 },
+        { id: 'bookstore', weight: 20 }
+      ]},
+      { period: 'lunch', weekdays: ['weekend'], locations: [
+        { id: 'cafe_maisy', weight: 40 },
+        { id: 'home', weight: 40 },
+        { id: 'convenience_store', weight: 20 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekend'], locations: [
+        { id: 'department_store', weight: 25 },
+        { id: 'shopping_street', weight: 25 },
+        { id: 'seaside_promenade', weight: 20 },
+        { id: 'home', weight: 30 }
+      ]},
+      { period: 'club_time', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 40 },
+        { id: 'cafe_maisy', weight: 30 },
+        { id: 'riverbank', weight: 30 }
+      ]},
+      // 通用时段
+      { period: 'evening', weekdays: ['all'], locations: [
+        { id: 'home', weight: 70 },
+        { id: 'riverbank', weight: 15 },
+        { id: 'shrine', weight: 15 }
+      ]},
+      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
+    ]
+  },
+
+  // ============ 社交达人：喜欢热闹和朋友 ============
+  student_social: {
+    id: 'student_social',
+    name: '社交达人',
+    slots: [
+      // 工作日日程
+      { period: 'early_morning', weekdays: ['weekday'], locations: [
+        { id: 'home', weight: 60 },
+        { id: 'th_main_gate', weight: 25 },
+        { id: 'th_sakura_avenue', weight: 15 }
+      ]},
+      { period: 'morning', weekdays: ['weekday'], locations: [
+        { id: '{classroom}', weight: 60 },
+        { id: 'th_courtyard', weight: 30 },
+        { id: 'cafeteria', weight: 10 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
+      { period: 'lunch', weekdays: ['weekday'], locations: [
+        { id: 'cafeteria', weight: 40 },
+        { id: 'th_courtyard', weight: 30 },
+        { id: 'school_store', weight: 20 },
+        { id: '{classroom}', weight: 10 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
+      { period: 'club_time', weekdays: ['weekday'], locations: [
+        { id: '{club}', weight: 40 },
+        { id: 'shopping_street', weight: 30 },
+        { id: 'cafe_maisy', weight: 20 },
+        { id: 'karaoke_box', weight: 10 }
+      ]},
+      // 周末日程 - 和朋友出去玩
+      { period: 'early_morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 100 }
+      ]},
+      { period: 'morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 50 },
+        { id: 'shopping_street', weight: 30 },
+        { id: 'tianhua_station', weight: 20 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekend'], locations: [
+        { id: 'shopping_street', weight: 30 },
+        { id: 'department_store', weight: 30 },
+        { id: 'central_park', weight: 20 },
+        { id: 'home', weight: 20 }
+      ]},
+      { period: 'lunch', weekdays: ['weekend'], locations: [
+        { id: 'cafe_maisy', weight: 35 },
+        { id: 'shopping_street', weight: 35 },
+        { id: 'department_store', weight: 30 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekend'], locations: [
+        { id: 'karaoke_box', weight: 25 },
+        { id: 'game_center', weight: 25 },
+        { id: 'amusement_park', weight: 20 },
+        { id: 'shopping_street', weight: 30 }
+      ]},
+      { period: 'club_time', weekdays: ['weekend'], locations: [
+        { id: 'shopping_street', weight: 30 },
+        { id: 'karaoke_box', weight: 25 },
+        { id: 'seaside_promenade', weight: 20 },
+        { id: 'home', weight: 25 }
+      ]},
+      // 通用时段
+      { period: 'evening', weekdays: ['all'], locations: [
+        { id: 'shopping_street', weight: 40 },
+        { id: 'home', weight: 40 },
+        { id: 'karaoke_box', weight: 20 }
+      ]},
+      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
+    ]
+  },
+
+  // ============ 独行侠/内向型：喜欢独处和安静 ============
+  student_loner: {
+    id: 'student_loner',
+    name: '独行侠',
+    slots: [
+      // 工作日日程
+      { period: 'early_morning', weekdays: ['weekday'], locations: [
+        { id: 'home', weight: 90 },
+        { id: '{classroom}', weight: 10 }
+      ]},
+      { period: 'morning', weekdays: ['weekday'], locations: [
+        { id: '{classroom}', weight: 85 },
+        { id: 'library', weight: 15 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
+      { period: 'lunch', weekdays: ['weekday'], locations: [
+        { id: 'library', weight: 30 },
+        { id: 'mb_rooftop', weight: 25 },
+        { id: '{classroom}', weight: 30 },
+        { id: 'lib_reading_hall', weight: 15 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
+      { period: 'club_time', weekdays: ['weekday'], locations: [
+        { id: '{club}', weight: 30 },
+        { id: 'library', weight: 30 },
+        { id: 'city_library', weight: 20 },
+        { id: 'home', weight: 20 }
+      ]},
+      // 周末日程 - 独自行动
+      { period: 'early_morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 100 }
+      ]},
+      { period: 'morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 80 },
+        { id: 'convenience_store', weight: 20 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 50 },
+        { id: 'city_library', weight: 30 },
+        { id: 'bookstore', weight: 20 }
+      ]},
+      { period: 'lunch', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 60 },
+        { id: 'convenience_store', weight: 25 },
+        { id: 'cafe_maisy', weight: 15 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekend'], locations: [
+        { id: 'city_library', weight: 30 },
+        { id: 'bookstore', weight: 20 },
+        { id: 'riverbank', weight: 20 },
+        { id: 'home', weight: 30 }
+      ]},
+      { period: 'club_time', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 50 },
+        { id: 'riverbank', weight: 25 },
+        { id: 'shrine', weight: 15 },
+        { id: 'yamate_park', weight: 10 }
+      ]},
+      // 通用时段
+      { period: 'evening', weekdays: ['all'], locations: [
+        { id: 'home', weight: 80 },
+        { id: 'convenience_store', weight: 10 },
+        { id: 'riverbank', weight: 10 }
+      ]},
+      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
+    ]
+  },
+
+  // ============ 打工学生：放学后在工作 ============
+  student_parttime: {
+    id: 'student_parttime',
+    name: '打工学生',
+    slots: [
+      // 工作日日程
+      { period: 'early_morning', weekdays: ['weekday'], locations: [
+        { id: 'home', weight: 100 }
+      ]},
+      { period: 'morning', weekdays: ['weekday'], locations: [
+        { id: '{classroom}', weight: 90 },
+        { id: 'cafeteria', weight: 10 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
+      { period: 'lunch', weekdays: ['weekday'], locations: [
+        { id: 'cafeteria', weight: 50 },
+        { id: 'school_store', weight: 30 },
+        { id: '{classroom}', weight: 20 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
+      { period: 'club_time', weekdays: ['weekday'], locations: [
+        { id: '{workplace}', weight: 70 },
+        { id: 'convenience_store', weight: 15 },
+        { id: 'cafe_maisy', weight: 15 }
+      ]},
+      // 周末日程 - 全天打工
+      { period: 'early_morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 100 }
+      ]},
+      { period: 'morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 50 },
+        { id: '{workplace}', weight: 50 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekend'], locations: [
+        { id: '{workplace}', weight: 70 },
+        { id: 'home', weight: 30 }
+      ]},
+      { period: 'lunch', weekdays: ['weekend'], locations: [
+        { id: '{workplace}', weight: 50 },
+        { id: 'convenience_store', weight: 30 },
+        { id: 'home', weight: 20 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekend'], locations: [
+        { id: '{workplace}', weight: 70 },
+        { id: 'shopping_street', weight: 20 },
+        { id: 'home', weight: 10 }
+      ]},
+      { period: 'club_time', weekdays: ['weekend'], locations: [
+        { id: '{workplace}', weight: 50 },
+        { id: 'shopping_street', weight: 30 },
+        { id: 'home', weight: 20 }
+      ]},
+      // 通用时段
+      { period: 'evening', weekdays: ['all'], locations: [
+        { id: '{workplace}', weight: 40 },
+        { id: 'home', weight: 50 },
+        { id: 'convenience_store', weight: 10 }
+      ]},
+      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
+    ]
+  },
+
+  // ============ 恋爱脑/约会型：经常在约会地点出没 ============
+  student_romantic: {
+    id: 'student_romantic',
+    name: '恋爱脑',
+    slots: [
+      // 工作日日程
+      { period: 'early_morning', weekdays: ['weekday'], locations: [
+        { id: 'home', weight: 70 },
+        { id: 'th_sakura_avenue', weight: 30 }
+      ]},
+      { period: 'morning', weekdays: ['weekday'], locations: [
+        { id: '{classroom}', weight: 70 },
+        { id: 'th_courtyard', weight: 20 },
+        { id: 'th_sakura_avenue', weight: 10 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
+      { period: 'lunch', weekdays: ['weekday'], locations: [
+        { id: 'th_courtyard', weight: 30 },
+        { id: 'cafeteria', weight: 25 },
+        { id: 'mb_rooftop', weight: 25 },
+        { id: 'th_sakura_avenue', weight: 20 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekday'], locations: [{ id: '{class_location}', weight: 100 }] },
+      { period: 'club_time', weekdays: ['weekday'], locations: [
+        { id: '{date_spot}', weight: 40 },
+        { id: '{club}', weight: 30 },
+        { id: 'cafe_maisy', weight: 20 },
+        { id: 'central_park', weight: 10 }
+      ]},
+      // 周末日程 - 约会日
+      { period: 'early_morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 100 }
+      ]},
+      { period: 'morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 50 },
+        { id: 'tianhua_station', weight: 30 },
+        { id: 'central_park', weight: 20 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekend'], locations: [
+        { id: 'central_park', weight: 25 },
+        { id: 'department_store', weight: 25 },
+        { id: 'aquarium', weight: 20 },
+        { id: 'home', weight: 30 }
+      ]},
+      { period: 'lunch', weekdays: ['weekend'], locations: [
+        { id: 'cafe_maisy', weight: 40 },
+        { id: 'shopping_street', weight: 30 },
+        { id: 'department_store', weight: 30 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekend'], locations: [
+        { id: 'amusement_park', weight: 30 },
+        { id: 'aquarium', weight: 25 },
+        { id: 'seaside_promenade', weight: 25 },
+        { id: 'shopping_street', weight: 20 }
+      ]},
+      { period: 'club_time', weekdays: ['weekend'], locations: [
+        { id: 'seaside_promenade', weight: 30 },
+        { id: 'riverbank', weight: 25 },
+        { id: 'shrine', weight: 20 },
+        { id: 'home', weight: 25 }
+      ]},
+      // 通用时段
+      { period: 'evening', weekdays: ['all'], locations: [
+        { id: 'riverbank', weight: 30 },
+        { id: 'seaside_promenade', weight: 20 },
+        { id: 'home', weight: 50 }
+      ]},
+      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
+    ]
+  },
+
+  // ============ 教师：标准教师日程 ============
   teacher: {
     id: 'teacher',
     name: '教师',
     slots: [
+      // 工作日日程
+      { period: 'early_morning', weekdays: ['weekday'], locations: [
+        { id: 'home', weight: 70 },
+        { id: 'ab_staff_room', weight: 30 }
+      ]},
       { period: 'morning', weekdays: ['weekday'], locations: [
         { id: 'ab_staff_room', weight: 80 },
         { id: '{teaching_room}', weight: 20 }
@@ -257,12 +984,41 @@ export const DEFAULT_TEMPLATES = {
         { id: 'ab_staff_room', weight: 30 }
       ]},
       { period: 'club_time', weekdays: ['weekday'], locations: [
-        { id: 'ab_staff_room', weight: 60 },
-        { id: '{club_advisor}', weight: 30 },
-        { id: 'city_library', weight: 10 }
+        { id: 'ab_staff_room', weight: 50 },
+        { id: '{club_advisor}', weight: 35 },
+        { id: 'city_library', weight: 15 }
       ]},
+      // 周末日程
+      { period: 'early_morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 100 }
+      ]},
+      { period: 'morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 80 },
+        { id: 'ab_staff_room', weight: 20 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 60 },
+        { id: 'ab_staff_room', weight: 20 },
+        { id: 'shopping_street', weight: 20 }
+      ]},
+      { period: 'lunch', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 70 },
+        { id: 'cafe_maisy', weight: 30 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 50 },
+        { id: 'shopping_street', weight: 30 },
+        { id: 'city_library', weight: 20 }
+      ]},
+      { period: 'club_time', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 60 },
+        { id: 'shopping_street', weight: 25 },
+        { id: '{club_advisor}', weight: 15 }
+      ]},
+      // 通用时段
       { period: 'evening', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
-      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
+      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
     ]
   }
 }
@@ -427,15 +1183,17 @@ const loadedTemplates = new Map()
 
 /**
  * 根据 NPC 信息自动推断日程模板 ID
+ * 扩展版 - 支持更多角色类型匹配
  */
 function inferTemplateId(npc, gameStore) {
   const origin = npc.origin || ''
+  const name = npc.name || ''
   
-  // 1. 班级判断：偶像科
+  // ============ 1. 班级判断：偶像科 ============
   if (npc.classId && npc.classId.endsWith('E')) return 'student_idol'
-  if (origin.includes('偶像大师') || origin.includes('Love Live')) return 'student_idol'
+  if (origin.includes('偶像大师') || origin.includes('Love Live') || origin.includes('Wake Up, Girls')) return 'student_idol'
   
-  // 2. 社团判断
+  // ============ 2. 社团判断 ============
   let clubId = null
   if (gameStore?.allClubs) {
     for (const [id, data] of Object.entries(gameStore.allClubs)) {
@@ -450,11 +1208,90 @@ function inferTemplateId(npc, gameStore) {
   if (/basketball|tennis|swimming|sports/.test(clubId)) return 'student_athletic'
   if (/light_music|drama|band|sos|service/.test(clubId)) return 'student_club_addict'
 
-  // 3. 来源判断
-  if (/灌篮高手|黑子的篮球|网球王子|Free|排球少年/.test(origin)) return 'student_athletic'
-  if (/轻音少女|吹响吧|孤独摇滚/.test(origin)) return 'student_club_addict'
-  if (/东京复仇者|热血高校|GTO|不良/.test(origin)) return 'student_delinquent'
-  if (/冰菓|实教|辉夜|学霸/.test(origin)) return 'student_honor'
+  // ============ 3. 角色名匹配（针对知名角色） ============
+  
+  // 音乐系学生
+  const musicianNames = [
+    '后藤一里', '伊地知虹夏', '喜多郁代', '山田凉', // 孤独摇滚
+    '高松灯', '千早爱音', '要乐奈', '椎名立希', '长崎素世', // MyGo
+    '平泽唯', '秋山澪', '田井中律', '琴吹紬', '中野梓', // 轻音少女
+    '黄前久美子', '加藤叶月', '川岛绿辉', '高坂丽奈', '田中明日香', // 吹响吧
+    '有马公生', '宫园薰' // 四月是你的谎言
+  ]
+  if (musicianNames.includes(name)) return 'student_musician'
+  
+  // 艺术创作型
+  const artistNames = [
+    '椎名真白', '青山七海', '上井草美咲', // 樱花庄
+    '五条新菜', '喜多川海梦', // 更衣人偶
+    '北白川玉子', // 玉子市场
+    '宫园薰', '有马公生' // 四月是你的谎言（也是艺术家）
+  ]
+  if (artistNames.includes(name)) return 'student_artist'
+  
+  // 社交达人
+  const socialNames = [
+    '藤原千花', '由比滨结衣', '一色彩羽', // 辉夜/俺ガイル
+    '凉宫春日', // 凉宫春日
+    '高坂穗乃果', '南小鸟', // Love Live
+    '千反田爱瑠', // 冰菓
+    '逢坂大河', '櫛枝实乃梨', // 龙与虎
+    '藤林杏', '古河渚' // CLANNAD
+  ]
+  if (socialNames.includes(name)) return 'student_social'
+  
+  // 独行侠/内向型
+  const lonerNames = [
+    '比企谷八幡', '雪之下雪乃', // 俺ガイル
+    '折木奉太郎', // 冰菓
+    '绫小路清隆', '堀北铃音', // 实教
+    '后藤一里', // 孤独摇滚（也是独行侠）
+    '长门有希', // 凉宫春日
+    '见崎鸣', // Another
+    '坂本', // 坂本
+    '市川京太郎', // 我心里危险的东西
+    '双叶理央', // 青春猪头
+    '古泉一树', '阿虚' // 凉宫（被动型）
+  ]
+  if (lonerNames.includes(name)) return 'student_loner'
+  
+  // 恋爱脑/约会型
+  const romanticNames = [
+    '伊藤诚', '西园寺世界', '桂言叶', // 日在校园
+    '安艺伦也', '加藤惠', '霞之丘诗羽', '泽村·斯宾塞·英梨梨', // 路人女主
+    '高须龙儿', '逢坂大河', // 龙与虎
+    '小糸侑', '七海灯子', // 终将成为你
+    '立花泷', '宫水三叶', // 你的名字
+    '安昙小太郎', '水野茜', // 月色真美
+    '岡崎朋也', '古河渚' // CLANNAD
+  ]
+  if (romanticNames.includes(name)) return 'student_romantic'
+
+  // ============ 4. 来源（动画）匹配 ============
+  
+  // 体育特长生
+  if (/灌篮高手|黑子的篮球|网球王子|Free|排球少年|SLAM DUNK/.test(origin)) return 'student_athletic'
+  
+  // 音乐系
+  if (/轻音少女|吹响吧|孤独摇滚|MyGo|BanG Dream|四月是你的谎言/.test(origin)) return 'student_musician'
+  
+  // 社团狂热者
+  if (/凉宫春日|冰菓|俺ガイル|青春恋爱物语/.test(origin)) return 'student_club_addict'
+  
+  // 不良学生
+  if (/东京复仇者|热血高校|GTO|不良|日在校园/.test(origin)) return 'student_delinquent'
+  
+  // 优等生
+  if (/实教|辉夜|坂本/.test(origin)) return 'student_honor'
+  
+  // 艺术创作型
+  if (/樱花庄|更衣人偶|玉子市场/.test(origin)) return 'student_artist'
+  
+  // 恋爱脑
+  if (/月色真美|政宗君的复仇|路人女主|龙与虎/.test(origin)) return 'student_romantic'
+  
+  // 偶像
+  if (/少女☆歌剧|偶像|アイドル/.test(origin)) return 'student_idol'
   
   return null
 }
@@ -605,7 +1442,7 @@ export function resolveLocationPlaceholder(locationId, npcData, gameStore) {
       
     case 'workplace':
       if (npcData.workplace) return npcData.workplace
-      const workplaces = getLocationsByCategory('workplace')
+      const workplaces = ['convenience_store', 'cafe_maisy', 'game_center', 'karaoke_box', 'bookstore', 'live_house_starry']
       return pickRandom(workplaces) || 'convenience_store'
       
     case 'home':
@@ -614,10 +1451,10 @@ export function resolveLocationPlaceholder(locationId, npcData, gameStore) {
       return 'home'
 
     case 'social_spot':
-      return pickRandom(getLocationsByCategory('social')) || 'shopping_street'
+      return pickRandom(['shopping_street', 'central_park', 'cafe_maisy', 'karaoke_box']) || 'shopping_street'
       
     case 'date_spot':
-      return pickRandom(getLocationsByCategory('date_spot')) || 'central_park'
+      return pickRandom(['central_park', 'seaside_promenade', 'amusement_park', 'aquarium', 'riverbank', 'shrine']) || 'central_park'
       
     case 'sport_spot':
       const sports = ['track_and_field', 'main_gymnasium', 'sub_gymnasium', 'tennis_court', 'swimming_pool_building']
@@ -892,7 +1729,7 @@ export function calculateNpcLocation(npc, gameTime, gameStore, forceRecalculate 
 
   // ============ 正常流程 ============
 
-  if (gameTime.hour >= 14 && gameTime.hour < 16 && !isWeekend(getWeekdayEnglish(gameTime.weekday))) {
+  if (gameTime.hour >= 14 && gameTime.hour < 16 && !isWeekend(getWeekdayEnglish(gameStore.gameTime.weekday))) {
     const electiveLocation = calculateNpcElectiveLocation(npc, gameTime, gameStore)
     if (electiveLocation) {
       const seed = generateLocationSeed(npc.id, gameTime)

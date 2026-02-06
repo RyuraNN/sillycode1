@@ -389,6 +389,12 @@
 
 <!-- 强制玩家退出社团 -->
 <leave_club id="club_id" />
+
+<!-- 接受社团邀请（当玩家邀请NPC时） -->
+<club_invite_accept id="club_id" name="角色名" />
+
+<!-- 拒绝社团邀请（当玩家邀请NPC时） -->
+<club_invite_reject id="club_id" name="角色名" reason="拒绝理由" />
 ```
 
 ### 7. 物品操作

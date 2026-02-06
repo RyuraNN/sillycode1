@@ -3,7 +3,7 @@
  */
 
 import type { ClubData, Group, NpcStats } from '../gameStoreTypes'
-import { fetchClassDataFromWorldbook, fetchClubDataFromWorldbook, addPlayerToClubInWorldbook, removePlayerFromClubInWorldbook, syncClubWorldbookState, setPlayerClass, setVariableParsingWorldbookStatus } from '../../utils/worldbookParser'
+import { fetchClassDataFromWorldbook, fetchClubDataFromWorldbook, addPlayerToClubInWorldbook, removePlayerFromClubInWorldbook, syncClubWorldbookState, setPlayerClass, setVariableParsingWorldbookStatus, addNpcToClubInWorldbook, createClubInWorldbook } from '../../utils/worldbookParser'
 import { DEFAULT_FORUM_POSTS, saveForumToWorldbook, switchForumSlot } from '../../utils/forumWorldbook'
 import { saveSocialData, switchSaveSlot, saveSocialRelationshipOverview, restoreWorldbookFromStore } from '../../utils/socialWorldbook'
 import { switchPartTimeSaveSlot, restorePartTimeWorldbookFromStore } from '../../utils/partTimeWorldbook'
@@ -257,6 +257,130 @@ export const classClubActions = {
    */
   confirmClubRejection(this: any) {
     this.clubRejection = null
+  },
+
+  /**
+   * 确认邀请通知（邀请被接受或拒绝后清除）
+   */
+  confirmClubInvitation(this: any) {
+    this.clubInvitation = null
+  },
+
+  /**
+   * 玩家邀请 NPC 加入社团
+   */
+  async inviteNpcToClub(this: any, clubId: string, npcName: string) {
+    const club = this.allClubs[clubId]
+    if (!club) {
+      return { success: false, message: '社团不存在' }
+    }
+
+    // 检查玩家是否是该社团成员
+    if (!this.player.joinedClubs.includes(clubId)) {
+      return { success: false, message: '你不是该社团成员，无法邀请他人' }
+    }
+
+    // 检查 NPC 是否已经是社团成员
+    if (club.members && club.members.includes(npcName)) {
+      return { success: false, message: `${npcName} 已经是社团成员` }
+    }
+
+    // 检查是否已有待处理的邀请
+    if (this.clubInvitation) {
+      return { success: false, message: '请等待当前邀请处理完成' }
+    }
+
+    this.clubInvitation = {
+      clubId: clubId,
+      clubName: club.name,
+      targetName: npcName,
+      remainingTurns: 3
+    }
+
+    this.addCommand(`[系统] ${this.player.name}邀请"${npcName}"加入"${club.name}"。`)
+
+    return { success: true, message: `已向 ${npcName} 发送邀请` }
+  },
+
+  /**
+   * 处理 NPC 接受社团邀请
+   */
+  async handleClubInviteAccepted(this: any, clubId: string, npcName: string) {
+    const club = this.allClubs[clubId]
+    if (!club) {
+      console.warn(`[GameStore] Club ${clubId} not found`)
+      return
+    }
+
+    // 更新社团成员列表
+    if (!club.members) club.members = []
+    if (!club.members.includes(npcName)) {
+      club.members.push(npcName)
+    }
+
+    // 更新世界书
+    await addNpcToClubInWorldbook(clubId, npcName, club, this.currentRunId)
+
+    // 清除邀请状态
+    if (this.clubInvitation && this.clubInvitation.clubId === clubId && this.clubInvitation.targetName === npcName) {
+      this.clubInvitation = null
+    }
+
+    this.addCommand(`[系统提示] ${npcName}接受了邀请，加入了${club.name}`)
+    console.log(`[GameStore] ${npcName} joined club ${club.name}`)
+  },
+
+  /**
+   * 处理 NPC 拒绝社团邀请
+   */
+  handleClubInviteRejected(this: any, clubId: string, npcName: string, reason: string) {
+    // 清除邀请状态
+    if (this.clubInvitation && this.clubInvitation.clubId === clubId && this.clubInvitation.targetName === npcName) {
+      this.clubInvitation = null
+    }
+
+    const club = this.allClubs[clubId]
+    this.addCommand(`[系统提示] ${npcName}拒绝了加入${club?.name || clubId}的邀请：${reason}`)
+    console.log(`[GameStore] ${npcName} rejected club invitation: ${reason}`)
+  },
+
+  /**
+   * 玩家创建新社团
+   */
+  async createClub(this: any, clubInfo: { name: string; description: string; coreSkill?: string; activityDay?: string; location?: string }) {
+    // 生成社团 ID
+    const clubId = `player_club_${Date.now().toString(36)}`
+
+    const fullClubInfo = {
+      id: clubId,
+      name: clubInfo.name,
+      description: clubInfo.description,
+      coreSkill: clubInfo.coreSkill || '',
+      activityDay: clubInfo.activityDay || '',
+      location: clubInfo.location || '',
+      president: this.player.name // 玩家是部长
+    }
+
+    // 创建世界书条目
+    const club = await createClubInWorldbook(fullClubInfo, this.currentRunId)
+
+    if (!club) {
+      return { success: false, message: '创建社团失败' }
+    }
+
+    // 添加到 allClubs
+    this.allClubs[clubId] = club
+
+    // 玩家加入社团
+    if (!this.player.joinedClubs.includes(clubId)) {
+      this.player.joinedClubs.push(clubId)
+    }
+
+    this.addCommand(`[系统提示] 你成功创建了社团"${clubInfo.name}"并成为部长`)
+
+    this.saveToStorage()
+
+    return { success: true, message: `社团"${clubInfo.name}"创建成功！`, clubId: clubId }
   },
 
   /**

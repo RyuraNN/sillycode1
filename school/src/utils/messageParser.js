@@ -621,6 +621,25 @@ export async function parseSocialTags(rawText) {
     }
   }
 
+  // 11.5 社团邀请处理
+  const clubInviteAcceptRegex = /<club_invite_accept\s+([^>]+?)\s*\/?>/g
+  let clubInviteAcceptMatch
+  while ((clubInviteAcceptMatch = clubInviteAcceptRegex.exec(text)) !== null) {
+    const attrs = parseAttributes(clubInviteAcceptMatch[1])
+    if (attrs.id && attrs.name) {
+      await gameStore.handleClubInviteAccepted(attrs.id, attrs.name)
+    }
+  }
+
+  const clubInviteRejectRegex = /<club_invite_reject\s+([^>]+?)\s*\/?>/g
+  let clubInviteRejectMatch
+  while ((clubInviteRejectMatch = clubInviteRejectRegex.exec(text)) !== null) {
+    const attrs = parseAttributes(clubInviteRejectMatch[1])
+    if (attrs.id && attrs.name) {
+      gameStore.handleClubInviteRejected(attrs.id, attrs.name, attrs.reason || '拒绝了邀请')
+    }
+  }
+
   // 12.5. 加入群聊 <join_group name="Group Name" members="A,B,C" [id="group_id"] />
   const joinGroupRegex = /<join_group\s+([^>]+?)\s*\/?>/g
   let joinGroupMatch

@@ -648,6 +648,20 @@ As the president or person in charge, please decide whether to approve or reject
 `
   }
 
+  // 构建社团邀请提示词
+  let clubInvitationPrompt = ''
+  if (gameState.clubInvitation) {
+    const { clubId, clubName, targetName, remainingTurns } = gameState.clubInvitation
+    clubInvitationPrompt = `
+[社团邀请]
+${player.name}邀请"${targetName}"加入"${clubName}"(社团ID: ${clubId})。
+该邀请将在 ${remainingTurns} 回合后过期。
+请扮演${targetName}，根据角色性格和与玩家的关系决定是否接受邀请。
+- 接受邀请: <club_invite_accept id="${clubId}" name="${targetName}" />
+- 拒绝邀请: <club_invite_reject id="${clubId}" name="${targetName}" reason="拒绝理由" />
+`
+  }
+
   // 构建论坛提示词
   const forumPrompt = buildForumPrompt(player)
 
@@ -739,7 +753,7 @@ Money: ${player.money}
 Inventory: ${inventoryStr}
 Stats: IQ=${player.attributes.iq}, EQ=${player.attributes.eq}, PHY=${player.attributes.physique}, FLEX=${player.attributes.flexibility}, CHARM=${player.attributes.charm}, MOOD=${player.attributes.mood}, HEALTH=${player.health}
 ${skillsStr}${knownNpcsStr}
-${npcRelationsStr}${weatherPrompt}${schedulePrompt}${specialDatePrompt}${clubApplicationPrompt}${socialPrompt}${forumPrompt}${eventPrompt}${relationshipPrompt}${partTimeJobPrompt}${newGameGuidePrompt}${electiveReminderPrompt}${pendingCommandsPrompt}
+${npcRelationsStr}${weatherPrompt}${schedulePrompt}${specialDatePrompt}${clubApplicationPrompt}${clubInvitationPrompt}${socialPrompt}${forumPrompt}${eventPrompt}${relationshipPrompt}${partTimeJobPrompt}${newGameGuidePrompt}${electiveReminderPrompt}${pendingCommandsPrompt}
 [Instructions]
 请根据玩家的行动推动剧情发展。
 - 剧情正文包裹在 <content> 标签中
@@ -774,6 +788,8 @@ ${npcRelationsStr}${weatherPrompt}${schedulePrompt}${specialDatePrompt}${clubApp
 [System Commands - 社团系统]
 - 拒绝申请: <reject_club id="club_id" from="拒绝人" reason="理由" />
 - 同意加入: <join_club id="club_id" />
+- 接受社团邀请: <club_invite_accept id="club_id" name="角色名" />
+- 拒绝社团邀请: <club_invite_reject id="club_id" name="角色名" reason="拒绝理由" />
 
 [System Commands - 论坛系统（天华通APP）]
 - 发帖: <forum_post board="版块" title="标题" from="作者" pinned="false">内容</forum_post>
