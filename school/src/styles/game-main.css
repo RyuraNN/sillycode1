@@ -1,0 +1,631 @@
+/**
+ * GameMain 公共样式
+ * 包含游戏主界面的通用样式定义
+ */
+
+/* ==================== 基础布局 ==================== */
+.game-main {
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  background: linear-gradient(135deg, #fdfbf3 0%, #f5f0e1 100%);
+  overflow: hidden;
+  position: relative;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  padding-left: env(safe-area-inset-left, 0);
+  padding-right: env(safe-area-inset-right, 0);
+}
+
+.game-main * {
+  box-sizing: border-box;
+}
+
+/* ==================== 侧边栏 ==================== */
+.sidebar {
+  width: 260px;
+  height: 100%;
+  background: linear-gradient(180deg, #fffdf5 0%, #fff9e6 100%);
+  border-right: 1px solid rgba(139, 69, 19, 0.15);
+  box-shadow: 3px 0 15px rgba(139, 69, 19, 0.08);
+  transition: transform 0.3s ease, margin-left 0.3s ease;
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+}
+
+.left-sidebar:not(.open) {
+  margin-left: -260px;
+}
+
+.left-sidebar.mobile {
+  position: absolute;
+  left: 0;
+  top: 0;
+  margin-left: 0;
+  transform: translateX(-100%);
+}
+
+.left-sidebar.mobile.open {
+  transform: translateX(0);
+}
+
+.sidebar-header {
+  padding: 18px 20px;
+  border-bottom: 1px solid rgba(139, 69, 19, 0.12);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: linear-gradient(180deg, rgba(218, 165, 32, 0.08) 0%, transparent 100%);
+}
+
+.sidebar-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: #5d4037;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.sidebar-content {
+  padding: 16px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.sidebar-content::-webkit-scrollbar {
+  width: 5px;
+}
+
+.sidebar-content::-webkit-scrollbar-track {
+  background: rgba(139, 69, 19, 0.05);
+}
+
+.sidebar-content::-webkit-scrollbar-thumb {
+  background: rgba(139, 69, 19, 0.2);
+  border-radius: 3px;
+}
+
+/* ==================== 主内容区 ==================== */
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  transition: margin-left 0.3s ease;
+  position: relative;
+  background: linear-gradient(180deg, rgba(255, 253, 245, 0.5) 0%, rgba(253, 251, 243, 1) 100%);
+}
+
+.top-bar {
+  height: 56px;
+  background: linear-gradient(180deg, rgba(255, 253, 245, 0.95) 0%, rgba(255, 249, 230, 0.95) 100%);
+  border-bottom: 1px solid rgba(139, 69, 19, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 2px 10px rgba(139, 69, 19, 0.05);
+}
+
+.title-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.page-title {
+  font-size: 1.3rem;
+  margin: 0;
+  color: #5d4037;
+  font-weight: 600;
+  letter-spacing: 2px;
+}
+
+/* ==================== 内容区域 ==================== */
+.content-area {
+  flex: 1;
+  padding: 24px;
+  overflow-y: auto;
+  padding-bottom: 90px;
+  background: transparent;
+  position: relative;
+}
+
+.content-area::-webkit-scrollbar {
+  width: 8px;
+}
+
+.content-area::-webkit-scrollbar-track {
+  background: rgba(139, 69, 19, 0.03);
+}
+
+.content-area::-webkit-scrollbar-thumb {
+  background: rgba(139, 69, 19, 0.15);
+  border-radius: 4px;
+}
+
+.content-area::-webkit-scrollbar-thumb:hover {
+  background: rgba(139, 69, 19, 0.25);
+}
+
+/* ==================== 日志项 ==================== */
+.log-item {
+  margin-bottom: 0;
+  padding: 28px 0;
+  position: relative;
+  display: flex;
+  width: 100%;
+  animation: fadeInUp 0.3s ease;
+}
+
+@keyframes fadeInUp {
+  from { 
+    opacity: 0; 
+    transform: translateY(10px); 
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0); 
+  }
+}
+
+.log-item::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 5%;
+  width: 90%;
+  height: 1px;
+  background: linear-gradient(to right, 
+    transparent, 
+    rgba(139, 69, 19, 0.12) 20%, 
+    rgba(139, 69, 19, 0.12) 80%, 
+    transparent);
+}
+
+.log-item:last-child::after {
+  display: none;
+}
+
+.log-item.player {
+  justify-content: flex-end;
+}
+
+.log-item.ai {
+  justify-content: flex-start;
+}
+
+.log-content {
+  max-width: 100%;
+  padding: 0 24px;
+  background-color: transparent;
+  white-space: pre-wrap;
+  line-height: 2;
+  color: #3e2723;
+  font-size: 1.05rem;
+  font-family: 'Georgia', 'Noto Serif SC', 'Times New Roman', serif;
+  letter-spacing: 0.03em;
+}
+
+.log-item.player .log-content {
+  color: #1565c0;
+  text-align: right;
+  font-weight: 500;
+  padding-left: 60px;
+  position: relative;
+}
+
+.log-item.player .log-content::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, #1565c0 0%, #42a5f5 100%);
+  border-radius: 2px;
+}
+
+/* ==================== 按钮样式 ==================== */
+.toggle-btn {
+  background: linear-gradient(135deg, rgba(139, 69, 19, 0.08) 0%, rgba(160, 82, 45, 0.12) 100%);
+  border: 1px solid rgba(139, 69, 19, 0.2);
+  padding: 6px 12px;
+  cursor: pointer;
+  border-radius: 6px;
+  color: #5d4037;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.toggle-btn:hover {
+  background: linear-gradient(135deg, rgba(218, 165, 32, 0.15) 0%, rgba(184, 134, 11, 0.2) 100%);
+  border-color: rgba(218, 165, 32, 0.4);
+}
+
+.action-btn {
+  padding: 8px 20px;
+  background: linear-gradient(135deg, rgba(139, 69, 19, 0.1) 0%, rgba(160, 82, 45, 0.15) 100%);
+  border: 1px solid rgba(139, 69, 19, 0.25);
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: #5d4037;
+  transition: all 0.3s ease;
+  font-weight: 500;
+}
+
+.action-btn:hover {
+  background: linear-gradient(135deg, rgba(218, 165, 32, 0.2) 0%, rgba(184, 134, 11, 0.25) 100%);
+  border-color: rgba(218, 165, 32, 0.5);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(139, 69, 19, 0.15);
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #8b4513;
+  opacity: 0.7;
+  transition: all 0.2s;
+}
+
+.close-btn:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+/* ==================== 输入栏 ==================== */
+.input-bar-container {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  padding: 14px 16px;
+  padding-bottom: calc(14px + env(safe-area-inset-bottom, 0));
+  background: linear-gradient(180deg, rgba(255, 253, 245, 0.92) 0%, rgba(255, 249, 230, 0.98) 100%);
+  border-top: 1px solid rgba(139, 69, 19, 0.12);
+  box-sizing: border-box;
+  z-index: 20;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 -4px 20px rgba(139, 69, 19, 0.05);
+  transition: bottom 0.15s ease-out;
+}
+
+.input-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 850px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.main-input {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  padding: 12px 20px;
+  border: 1px solid rgba(139, 69, 19, 0.2);
+  border-radius: 25px;
+  font-size: 1rem;
+  outline: none;
+  background: linear-gradient(180deg, #ffffff 0%, #fffdf8 100%);
+  color: #3e2723;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+  box-shadow: inset 0 1px 3px rgba(139, 69, 19, 0.05);
+  resize: none;
+  height: auto;
+  min-height: 44px;
+  max-height: 150px;
+  line-height: 1.5;
+  font-family: inherit;
+  overflow-y: auto;
+}
+
+.main-input:focus {
+  border-color: rgba(218, 165, 32, 0.6);
+  box-shadow: 
+    inset 0 1px 3px rgba(139, 69, 19, 0.05),
+    0 0 0 3px rgba(218, 165, 32, 0.1);
+}
+
+.send-btn {
+  padding: 10px 28px;
+  background: linear-gradient(135deg, #8b4513 0%, #a0522d 100%);
+  color: rgba(255, 248, 220, 0.95);
+  border: none;
+  border-radius: 25px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 600;
+  min-width: 90px;
+  letter-spacing: 1px;
+  transition: all 0.3s ease;
+  box-shadow: 0 3px 10px rgba(139, 69, 19, 0.25);
+  flex-shrink: 0;
+}
+
+.send-btn:hover {
+  background: linear-gradient(135deg, #a0522d 0%, #cd853f 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 5px 15px rgba(139, 69, 19, 0.35);
+}
+
+.send-btn.stop-btn {
+  background: linear-gradient(135deg, #c62828 0%, #e53935 100%);
+  box-shadow: 0 3px 10px rgba(198, 40, 40, 0.3);
+}
+
+.send-btn.stop-btn:hover {
+  background: linear-gradient(135deg, #b71c1c 0%, #c62828 100%);
+  box-shadow: 0 5px 15px rgba(198, 40, 40, 0.4);
+}
+
+.send-btn.disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ==================== 浮动按钮 ==================== */
+.floating-phone-btn {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 68px;
+  background: linear-gradient(135deg, #3e2723 0%, #5d4037 100%);
+  color: rgba(255, 248, 220, 0.9);
+  border: none;
+  border-top-left-radius: 12px;
+  border-bottom-left-radius: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  box-shadow: -3px 0 15px rgba(62, 39, 35, 0.3);
+  z-index: 100;
+  transition: all 0.3s ease;
+}
+
+.floating-phone-btn:hover {
+  width: 54px;
+  background: linear-gradient(135deg, #5d4037 0%, #8b4513 100%);
+  box-shadow: -5px 0 20px rgba(139, 69, 19, 0.4);
+}
+
+.floating-phone-btn::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 30px;
+  background: linear-gradient(180deg, rgba(218, 165, 32, 0.6) 0%, rgba(218, 165, 32, 0.2) 100%);
+  border-radius: 0 2px 2px 0;
+}
+
+/* ==================== 遮罩层 ==================== */
+.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, rgba(20, 15, 10, 0.6) 0%, rgba(40, 30, 20, 0.6) 100%);
+  z-index: 5;
+  backdrop-filter: blur(3px);
+}
+
+/* ==================== 加载指示器 ==================== */
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 3px solid rgba(139, 69, 19, 0.2);
+  border-radius: 50%;
+  border-top-color: #8b4513;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes flash {
+  0% { opacity: 0.4; }
+  50% { opacity: 1; }
+  100% { opacity: 0.4; }
+}
+
+.flashing-text {
+  animation: flash 1.5s infinite ease-in-out;
+}
+
+.img-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #8b4513;
+  border-bottom-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+/* ==================== 空状态提示 ==================== */
+.empty-state-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 80%;
+  text-align: center;
+  color: #8d6e63;
+  font-size: 1.1rem;
+  opacity: 0.8;
+  animation: fadeInUp 1s ease;
+  pointer-events: none;
+}
+
+.empty-state-hint p {
+  margin: 8px 0;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.5);
+}
+
+/* ==================== 夜间模式 ==================== */
+.game-main.dark-mode {
+  background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
+}
+
+.dark-mode .sidebar {
+  background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+  border-right-color: rgba(99, 102, 241, 0.2);
+  box-shadow: 3px 0 20px rgba(0, 0, 0, 0.3);
+}
+
+.dark-mode .sidebar-header {
+  border-bottom-color: rgba(99, 102, 241, 0.15);
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.1) 0%, transparent 100%);
+}
+
+.dark-mode .sidebar-header h3 {
+  color: #e0e7ff;
+}
+
+.dark-mode .main-content {
+  background: linear-gradient(180deg, rgba(15, 15, 26, 0.5) 0%, rgba(22, 33, 62, 1) 100%);
+}
+
+.dark-mode .top-bar {
+  background: linear-gradient(180deg, rgba(26, 26, 46, 0.95) 0%, rgba(22, 33, 62, 0.95) 100%);
+  border-bottom-color: rgba(99, 102, 241, 0.15);
+  box-shadow: 0 2px 15px rgba(0, 0, 0, 0.2);
+}
+
+.dark-mode .page-title {
+  color: #e0e7ff;
+}
+
+.dark-mode .toggle-btn {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
+  border-color: rgba(99, 102, 241, 0.25);
+  color: #a5b4fc;
+}
+
+.dark-mode .toggle-btn:hover {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%);
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.dark-mode .log-item::after {
+  background: linear-gradient(to right, 
+    transparent, 
+    rgba(99, 102, 241, 0.15) 20%, 
+    rgba(99, 102, 241, 0.15) 80%, 
+    transparent);
+}
+
+.dark-mode .log-content {
+  color: #e0e7ff;
+}
+
+.dark-mode .log-item.player .log-content {
+  color: #93c5fd;
+}
+
+.dark-mode .log-item.player .log-content::before {
+  background: linear-gradient(180deg, #6366f1 0%, #a78bfa 100%);
+}
+
+.dark-mode .input-bar-container {
+  background: linear-gradient(180deg, rgba(26, 26, 46, 0.92) 0%, rgba(22, 33, 62, 0.98) 100%);
+  border-top-color: rgba(99, 102, 241, 0.15);
+  box-shadow: 0 -4px 25px rgba(0, 0, 0, 0.2);
+}
+
+.dark-mode .main-input {
+  background: linear-gradient(180deg, rgba(30, 30, 50, 0.9) 0%, rgba(40, 40, 70, 0.9) 100%);
+  border-color: rgba(99, 102, 241, 0.3);
+  color: #e0e7ff;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.dark-mode .main-input::placeholder {
+  color: rgba(165, 180, 252, 0.5);
+}
+
+.dark-mode .main-input:focus {
+  border-color: rgba(99, 102, 241, 0.6);
+  box-shadow: 
+    inset 0 1px 4px rgba(0, 0, 0, 0.2),
+    0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.dark-mode .send-btn {
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  box-shadow: 0 3px 12px rgba(99, 102, 241, 0.35);
+}
+
+.dark-mode .send-btn:hover {
+  background: linear-gradient(135deg, #818cf8 0%, #a78bfa 100%);
+  box-shadow: 0 5px 18px rgba(99, 102, 241, 0.45);
+}
+
+.dark-mode .send-btn.stop-btn {
+  background: linear-gradient(135deg, #ef4444 0%, #f87171 100%);
+  box-shadow: 0 3px 12px rgba(239, 68, 68, 0.35);
+}
+
+.dark-mode .floating-phone-btn {
+  background: linear-gradient(135deg, #1a1a2e 0%, #2d2d4a 100%);
+  box-shadow: -3px 0 20px rgba(0, 0, 0, 0.4);
+}
+
+.dark-mode .floating-phone-btn:hover {
+  background: linear-gradient(135deg, #2d2d4a 0%, #4a4a6a 100%);
+  box-shadow: -5px 0 25px rgba(99, 102, 241, 0.3);
+}
+
+.dark-mode .floating-phone-btn::before {
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.6) 0%, rgba(139, 92, 246, 0.3) 100%);
+}
+
+.dark-mode .overlay {
+  background: linear-gradient(135deg, rgba(10, 10, 20, 0.7) 0%, rgba(20, 20, 40, 0.7) 100%);
+}
+
+.dark-mode .close-btn {
+  color: #a5b4fc;
+}
+
+.dark-mode .action-btn {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.15) 100%);
+  border-color: rgba(99, 102, 241, 0.3);
+  color: #e0e7ff;
+}
+
+.dark-mode .action-btn:hover {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.25) 0%, rgba(139, 92, 246, 0.25) 100%);
+  border-color: rgba(99, 102, 241, 0.5);
+  box-shadow: 0 3px 15px rgba(99, 102, 241, 0.2);
+}
+
+.dark-mode .empty-state-hint {
+  color: #a5b4fc;
+}
+
+.dark-mode .empty-state-hint p {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
