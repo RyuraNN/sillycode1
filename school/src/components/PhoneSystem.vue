@@ -93,7 +93,7 @@ const removeContentTag = (tag) => {
 }
 
 const WALLPAPER_STORAGE_KEY = 'school_phone_wallpaper'
-const DEFAULT_WALLPAPER = 'https://s41.ax1x.com/2026/01/30/pZfUo5t.jpg'
+const DEFAULT_WALLPAPER = 'https://files.catbox.moe/kxz1kx.jpg'
 
 const totalUnreadCount = computed(() => {
   let count = 0
@@ -875,7 +875,7 @@ const handleHomeClick = () => {
 .phone-screen {
   width: 100%;
   height: 100%;
-  background: url('https://s41.ax1x.com/2026/01/30/pZfUo5t.jpg') center/cover no-repeat;
+  background: url('https://files.catbox.moe/kxz1kx.jpg') center/cover no-repeat;
   position: relative;
   display: flex;
   flex-direction: column;

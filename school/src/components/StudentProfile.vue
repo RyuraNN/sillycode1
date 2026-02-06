@@ -69,7 +69,7 @@ const genderName = computed(() => props.formData.gender === 'male' ? '男' : '�
   <div class="profile-overlay">
     <div class="profile-paper slide-down">
       <div class="profile-header">
-        <img src="https://s41.ax1x.com/2026/01/30/pZfU7PP.png" alt="Logo" class="mini-logo" />
+        <img src="https://files.catbox.moe/efg1xe.png" alt="Logo" class="mini-logo" />
         <h2>天华学园新生档案</h2>
       </div>
 

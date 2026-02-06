@@ -141,7 +141,7 @@ const toggleFullscreen = () => {
   display: flex;
   justify-content: center;
   align-items: center;
-  background-image: url('https://s41.ax1x.com/2026/01/30/pZfUo5t.jpg'); 
+  background-image: url('https://files.catbox.moe/kxz1kx.jpg');
   background-size: cover;
   background-position: center;
   overflow: hidden;

@@ -113,7 +113,28 @@
 ```
 > 注：好感度更新请使用 `npc_relationship` 指令，此处的 `relationship` 字段已弃用。
 
-### 6. NPC 心情更新 (`npc_mood`)
+### 6. NPC 强制移动 (`npc_move`)
+
+用于强制 NPC 移动到指定地点并停留一段时间，此期间将忽略原有的日程安排。
+
+```json
+{
+  "npc_move": [
+    {
+      "name": "后藤一里",
+      "location": "live_house_starry",
+      "duration": 2 // 持续时间（小时）
+    }
+  ]
+}
+```
+
+**参数说明：**
+- `name`：NPC 姓名（必需）
+- `location`：目标地点 ID（必需）
+- `duration`：停留时长，单位为小时（必需）
+
+### 7. NPC 心情更新 (`npc_mood`)
 
 用于更新 NPC 的心情状态，这将影响他们的日常行迹和行为模式。
 
@@ -152,7 +173,7 @@
 - `reason`：心情变化原因（可选）
 - `duration`：持续时间，单位为回合/小时（可选，默认1）
 
-### 7. NPC 关系更新 (`npc_relationship`)
+### 8. NPC 关系更新 (`npc_relationship`)
 
 用于更新角色之间的人际关系。所有角色都使用**角色名**作为唯一标识符。
 

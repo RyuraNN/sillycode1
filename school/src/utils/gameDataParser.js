@@ -5,6 +5,7 @@
 
 import { useGameStore } from '../stores/gameStore'
 import { processNpcRelationshipUpdate } from './messageParser'
+import { calculateTotalHours } from './npcScheduleSystem'
 
 /**
  * 解析文本中的游戏数据，返回数据对象数组
@@ -83,6 +84,7 @@ export const analyzeChanges = (data) => {
   
   if (data.npc_relationship) changes.push('NPC关系发生了变化')
   if (data.npcs) changes.push('NPC状态发生了变化')
+  if (data.npc_move) changes.push('NPC位置被强制变更')
   
   return changes
 }
@@ -177,9 +179,38 @@ export const applyGameData = (data) => {
       processNpcRelationshipUpdate(data)
     }
 
+    // Process NPC move updates (forced location)
+    if (data.npc_move) {
+      processNpcMoveUpdate(data.npc_move, gameStore)
+    }
+
     // 检查事件触发
     gameStore.checkEventTriggers()
     gameStore.updateEvents()
   }
   return changes
+}
+
+/**
+ * 处理 NPC 强制移动指令
+ * @param {Array|Object} moveData 
+ * @param {Object} gameStore 
+ */
+function processNpcMoveUpdate(moveData, gameStore) {
+  const updates = Array.isArray(moveData) ? moveData : [moveData]
+  const currentTotalHours = calculateTotalHours(gameStore.gameTime)
+  
+  updates.forEach(update => {
+    const { name, location, duration } = update
+    if (!name || !location || !duration) return
+    
+    const npc = gameStore.npcs.find(n => n.name === name)
+    if (npc) {
+      npc.forcedLocation = {
+        locationId: location,
+        endTime: currentTotalHours + duration
+      }
+      console.log(`[GameData] NPC ${name} forced to move to ${location} for ${duration} hours`)
+    }
+  })
 }

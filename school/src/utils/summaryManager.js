@@ -95,6 +95,7 @@ export function removeThinking(content) {
     .replace(/<think>[\s\S]*?<\/think>/gi, '')
     .replace(/<thought>[\s\S]*?<\/thought>/gi, '')
     .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+    .replace(/<extrathink>[\s\S]*?<\/extrathink>/gi, '')
     .trim()
 }
 

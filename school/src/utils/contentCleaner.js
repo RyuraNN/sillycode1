@@ -36,6 +36,8 @@ export const cleanSystemTags = (text) => {
     /<image_think>[\s\S]*?<\/image_think>/gi,
     /<imgthink[\s\S]*?<\/imgthink>/g,
     /<imgthink\s*\/?>/g,
+    /<extrathink>[\s\S]*?<\/extrathink>/gi,
+    /<tucao>[\s\S]*?<\/tucao>/gi,
     /<social_msg[\s\S]*?<\/social_msg>/g,
     /<add_friend[\s\S]*?<\/add_friend>/g,
     /<social_status[\s\S]*?<\/social_status>/g,
@@ -60,6 +62,9 @@ export const cleanSystemTags = (text) => {
   knownSystemTags.forEach(regex => {
     cleaned = cleaned.replace(regex, '')
   })
+
+  // 1.5 处理 htmlcontent (保留内容)
+  cleaned = cleaned.replace(/<htmlcontent>([\s\S]*?)<\/htmlcontent>/gi, '$1')
 
   // 2. 移除通用未知标签 <tag>content</tag>，但保留白名单
   const tagRegex = new RegExp(`<(?!${keepPattern}\\b)([a-zA-Z0-9_]+)[^>]*>[\\s\\S]*?<\\/\\1>`, 'gi')

@@ -10,7 +10,7 @@ import { useGameStore } from '../stores/gameStore'
 // 外部依赖
 import { generateReply, generateStreaming, stopGeneration } from '../utils/stClient'
 import { requestImageGeneration } from '../utils/imageGenerator'
-import { parseSocialTags, extractSuggestedReplies } from '../utils/messageParser'
+import { parseSocialTags, extractSuggestedReplies, extractTucao } from '../utils/messageParser'
 import { deleteSocialMessage, deleteMomentFromWorldbook } from '../utils/socialWorldbook'
 import { optimizeWorldbook, setVariableParsingWorldbookStatus, fetchMapDataFromWorldbook } from '../utils/worldbookParser'
 import { callAssistantAI, callImageAnalysisAI } from '../utils/assistantAI'
@@ -79,6 +79,10 @@ const contentAreaRef = ref(null)
 const textareaRef = ref(null)
 const hasContentWarning = ref(false)
 const showWarningDetail = ref(false)
+
+// 吐槽小剧场
+const tucaoContent = ref('')
+const showTucaoPanel = ref(false)
 
 // 建议回复
 const suggestedReplies = ref([])
@@ -718,6 +722,15 @@ const sendMessage = async () => {
 
 const processAIResponse = async (response) => {
   const cleanResponse = removeThinking(response)
+
+  // 提取吐槽内容
+  const tucao = extractTucao(cleanResponse)
+  if (tucao) {
+    tucaoContent.value = tucao
+    // 有新吐槽时，如果有设置自动弹出或者只是显示小红点？
+    // 任务描述：放置在角落里...点击小按钮来将圆形按钮变成一个小矩形圆角面板
+    // 所以只需要设置内容，让按钮出现即可。
+  }
 
   if (imageGenerationCache.size > 0) {
     await Promise.allSettled(Array.from(imageGenerationCache.values()))
@@ -1483,6 +1496,32 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
     <!-- 右侧悬浮手机按钮 -->
     <button class="floating-phone-btn" @click="togglePhone" title="打开手机">📱</button>
 
+    <!-- 吐槽小剧场悬浮按钮 -->
+    <transition name="fade">
+      <div v-if="tucaoContent" class="tucao-container" :class="{ 'expanded': showTucaoPanel }">
+        <!-- 小圆圈按钮 -->
+        <button 
+          v-if="!showTucaoPanel" 
+          class="tucao-btn" 
+          @click="showTucaoPanel = true"
+          title="点击查看小剧场"
+        >
+          🎭
+        </button>
+        
+        <!-- 展开面板 -->
+        <div v-else class="tucao-panel" @click="showTucaoPanel = false">
+          <div class="tucao-header">
+            <span class="tucao-title">🎭 小剧场</span>
+            <button class="tucao-close" @click.stop="showTucaoPanel = false">×</button>
+          </div>
+          <div class="tucao-content">
+            {{ tucaoContent }}
+          </div>
+        </div>
+      </div>
+    </transition>
+
     <!-- 弹幕层 -->
     <DanmakuLayer />
 
@@ -1968,5 +2007,106 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* 吐槽小剧场样式 */
+.tucao-container {
+  position: fixed;
+  bottom: 160px; /* 在手机按钮上方 */
+  right: 20px;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.tucao-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 99%, #fecfef 100%);
+  border: 2px solid #fff;
+  box-shadow: 0 4px 10px rgba(255, 154, 158, 0.4);
+  font-size: 1.5rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  animation: float 3s ease-in-out infinite;
+}
+
+.tucao-btn:hover {
+  transform: scale(1.1) rotate(10deg);
+}
+
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+  100% { transform: translateY(0px); }
+}
+
+.tucao-panel {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  padding: 12px;
+  width: 260px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 154, 158, 0.3);
+  transform-origin: bottom right;
+  animation: pop-in 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  cursor: pointer;
+}
+
+@keyframes pop-in {
+  0% { opacity: 0; transform: scale(0.8); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.tucao-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed rgba(0, 0, 0, 0.1);
+}
+
+.tucao-title {
+  font-weight: bold;
+  color: #ff6b6b;
+  font-size: 0.9rem;
+}
+
+.tucao-close {
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  color: #999;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.tucao-content {
+  color: #555;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.dark-mode .tucao-panel {
+  background: rgba(30, 30, 46, 0.95);
+  border-color: rgba(255, 154, 158, 0.2);
+}
+
+.dark-mode .tucao-content {
+  color: #e0e0e0;
+}
+
+.dark-mode .tucao-title {
+  color: #ff9a9e;
 }
 </style>

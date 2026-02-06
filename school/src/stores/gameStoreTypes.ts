@@ -432,6 +432,10 @@ export interface NpcStats {
   mood?: NpcMoodType
   moodReason?: string
   moodDuration?: number
+  forcedLocation?: {
+    locationId: string
+    endTime: number // 绝对时间戳 (total hours)
+  }
 }
 
 /** 社团数据 */

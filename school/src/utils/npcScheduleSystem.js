@@ -17,6 +17,17 @@ import {
 import { getItem, mapData, getChildren } from '../data/mapData.js'
 import { autoSelectElectives, getCourseById } from '../data/coursePoolData.js'
 
+// ==================== 辅助函数 ====================
+
+/**
+ * 计算绝对游戏小时数
+ * 用于跨天比较
+ * @param {Object} gameTime 
+ */
+export function calculateTotalHours(gameTime) {
+  return gameTime.year * 365 * 24 + gameTime.day * 24 + gameTime.hour
+}
+
 // ==================== 常量定义 ====================
 
 /**
@@ -813,6 +824,18 @@ export function calculateNpcLocation(npc, gameTime, gameStore, forceRecalculate 
   if (npc.isAlive && gameStore?.player?.location) {
     return gameStore.player.location
   }
+  
+  // ============ 强制移动逻辑 ============
+  if (npc.forcedLocation) {
+    const currentTotalHours = calculateTotalHours(gameTime)
+    if (currentTotalHours < npc.forcedLocation.endTime) {
+      return npc.forcedLocation.locationId
+    } else {
+      // 已过期，清除状态
+      delete npc.forcedLocation
+    }
+  }
+  // ======================================
   
   if (!npc.isAlive && (gameTime.hour >= 21 || gameTime.hour < 5)) {
     return UNKNOWN_LOCATION
