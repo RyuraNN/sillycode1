@@ -59,7 +59,7 @@ const gameStore = useGameStore()
 const { imageCacheMap, queueImageLoad, saveAndCache, cleanup: cleanupImageCache } = useImageCache()
 const { autoScrollEnabled, showNewMessageTip, scrollToBottom, handleNewContent, handleUserScroll, resetAutoScroll } = useScrollControl()
 const { danmakuList, showDanmaku } = useDanmaku()
-const { currentEvent, isBannerCollapsed } = useEventCarousel()
+const { currentEvent, isBannerCollapsed } = useEventCarousel({ manageLifecycle: true })
 
 // 基础状态
 const isLeftSidebarOpen = ref(true)
