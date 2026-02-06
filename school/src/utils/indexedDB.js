@@ -135,6 +135,32 @@ export async function getRosterBackup() {
   return getItem(ROSTER_KEY, STORE_NAME)
 }
 
+// Full Character Pool (全角色池 - 包含所有角色的完整数据)
+const FULL_CHARACTER_POOL_KEY = 'school_full_character_pool'
+
+export async function saveFullCharacterPool(data) {
+  console.log('[IndexedDB] Saving full character pool...')
+  return setItem(FULL_CHARACTER_POOL_KEY, data, STORE_NAME)
+}
+
+export async function getFullCharacterPool() {
+  console.log('[IndexedDB] Loading full character pool...')
+  return getItem(FULL_CHARACTER_POOL_KEY, STORE_NAME)
+}
+
+// Custom Roster Presets (自定义名册预设)
+const ROSTER_PRESETS_KEY = 'school_roster_presets'
+
+export async function saveRosterPresets(data) {
+  console.log('[IndexedDB] Saving roster presets...')
+  return setItem(ROSTER_PRESETS_KEY, data, STORE_NAME)
+}
+
+export async function getRosterPresets() {
+  console.log('[IndexedDB] Loading roster presets...')
+  return getItem(ROSTER_PRESETS_KEY, STORE_NAME)
+}
+
 // Snapshot Data Helpers
 export async function saveSnapshotData(id, data) {
   // console.log(`[IndexedDB] Saving snapshot data for ${id}...`)

@@ -3,7 +3,19 @@
  */
 
 import type { SaveSnapshot } from '../gameStoreTypes'
-import { setItem, getItem, migrateFromLocalStorage, saveSnapshotData, getSnapshotData } from '../../utils/indexedDB'
+import { 
+  setItem, 
+  getItem, 
+  migrateFromLocalStorage, 
+  saveSnapshotData, 
+  getSnapshotData,
+  getRosterBackup,
+  saveRosterBackup,
+  getFullCharacterPool,
+  saveFullCharacterPool,
+  getRosterPresets,
+  saveRosterPresets
+} from '../../utils/indexedDB'
 import { DEFAULT_RELATIONSHIPS, DEFAULT_PERSONALITIES, DEFAULT_GOALS, DEFAULT_PRIORITIES } from '../../data/relationshipData'
 
 let saveTimer: any = null
@@ -172,10 +184,20 @@ export const storageActions = {
       fullSnapshots.push(fullSnapshot)
     }
 
+    // 获取扩展数据 (IndexedDB)
+    const rosterBackup = await getRosterBackup()
+    const fullCharacterPool = await getFullCharacterPool()
+    const rosterPresets = await getRosterPresets()
+
     return JSON.stringify({
-      version: 1,
+      version: 2, // 升级版本号
       timestamp: Date.now(),
-      snapshots: fullSnapshots
+      snapshots: fullSnapshots,
+      extraData: {
+        rosterBackup,
+        fullCharacterPool,
+        rosterPresets
+      }
     })
   },
 
@@ -193,6 +215,27 @@ export const storageActions = {
         loadedSnapshots = data.snapshots
       } else {
         throw new Error('Invalid save data format')
+      }
+
+      // 恢复扩展数据 (如果存在)
+      if (data.extraData) {
+        console.log('[GameStore] Importing extra data from save file...')
+        const { rosterBackup, fullCharacterPool, rosterPresets } = data.extraData
+        
+        if (rosterBackup) {
+          await saveRosterBackup(rosterBackup)
+          console.log('[GameStore] Restored roster backup')
+        }
+        
+        if (fullCharacterPool) {
+          await saveFullCharacterPool(fullCharacterPool)
+          console.log('[GameStore] Restored full character pool')
+        }
+        
+        if (rosterPresets) {
+          await saveRosterPresets(rosterPresets)
+          console.log('[GameStore] Restored roster presets')
+        }
       }
 
       const processedSnapshots: SaveSnapshot[] = []

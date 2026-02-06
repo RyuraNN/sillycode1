@@ -1173,6 +1173,159 @@ export async function updateCompactMapEntry() {
   }
 }
 
+// ==================== 默认角色备份世界书 ====================
+
+const DEFAULT_ROSTER_BACKUP_WORLDBOOK_NAME = '天华校园-默认角色备份'
+
+/**
+ * 创建或更新默认角色备份世界书
+ * 该世界书 enabled=false，用于保存所有角色的原始数据
+ * @param {Object} allClassData 所有班级数据
+ * @returns {Promise<boolean>} 是否成功
+ */
+export async function createDefaultRosterBackupWorldbook(allClassData) {if (typeof window.createOrReplaceWorldbook !== 'function') {
+    console.warn('[WorldbookParser] createOrReplaceWorldbook API not available')
+    return false
+  }
+
+  try {
+    console.log('[WorldbookParser] Creating/updating default roster backup worldbook...')
+    
+    const entries = []
+    
+    // 为每个班级创建一个条目
+    for (const [classId, classInfo] of Object.entries(allClassData)) {
+      const content = formatClassData(classInfo)
+      entries.push({
+        name: `[BackupClass:${classId}] ${classInfo.name || classId}`,
+        content: content,
+        enabled: false,
+        strategy: {
+          type: 'selective',
+          keys: [],
+          keys_secondary: { logic: 'and_any', keys: [] },
+          scan_depth: 'same_as_global'
+        },
+        position: {
+          type: 'before_character_definition',
+          order: 100
+        },
+        probability: 100,
+        recursion: {
+          prevent_incoming: true,
+          prevent_outgoing: true,
+          delay_until: null
+        },
+        effect: {
+          sticky: null,
+          cooldown: null,
+          delay: null
+        }
+      })
+    }
+    
+    // 添加一个元数据条目
+    entries.push({
+      name: '[RosterBackupMeta]',
+      content: JSON.stringify({
+        createdAt: Date.now(),
+        classCount: Object.keys(allClassData).length,
+        totalStudents: Object.values(allClassData).reduce((sum, c) => sum + (c.students?.length || 0), 0),
+        totalTeachers: Object.values(allClassData).reduce((sum, c) => sum + (c.teachers?.length || 0) + (c.headTeacher?.name ? 1 : 0), 0)
+      }),
+      enabled: false,
+      strategy: {
+        type: 'selective',
+        keys: [],
+        keys_secondary: { logic: 'and_any', keys: [] },
+        scan_depth: 'same_as_global'
+      },
+      position: {
+        type: 'before_character_definition',
+        order: 100
+      },
+      probability: 100,
+      recursion: {
+        prevent_incoming: true,
+        prevent_outgoing: true,
+        delay_until: null
+      },
+      effect: {
+        sticky: null,
+        cooldown: null,
+        delay: null
+      }
+    })
+    
+    await window.createOrReplaceWorldbook(DEFAULT_ROSTER_BACKUP_WORLDBOOK_NAME, entries, { render: 'none' })
+    console.log(`[WorldbookParser] Default roster backup worldbook created with ${entries.length} entries`)
+    return true
+    
+  } catch (e) {
+    console.error('[WorldbookParser] Error creating default roster backup worldbook:', e)
+    return false
+  }
+}
+
+/**
+ * 从备份世界书恢复所有角色数据
+ * @returns {Promise<Object|null>} 恢复的班级数据，失败返回 null
+ */
+export async function restoreFromBackupWorldbook() {
+  if (typeof window.getWorldbook !== 'function') {
+    console.warn('[WorldbookParser] getWorldbook API not available')
+    return null
+  }
+
+  try {
+    console.log('[WorldbookParser] Restoring from backup worldbook...')
+    const entries = await window.getWorldbook(DEFAULT_ROSTER_BACKUP_WORLDBOOK_NAME)
+    
+    if (!entries || !Array.isArray(entries)) {
+      console.warn('[WorldbookParser] Backup worldbook not found or empty')
+      return null
+    }
+    
+    const allClassData = {}
+    
+    for (const entry of entries) {
+      const match = entry.name && entry.name.match(/\[BackupClass:([0-3]-[A-Z])\]/)
+      if (match) {
+        const classId = match[1]
+        const parsedData = parseClassData(entry.content)
+        if (parsedData[classId]) {
+          allClassData[classId] = parsedData[classId]
+        }
+      }
+    }
+    
+    if (Object.keys(allClassData).length > 0) {
+      console.log(`[WorldbookParser] Restored ${Object.keys(allClassData).length} classes from backup`)
+      return allClassData
+    }
+    
+    return null
+    
+  } catch (e) {
+    console.error('[WorldbookParser] Error restoring from backup worldbook:', e)
+    return null
+  }
+}
+
+/**
+ * 检查备份世界书是否存在
+ * @returns {Promise<boolean>}
+ */
+export async function hasBackupWorldbook() {
+  if (typeof window.getWorldbookNames !== 'function') return false
+  try {
+    const names = window.getWorldbookNames()
+    return names.includes(DEFAULT_ROSTER_BACKUP_WORLDBOOK_NAME)
+  } catch (e) {
+    return false
+  }
+}
+
 /**
  * 执行所有世界书优化操作
  * 建议在游戏初始化时调用
