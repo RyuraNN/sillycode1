@@ -772,6 +772,194 @@ export let GRADE_2_COURSES = JSON.parse(JSON.stringify(DEFAULT_GRADE_2_COURSES))
 export let GRADE_3_COURSES = JSON.parse(JSON.stringify(DEFAULT_GRADE_3_COURSES))
 export let IDOL_COURSES = JSON.parse(JSON.stringify(DEFAULT_IDOL_COURSES))
 
+// ============ 世界书持久化 ============
+
+const WB_ENTRY_NAME = '[CoursePool]'
+
+/**
+ * 将课程对象转换为文本行
+ */
+function serializeCourse(category, course, typeLabel) {
+  let teacherStr = course.teacher || '未知教师'
+  if (course.teacherGender) {
+    teacherStr += ` ${course.teacherGender === 'male' ? '♂' : '♀'}`
+  }
+  if (course.origin && course.origin !== '自定义') {
+    teacherStr += ` (${course.origin})`
+  }
+  
+  return `${category}|${course.name}|${teacherStr}|${course.location || 'classroom'}|${typeLabel}`
+}
+
+/**
+ * 解析文本行到课程对象
+ */
+function parseCourseLine(line) {
+  const parts = line.split('|').map(s => s.trim())
+  if (parts.length < 5) return null
+  
+  const [category, name, teacherInfo, location, typeLabel] = parts
+  
+  // 解析教师信息 "Name ♂ (Origin)"
+  let teacher = teacherInfo
+  let teacherGender = 'female' // 默认
+  let origin = '自定义'
+  
+  const match = teacherInfo.match(/^(.+?)(?:\s+([♂♀]))?(?:\s+\((.+)\))?$/)
+  if (match) {
+    teacher = match[1]
+    if (match[2]) teacherGender = match[2] === '♂' ? 'male' : 'female'
+    if (match[3]) origin = match[3]
+  }
+  
+  return {
+    category,
+    course: {
+      id: `imported_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      name,
+      teacher,
+      teacherGender,
+      origin,
+      location,
+      type: typeLabel === '必修' ? 'required' : 'elective',
+      availableFor: [category] // 简单处理
+    },
+    isRequired: typeLabel === '必修'
+  }
+}
+
+/**
+ * 保存课程池到世界书
+ */
+export async function saveCoursePoolToWorldbook() {
+  if (typeof window.saveWorldbookEntry !== 'function') {
+    console.warn('[CoursePool] Worldbook API not available')
+    return false
+  }
+
+  let content = '# 课程池配置数据\n# 请勿随意修改格式\n\n'
+  
+  content += '# --- 通用课程 (所有年级可选) ---\n'
+  UNIVERSAL_ELECTIVES.forEach(c => {
+    content += serializeCourse('通用', c, '选修') + '\n'
+  })
+  
+  const processGrade = (gradeName, data) => {
+    content += `\n# --- ${gradeName} ---\n`
+    data.required.forEach(c => content += serializeCourse(gradeName, c, '必修') + '\n')
+    data.electives.forEach(c => content += serializeCourse(gradeName, c, '选修') + '\n')
+  }
+  
+  processGrade('1年级', GRADE_1_COURSES)
+  processGrade('2年级', GRADE_2_COURSES)
+  processGrade('3年级', GRADE_3_COURSES)
+  
+  content += '\n# --- 偶像科专用 ---\n'
+  const processIdol = (className, data) => {
+    data.required.forEach(c => content += serializeCourse(className, c, '必修') + '\n')
+    data.electives.forEach(c => content += serializeCourse(className, c, '选修') + '\n')
+  }
+  processIdol('1年E班', IDOL_COURSES.grade1)
+  processIdol('2年E班', IDOL_COURSES.grade2)
+  processIdol('3年E班', IDOL_COURSES.grade3)
+  
+  try {
+    // 保存到当前聊天
+    await window.saveWorldbookEntry('current', WB_ENTRY_NAME, content, ['system', 'course'], false)
+    console.log('[CoursePool] Saved to worldbook')
+    return true
+  } catch (e) {
+    console.error('[CoursePool] Save failed:', e)
+    return false
+  }
+}
+
+/**
+ * 从世界书加载课程池
+ */
+export async function loadCoursePoolFromWorldbook() {
+  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.getWorldbook !== 'function') {
+    console.warn('[CoursePool] Worldbook API not available')
+    return false
+  }
+
+  try {
+    const books = window.getCharWorldbookNames('current')
+    const bookNames = []
+    if (books && typeof books === 'object') {
+      if (books.primary) bookNames.push(books.primary)
+      if (Array.isArray(books.additional)) bookNames.push(...books.additional)
+    } else if (Array.isArray(books)) {
+      bookNames.push(...books)
+    }
+
+    let foundContent = null
+    
+    // 查找包含 [CoursePool] 的条目
+    for (const name of bookNames) {
+      const entries = await window.getWorldbook(name)
+      if (!entries || !Array.isArray(entries)) continue
+      
+      const entry = entries.find(e => e.name === WB_ENTRY_NAME || (e.keys && e.keys.includes('CoursePool')))
+      if (entry) {
+        foundContent = entry.content
+        console.log('[CoursePool] Found entry in book:', name)
+        break
+      }
+    }
+
+    if (!foundContent) {
+      console.log('[CoursePool] No entry found, using defaults')
+      return false
+    }
+
+    // 解析内容并更新内存
+    const lines = foundContent.split('\n')
+    
+    // 清空现有数据
+    UNIVERSAL_ELECTIVES.length = 0
+    GRADE_1_COURSES.required.length = 0; GRADE_1_COURSES.electives.length = 0
+    GRADE_2_COURSES.required.length = 0; GRADE_2_COURSES.electives.length = 0
+    GRADE_3_COURSES.required.length = 0; GRADE_3_COURSES.electives.length = 0
+    IDOL_COURSES.grade1.required.length = 0; IDOL_COURSES.grade1.electives.length = 0
+    IDOL_COURSES.grade2.required.length = 0; IDOL_COURSES.grade2.electives.length = 0
+    IDOL_COURSES.grade3.required.length = 0; IDOL_COURSES.grade3.electives.length = 0
+
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      
+      const parsed = parseCourseLine(trimmed)
+      if (!parsed) continue
+      
+      const { category, course, isRequired } = parsed
+      
+      if (category === '通用') {
+        UNIVERSAL_ELECTIVES.push(course)
+      } else if (category === '1年级') {
+        isRequired ? GRADE_1_COURSES.required.push(course) : GRADE_1_COURSES.electives.push(course)
+      } else if (category === '2年级') {
+        isRequired ? GRADE_2_COURSES.required.push(course) : GRADE_2_COURSES.electives.push(course)
+      } else if (category === '3年级') {
+        isRequired ? GRADE_3_COURSES.required.push(course) : GRADE_3_COURSES.electives.push(course)
+      } else if (category === '1年E班') {
+        isRequired ? IDOL_COURSES.grade1.required.push(course) : IDOL_COURSES.grade1.electives.push(course)
+      } else if (category === '2年E班') {
+        isRequired ? IDOL_COURSES.grade2.required.push(course) : IDOL_COURSES.grade2.electives.push(course)
+      } else if (category === '3年E班') {
+        isRequired ? IDOL_COURSES.grade3.required.push(course) : IDOL_COURSES.grade3.electives.push(course)
+      }
+    }
+    
+    console.log('[CoursePool] Loaded successfully')
+    return true
+    
+  } catch (e) {
+    console.error('[CoursePool] Load failed:', e)
+    return false
+  }
+}
+
 // ============ 状态管理函数 ============
 
 /**

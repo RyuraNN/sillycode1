@@ -85,14 +85,29 @@
                 class="class-cell"
                 :class="{ 
                   'today': isToday(day.en),
-                  'empty': isEmptySlot(day.en, period.period),
-                  'current': isCurrentClass(day.en, period.period)
+                  'current': isCurrentClass(day.en, period.period),
+                  'holiday-cell': getHolidayInfo(day.en, period)?.holidayType === 'full',
+                  'exam-cell': getHolidayInfo(day.en, period)?.holidayType === 'exam',
+                  'partial-holiday-cell': ['am_off', 'pm_off'].includes(getHolidayInfo(day.en, period)?.holidayType),
+                  'empty': isEmptySlot(day.en, period.period) && !getHolidayInfo(day.en, period)
                 }"
               >
-                <template v-if="!isEmptySlot(day.en, period.period)">
+                <!-- 优先显示假期信息 -->
+                <template v-if="getHolidayInfo(day.en, period)">
+                  <div class="holiday-content">
+                    <span class="holiday-icon" v-if="getHolidayInfo(day.en, period).holidayType === 'exam'">📝</span>
+                    <span class="holiday-icon" v-else>🏖️</span>
+                    <span class="holiday-name">{{ getHolidayInfo(day.en, period).eventInfo?.name }}</span>
+                  </div>
+                </template>
+                
+                <!-- 否则显示课程 -->
+                <template v-else-if="!isEmptySlot(day.en, period.period)">
                   <div class="class-subject">{{ getClassInfo(day.en, period.period)?.subject }}</div>
                   <div class="class-location">{{ getClassInfo(day.en, period.period)?.location }}</div>
                 </template>
+                
+                <!-- 空课 -->
                 <template v-else>
                   <div class="empty-slot">-</div>
                 </template>
@@ -425,6 +440,19 @@
             
             <div class="form-group">
               <label class="form-label">
+                <span class="label-icon">👨‍🏫</span>
+                指导老师 (可选)
+              </label>
+              <select v-model="createClubForm.advisor" class="form-select">
+                <option value="">无</option>
+                <option v-for="teacher in allTeachers" :key="teacher.name" :value="teacher.name">
+                  {{ teacher.name }} ({{ teacher.className || '教师' }})
+                </option>
+              </select>
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">
                 <span class="label-icon">🎯</span>
                 核心技能
               </label>
@@ -521,7 +549,7 @@
                   :key="npc.id" 
                   :value="npc.name"
                 >
-                  {{ npc.name }} ({{ npc.relationship }}好感)
+                  {{ npc.name }} (好感度: {{ npc.affinity }})
                 </option>
               </select>
             </div>
@@ -541,7 +569,7 @@
       </div>
 
       <!-- 拒绝通知弹窗 -->
-      <div v-if="gameStore.clubRejection" class="rejection-modal-overlay" @click.self="gameStore.confirmClubRejection()">
+      <div v-if="gameStore.clubRejection" class="club-modal-overlay" @click.self="gameStore.confirmClubRejection()">
         <div class="rejection-modal">
           <div class="rejection-icon">❌</div>
           <div class="rejection-title">申请被拒绝</div>
@@ -567,14 +595,16 @@
       </transition>
 
       <!-- 地图编辑器 (选择模式) -->
-      <MapEditorPanel 
-        v-if="showMapEditor"
-        :selection-mode="true"
-        selection-title="创建社团活动室"
-        :occupied-locations="occupiedLocations"
-        @close="showMapEditor = false"
-        @location-selected="handleLocationSelected"
-      />
+      <Teleport to="body">
+        <MapEditorPanel 
+          v-if="showMapEditor"
+          :selection-mode="true"
+          selection-title="创建社团活动室"
+          :occupied-locations="occupiedLocations"
+          @close="showMapEditor = false"
+          @location-selected="handleLocationSelected"
+        />
+      </Teleport>
     </div>
 
     <!-- 论坛标签页内容 -->
@@ -669,7 +699,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useGameStore } from '../stores/gameStore'
-import { TIME_SLOTS, getWeekdayEnglish, getTermInfo } from '../utils/scheduleGenerator'
+import { TIME_SLOTS, getWeekdayEnglish, getTermInfo, checkDayStatus } from '../utils/scheduleGenerator'
 import ForumApp from './ForumApp.vue'
 import ElectiveCourseSelector from './ElectiveCourseSelector.vue'
 import MapEditorPanel from './MapEditorPanel.vue'
@@ -689,7 +719,8 @@ const createClubForm = ref({
   description: '',
   coreSkill: '',
   activityDay: '未定',
-  location: ''
+  location: '',
+  advisor: ''
 })
 const inviteTarget = ref('')
 
@@ -736,6 +767,71 @@ const weekNumber = computed(() => termInfo.value.weekNumber)
 
 // 学期名称
 const termName = computed(() => termInfo.value.termName || '')
+
+// 计算本周每一天的日期
+const weekDateMap = computed(() => {
+  const { year, month, day, weekday } = gameStore.gameTime
+  const currentWeekdayEn = getWeekdayEnglish(weekday)
+  
+  // 映射星期到索引 (Monday=0, ..., Sunday=6)
+  const weekdayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+  const currentIndex = weekdayOrder.indexOf(currentWeekdayEn)
+  
+  const map = {}
+  
+  // 如果找不到当前星期（异常情况），直接返回空
+  if (currentIndex === -1) return map
+  
+  const currentDateObj = new Date(year, month - 1, day)
+  
+  weekdays.forEach((wd, index) => {
+    // 计算偏差天数
+    // weekdays 数组里的 index 0 是 Monday
+    // 如果今天是 Monday (currentIndex=0), 偏差是 index - 0
+    // 如果今天是 Wednesday (currentIndex=2), Monday(index=0) 的偏差是 0 - 2 = -2
+    const diff = index - currentIndex
+    
+    const targetDate = new Date(currentDateObj)
+    targetDate.setDate(currentDateObj.getDate() + diff)
+    
+    map[wd.en] = {
+      year: targetDate.getFullYear(),
+      month: targetDate.getMonth() + 1,
+      day: targetDate.getDate()
+    }
+  })
+  
+  return map
+})
+
+// 计算本周每一天的状态
+const dayStatusMap = computed(() => {
+  const map = {}
+  for (const [dayEn, date] of Object.entries(weekDateMap.value)) {
+    map[dayEn] = checkDayStatus(date.month, date.day)
+  }
+  return map
+})
+
+// 判断某天某节课是否被假期/考试覆盖
+function getHolidayInfo(dayEn, period) {
+  const status = dayStatusMap.value[dayEn]
+  if (!status) return null
+  
+  if (status.holidayType === 'full' || status.holidayType === 'exam') {
+    return status
+  }
+  
+  if (status.holidayType === 'am_off' && period.type === 'morning') {
+    return status
+  }
+  
+  if (status.holidayType === 'pm_off' && period.type === 'afternoon') {
+    return status
+  }
+  
+  return null
+}
 
 // 头部副标题
 const getHeaderSubtitle = computed(() => {
@@ -813,6 +909,39 @@ const occupiedLocations = computed(() => {
     }
   })
   return locations
+})
+
+// 所有教师列表（用于指导老师选择）
+const allTeachers = computed(() => {
+  const teacherMap = new Map();
+  
+  if (gameStore.allClassData) {
+    for (const [classId, classData] of Object.entries(gameStore.allClassData)) {
+      // 班主任
+      if (classData.headTeacher && classData.headTeacher.name) {
+        if (!teacherMap.has(classData.headTeacher.name)) {
+          teacherMap.set(classData.headTeacher.name, {
+            name: classData.headTeacher.name,
+            className: classData.name || classId,
+            role: '班主任'
+          });
+        }
+      }
+      // 科任教师
+      if (classData.teachers && Array.isArray(classData.teachers)) {
+        classData.teachers.forEach(t => {
+          if (t.name && !teacherMap.has(t.name)) {
+            teacherMap.set(t.name, {
+              name: t.name,
+              className: t.subject || '教师',
+              role: '教师'
+            });
+          }
+        })
+      }
+    }
+  }
+  return Array.from(teacherMap.values());
 })
 
 // 判断是否正在申请该社团
@@ -910,13 +1039,30 @@ function isEmptySlot(dayEn, periodNum) {
   return !info
 }
 
+// 计算综合好感度（基于四维数据）
+function calculateAffinity(npcName) {
+  const relationData = gameStore.npcRelationships?.[npcName]?.relations?.[gameStore.player.name]
+  if (!relationData) {
+    // 没有关系数据，尝试获取反向关系
+    const reverseRelation = gameStore.npcRelationships?.[gameStore.player.name]?.relations?.[npcName]
+    if (reverseRelation) {
+      const { intimacy = 0, trust = 0, passion = 0, hostility = 0 } = reverseRelation
+      return Math.round((intimacy + trust + passion - hostility) / 3)
+    }
+    return 0
+  }
+  const { intimacy = 0, trust = 0, passion = 0, hostility = 0 } = relationData
+  return Math.round((intimacy + trust + passion - hostility) / 3)
+}
+
 // 过滤掉已加入社团或未认识的 NPC
 const availableNpcs = computed(() => {
   if (!selectedClub.value) return []
   return gameStore.npcs
     .filter(npc => {
-      // 必须是已认识的（有好感度数据）
-      const hasRelation = gameStore.npcRelationships[npc.name]
+      // 必须是已认识的（有关系数据）
+      const hasRelation = gameStore.npcRelationships[npc.name] || 
+                          gameStore.npcRelationships[gameStore.player.name]?.relations?.[npc.name]
       if (!hasRelation) return false
       
       // 不能是当前社团成员
@@ -927,8 +1073,9 @@ const availableNpcs = computed(() => {
     .map(npc => ({
       id: npc.id,
       name: npc.name,
-      relationship: npc.relationship || 0
+      affinity: calculateAffinity(npc.name)
     }))
+    .sort((a, b) => b.affinity - a.affinity) // 按好感度降序排列
 })
 
 // 打开邀请弹窗
@@ -961,7 +1108,14 @@ async function handleCreateClub() {
     return
   }
   
-  const result = await gameStore.createClub(createClubForm.value)
+  const result = await gameStore.createClub({
+    name: createClubForm.value.name,
+    description: createClubForm.value.description,
+    coreSkill: createClubForm.value.coreSkill,
+    activityDay: createClubForm.value.activityDay,
+    location: createClubForm.value.location,
+    advisor: createClubForm.value.advisor
+  })
   
   actionMessage.value = {
     type: result.success ? 'success' : 'error',
@@ -976,7 +1130,8 @@ async function handleCreateClub() {
       description: '',
       coreSkill: '',
       activityDay: '未定',
-      location: ''
+      location: '',
+      advisor: ''
     }
   }
   
@@ -1024,6 +1179,7 @@ onMounted(async () => {
   color: white;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   position: relative;
+  overflow: hidden;
 }
 
 .schedule-app.vacation-mode {
@@ -1035,6 +1191,7 @@ onMounted(async () => {
   text-align: center;
   background: rgba(0, 0, 0, 0.2);
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
 }
 
 .header-title {
@@ -1061,6 +1218,7 @@ onMounted(async () => {
   display: flex;
   background: rgba(0, 0, 0, 0.15);
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
 }
 
 .tab-item {
@@ -1109,8 +1267,11 @@ onMounted(async () => {
 /* 标签页内容 */
 .tab-content {
   flex: 1;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   position: relative;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 /* 课表相关样式 */
@@ -1252,6 +1413,7 @@ onMounted(async () => {
   background: rgba(0, 0, 0, 0.2);
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   font-size: 11px;
+  flex-shrink: 0;
 }
 
 .schedule-footer .label {
@@ -1300,6 +1462,7 @@ onMounted(async () => {
 /* ==================== 社团页面样式 (全新设计) ==================== */
 .clubs-content {
   padding: 16px;
+  padding-bottom: 80px;
   background: linear-gradient(180deg, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.2) 100%);
 }
 
@@ -1722,9 +1885,8 @@ onMounted(async () => {
 }
 
 /* ==================== 社团弹窗样式 ==================== */
-.club-modal-overlay,
-.rejection-modal-overlay {
-  position: fixed;
+.club-modal-overlay {
+  position: absolute;
   top: 0;
   left: 0;
   right: 0;
@@ -1734,14 +1896,16 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 100;
   padding: 20px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .club-modal {
   width: 100%;
   max-width: 420px;
-  max-height: 85vh;
+  max-height: calc(100% - 40px);
   background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
   border-radius: 20px;
   overflow: hidden;
@@ -1749,6 +1913,7 @@ onMounted(async () => {
   flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   animation: modal-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  touch-action: pan-y;
 }
 
 @keyframes modal-pop {
@@ -1764,6 +1929,7 @@ onMounted(async () => {
   height: 120px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   pointer-events: none;
+  border-radius: 20px 20px 0 0;
 }
 
 .modal-header-bg.create-bg {
@@ -1781,6 +1947,7 @@ onMounted(async () => {
   gap: 14px;
   padding: 20px;
   z-index: 1;
+  flex-shrink: 0;
 }
 
 .modal-club-avatar {
@@ -1827,6 +1994,8 @@ onMounted(async () => {
   flex: 1;
   overflow-y: auto;
   padding: 20px;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 .info-grid {
@@ -1920,6 +2089,7 @@ onMounted(async () => {
   display: flex;
   gap: 12px;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .status-box {
@@ -2039,6 +2209,7 @@ onMounted(async () => {
   color: white;
   font-size: 14px;
   transition: all 0.2s;
+  box-sizing: border-box;
 }
 
 .form-input:focus,
@@ -2222,7 +2393,7 @@ onMounted(async () => {
 
 /* Toast 提示 */
 .action-toast {
-  position: fixed;
+  position: absolute;
   bottom: 100px;
   left: 50%;
   transform: translateX(-50%);
@@ -2233,7 +2404,7 @@ onMounted(async () => {
   border-radius: 16px;
   font-size: 14px;
   font-weight: 500;
-  z-index: 1001;
+  z-index: 101;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
 }
 
@@ -2265,6 +2436,7 @@ onMounted(async () => {
 /* 档案页面样式 */
 .profile-content {
   padding: 16px;
+  padding-bottom: 80px;
   background: #f0f2f5;
   color: #333;
 }
@@ -2460,5 +2632,44 @@ onMounted(async () => {
 
 .skill-bar {
   background: linear-gradient(90deg, #2196f3, #03a9f4);
+}
+
+/* 论坛内容区域 */
+.forum-content {
+  height: 100%;
+}
+
+.holiday-cell {
+  background: rgba(255, 99, 71, 0.15) !important;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.exam-cell {
+  background: rgba(155, 89, 182, 0.2) !important;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.partial-holiday-cell {
+  background: rgba(255, 159, 67, 0.15) !important;
+}
+
+.holiday-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 10px;
+}
+
+.holiday-icon {
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+
+.holiday-name {
+  font-weight: bold;
+  text-align: center;
+  line-height: 1.2;
 }
 </style>

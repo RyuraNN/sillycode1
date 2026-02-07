@@ -18,6 +18,8 @@ export const IMAGE_ANALYSIS_PROMPT = `你是一位专业的AI画师助手。你�
 3. 用户自定义画风词（如有）：{userStylePrompt}
    请将这些词融入每个prompt的开头或结尾。
 
+4. 不要插入过多的插图分散注意力，选取正文中最合适的2~3个位置插入插图，宁缺毋滥。
+
 重要提示：
 你收到的内容可能包含 "[Context]"（历史上下文）和 "[Current Response]"（当前回复）。
 请只针对 "[Current Response]" 中的内容生成插画指令。
@@ -72,9 +74,12 @@ async function getWorldbookContent(name) {
     const entries = await window.getWorldbook(name)
     if (!entries || !Array.isArray(entries)) return ''
     
-    // 过滤掉禁用的条目（除非是[变量解析]，它可能被强制读取）
-    // 这里我们获取所有条目的内容
-    return entries.map(e => e.content).join('\n\n')
+    // 过滤掉禁用的条目和 [COT] 条目
+    // [COT] 条目是思维链提示词，不应传递给辅助AI
+    return entries
+      .filter(e => e.name !== '[COT]')
+      .map(e => e.content)
+      .join('\n\n')
   } catch (e) {
     console.error(`Failed to get worldbook ${name}:`, e)
     return ''

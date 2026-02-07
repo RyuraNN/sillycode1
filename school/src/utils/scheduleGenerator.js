@@ -827,6 +827,11 @@ export function getTodayScheduleSummary(gameTime, weeklySchedule) {
   if (dayStatus.isHoliday) {
     return `今天是${dayStatus.eventInfo.name}，无课程安排。`
   }
+
+  // 检查考试周
+  if (dayStatus.holidayType === 'exam') {
+    return `今天是${dayStatus.eventInfo.name}，全天进行考试安排。`
+  }
   
   const englishWeekday = getWeekdayEnglish(weekday)
   const todaySchedule = weeklySchedule[englishWeekday]
@@ -859,6 +864,77 @@ export function getTodayScheduleSummary(gameTime, weeklySchedule) {
   }
   
   return prefix + '今日课表：' + classes.join('→')
+}
+
+/**
+ * 获取明日课表摘要（预告）
+ * @param {Object} gameTime 游戏时间
+ * @param {Object} weeklySchedule 周课表
+ * @returns {string} 明日课表摘要文本
+ */
+export function getNextDayScheduleSummary(gameTime, weeklySchedule) {
+  const { year, month, day } = gameTime
+  
+  // 计算明天日期
+  const today = new Date(year, month - 1, day)
+  const tomorrow = new Date(today)
+  tomorrow.setDate(today.getDate() + 1)
+  
+  const tmrMonth = tomorrow.getMonth() + 1
+  const tmrDay = tomorrow.getDate()
+  
+  // 获取明天是周几
+  const tmrWeekdayIndex = tomorrow.getDay() // 0-6, 0 is Sunday
+  const weekdaysEn = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+  const tmrWeekdayEn = weekdaysEn[tmrWeekdayIndex]
+  const tmrWeekdayCn = getWeekdayChinese(tmrWeekdayEn)
+  
+  // 1. 检查明天是否是假期
+  const dayStatus = checkDayStatus(tmrMonth, tmrDay)
+  
+  if (dayStatus.isHoliday) {
+    return `\n[明日预告] 明天是${tmrWeekdayCn}，${dayStatus.eventInfo.name}（全天休假）。`
+  }
+  
+  if (dayStatus.holidayType === 'exam') {
+    return `\n[明日预告] 明天是${tmrWeekdayCn}，${dayStatus.eventInfo.name}（全天考试）。`
+  }
+  
+  // 2. 检查明天是否是周末
+  if (isWeekend(tmrWeekdayEn)) {
+    return `\n[明日预告] 明天是${tmrWeekdayCn}，周末休息。`
+  }
+  
+  // 3. 获取明天课表
+  const tomorrowSchedule = weeklySchedule[tmrWeekdayEn]
+  
+  if (!tomorrowSchedule || tomorrowSchedule.length === 0) {
+    // 正常上课日但无课表数据（可能是周一至周五但未生成）
+    return `\n[明日预告] 明天是${tmrWeekdayCn}，暂无课程安排。`
+  }
+  
+  // 4. 过滤部分休假
+  let effectiveSchedule = [...tomorrowSchedule]
+  let prefix = `\n[明日预告] 明天是${tmrWeekdayCn}。`
+  
+  if (dayStatus.holidayType === 'am_off') {
+    effectiveSchedule = effectiveSchedule.filter(c => c.type !== 'morning')
+    prefix = `\n[明日预告] 明天是${tmrWeekdayCn}，${dayStatus.eventInfo.name}（上午休假）。`
+  } else if (dayStatus.holidayType === 'pm_off') {
+    effectiveSchedule = effectiveSchedule.filter(c => c.type !== 'afternoon')
+    prefix = `\n[明日预告] 明天是${tmrWeekdayCn}，${dayStatus.eventInfo.name}（下午休假）。`
+  }
+  
+  // 5. 生成课表字符串
+  const classes = effectiveSchedule
+    .filter(c => !c.isEmpty)
+    .map(c => `${c.start} ${c.subject}(${c.location})`)
+  
+  if (classes.length === 0) {
+    return prefix + '全天无课。'
+  }
+  
+  return prefix + '课程：' + classes.join('→')
 }
 
 /**

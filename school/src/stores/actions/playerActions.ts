@@ -271,6 +271,12 @@ export const playerActions = {
              // @ts-ignore
              newNpc.isAlive = newNpc.isAlive === 'true'
            }
+           
+           if (newNpc.isAlive) {
+             newNpc.aliveRemaining = 2 // 延长到2轮
+           } else {
+             newNpc.aliveRemaining = 0
+           }
         }
 
         // @ts-ignore

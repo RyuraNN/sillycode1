@@ -27,6 +27,7 @@ const expandedWorks = ref({})
 // ==================== 筛选器状态 ====================
 const clubFilter = ref('')
 const electiveFilter = ref('')
+const genderFilter = ref('')
 const showFilters = ref(false)
 
 // ==================== 教师编辑状态 ====================
@@ -50,6 +51,7 @@ const composerSearchQuery = ref('')
 const composerRoleFilter = ref('all') // 'all' | 'student' | 'teacher'
 const showAddClassModal = ref(false)
 const newClassForm = ref({ id: '', name: '' })
+const composerMobileView = ref('class') // 'class' | 'pool'
 
 // ==================== 角色编辑器状态（原"全部角色"标签页，现升级为完整编辑器） ====================
 const characterPool = ref([]) // 待选角色池（包含所有可用角色）
@@ -88,7 +90,7 @@ onMounted(async () => {
 })
 
 // ==================== 数据加载 ====================
-const loadData = async () => {
+const loadData = async (forceUpdate = false) => {
   loading.value = true
   try {
     let backupData = await getRosterBackup()
@@ -104,45 +106,63 @@ const loadData = async () => {
         await createDefaultRosterBackupWorldbook(backupData)
       }
     } else {
-      console.log('[RosterFilter] Merging current data into backup')
+      console.log('[RosterFilter] Merging current data into backup', forceUpdate ? '(Forced)' : '')
       let hasChanges = false
       for (const [classId, classInfo] of Object.entries(currentData)) {
         if (!backupData[classId]) {
           backupData[classId] = JSON.parse(JSON.stringify(classInfo))
           hasChanges = true
         } else {
-          // 合并学生时保留所有字段（包括 electivePreference）
-          // 修复：使用 Array.isArray 确保是数组
+          // 合并学生
           const backupStudents = Array.isArray(backupData[classId].students) ? backupData[classId].students : []
           const currentStudents = Array.isArray(classInfo.students) ? classInfo.students : []
           
           currentStudents.forEach(curr => {
             const existing = backupStudents.find(b => b.name === curr.name)
             if (!existing) {
-              // 新学生，完整复制（保留所有字段）
+              // 新学生，完整复制
               backupStudents.push(JSON.parse(JSON.stringify(toRaw(curr))))
               hasChanges = true
             } else {
-              // 已存在的学生，更新可能丢失的字段
-              if (curr.electivePreference && !existing.electivePreference) {
-                existing.electivePreference = curr.electivePreference
-                hasChanges = true
-              }
-              if (curr.scheduleTag && !existing.scheduleTag) {
-                existing.scheduleTag = curr.scheduleTag
-                hasChanges = true
+              // 更新字段逻辑
+              if (forceUpdate) {
+                // 强制更新模式：世界书数据覆盖本地（如果有值）
+                if (curr.electivePreference) {
+                  existing.electivePreference = curr.electivePreference
+                  hasChanges = true
+                }
+                if (curr.scheduleTag) {
+                  existing.scheduleTag = curr.scheduleTag
+                  hasChanges = true
+                }
+              } else {
+                // 正常模式：仅补充缺失的字段
+                if (!existing.electivePreference && curr.electivePreference) {
+                  existing.electivePreference = curr.electivePreference
+                  hasChanges = true
+                }
+                if (!existing.scheduleTag && curr.scheduleTag) {
+                  existing.scheduleTag = curr.scheduleTag
+                  hasChanges = true
+                }
               }
             }
           })
           backupData[classId].students = backupStudents
           
-          // 同样合并教师
-          // 修复：使用 Array.isArray 确保是数组
+          // 合并教师
           const backupTeachers = Array.isArray(backupData[classId].teachers) ? backupData[classId].teachers : []
           const currentTeachers = Array.isArray(classInfo.teachers) ? classInfo.teachers : []
           currentTeachers.forEach(curr => {
-            if (curr.name && !backupTeachers.find(b => b.name === curr.name)) {
-              backupTeachers.push(JSON.parse(JSON.stringify(toRaw(curr))))
+            const existing = backupTeachers.find(b => b.name === curr.name)
+            if (!existing) {
+              if (curr.name) {
+                backupTeachers.push(JSON.parse(JSON.stringify(toRaw(curr))))
+                hasChanges = true
+              }
+            } else if (forceUpdate && curr.subject) {
+              // 强制更新时，更新科目
+              existing.subject = curr.subject
               hasChanges = true
             }
           })
@@ -166,6 +186,15 @@ const loadData = async () => {
     const state = {}
     const groups = {}
     
+    // 在强制更新模式下，先收集世界书中的所有学生名（用于确定选中状态）
+    const worldbookStudentSets = {}
+    if (forceUpdate) {
+      for (const [classId, classInfo] of Object.entries(currentData)) {
+        const students = Array.isArray(classInfo?.students) ? classInfo.students : []
+        worldbookStudentSets[classId] = new Set(students.map(s => s.name))
+      }
+    }
+    
     for (const [classId, classInfo] of Object.entries(backupData)) {
       // 修复：使用 Array.isArray 确保是数组
       const students = Array.isArray(classInfo.students) ? classInfo.students : []
@@ -181,7 +210,15 @@ const loadData = async () => {
       state[classId] = {}
       
       students.forEach(student => {
-        state[classId][student.name] = currentStudentNames.has(student.name)
+        if (forceUpdate) {
+          // 强制更新模式：只有在世界书中存在的学生才标记为选中
+          // 如果这个班级在世界书中不存在，则保持选中（向后兼容）
+          const worldbookSet = worldbookStudentSets[classId]
+          state[classId][student.name] = worldbookSet ? worldbookSet.has(student.name) : true
+        } else {
+          // 正常模式：根据当前数据判断
+          state[classId][student.name] = currentStudentNames.has(student.name)
+        }
         
         let origin = '未知'
         if (student.origin) {
@@ -233,7 +270,8 @@ const loadCharacterPool = async () => {
     
     // 2. 从快照构建基础角色池
     const currentPool = []
-    const addedNames = new Set() // 用于去重，避免同一老师重复计入
+    const addedNames = new Set() // 用于去重（主要用于学生和防止重复添加）
+    const teacherMap = new Map() // 用于聚合教师信息
     const snapshot = fullRosterSnapshot.value
     
     if (!snapshot || Object.keys(snapshot).length === 0) {
@@ -243,59 +281,65 @@ const loadCharacterPool = async () => {
     }
     
     for (const [classId, classInfo] of Object.entries(snapshot)) {
-      // 添加班主任（优先级最高，先添加）
-      if (classInfo.headTeacher?.name && !addedNames.has(classInfo.headTeacher.name)) {
-        const char = {
-          name: classInfo.headTeacher.name,
-          gender: classInfo.headTeacher.gender || 'female',
-          origin: classInfo.headTeacher.origin || '',
-          classId,
-          role: 'teacher',
-          subject: '',
-          isHeadTeacher: true,
-          electivePreference: 'general',
-          scheduleTag: '',
-          personality: { order: 0, altruism: 0, tradition: 0, peace: 50 }
+      // --- 处理教师（聚合多重身份）---
+      
+      // 1. 班主任
+      if (classInfo.headTeacher?.name) {
+        const name = classInfo.headTeacher.name
+        if (!teacherMap.has(name)) {
+          teacherMap.set(name, {
+            name: name,
+            gender: classInfo.headTeacher.gender || 'female',
+            origin: classInfo.headTeacher.origin || '',
+            classId: classId, // 初始设置为该班
+            role: 'teacher',
+            subjects: new Set(),
+            isHeadTeacher: true,
+            electivePreference: 'general',
+            scheduleTag: '',
+            personality: { order: 0, altruism: 0, tradition: 0, peace: 50 }
+          })
+        } else {
+          // 已存在：标记为班主任，且班级归属优先变更为其担任班主任的班级
+          const t = teacherMap.get(name)
+          t.isHeadTeacher = true
+          t.classId = classId
+          // 如果之前从 savedMap 合并过数据，这里不需要特殊处理，最后统一合并
         }
-        // 合并已保存的额外属性
-        if (savedMap.has(char.name)) {
-          const saved = savedMap.get(char.name)
-          char.personality = saved.personality || char.personality
-          savedMap.delete(char.name)
-        }
-        currentPool.push(char)
-        addedNames.add(char.name)
       }
       
-      // 添加科任教师（跳过已作为班主任添加的）
-      // 修复：使用 Array.isArray 确保是数组
+      // 2. 科任教师
       const teachers = Array.isArray(classInfo.teachers) ? classInfo.teachers : []
       teachers.forEach(t => {
-        if (t.name && !addedNames.has(t.name)) {
-          const char = {
+        if (!t.name) return
+        
+        if (!teacherMap.has(t.name)) {
+          teacherMap.set(t.name, {
             name: t.name,
             gender: t.gender || 'female',
             origin: t.origin || '',
-            classId,
+            classId: classId,
             role: 'teacher',
-            subject: t.subject || '',
+            subjects: new Set(),
             isHeadTeacher: false,
             electivePreference: 'general',
             scheduleTag: '',
             personality: { order: 0, altruism: 0, tradition: 0, peace: 50 }
-          }
-          if (savedMap.has(char.name)) {
-            const saved = savedMap.get(char.name)
-            char.personality = saved.personality || char.personality
-            savedMap.delete(char.name)
-          }
-          currentPool.push(char)
-          addedNames.add(char.name)
+          })
+        }
+        
+        // 收集科目
+        const teacherObj = teacherMap.get(t.name)
+        if (t.subject) {
+          // 支持逗号、顿号分隔
+          t.subject.split(/[,，、]/).forEach(s => {
+            const trimmed = s.trim()
+            if (trimmed) teacherObj.subjects.add(trimmed)
+          })
         }
       })
       
-      // 添加学生（同样去重）
-      // 修复：使用 Array.isArray 确保是数组
+      // --- 处理学生（保持原有简单去重逻辑）---
       const students = Array.isArray(classInfo.students) ? classInfo.students : []
       students.forEach(s => {
         if (s.name && !addedNames.has(s.name)) {
@@ -324,6 +368,31 @@ const loadCharacterPool = async () => {
           addedNames.add(char.name)
         }
       })
+    }
+    
+    // --- 将聚合后的教师加入池中 ---
+    for (const teacher of teacherMap.values()) {
+      // 格式化科目
+      const subjectStr = Array.from(teacher.subjects).join('、')
+      
+      const char = {
+        ...teacher,
+        subject: subjectStr,
+        subjects: undefined // 清理临时 Set
+      }
+      
+      // 合并已保存的自定义属性
+      if (savedMap.has(char.name)) {
+        const saved = savedMap.get(char.name)
+        char.personality = saved.personality || char.personality
+        savedMap.delete(char.name)
+      }
+      
+      // 避免与学生重名（虽然不太可能，但安全起见）
+      if (!addedNames.has(char.name)) {
+        currentPool.push(char)
+        addedNames.add(char.name)
+      }
     }
     
     // 3. 添加剩余的自定义角色（不在班级中的，同样去重）
@@ -460,6 +529,17 @@ const filteredGroups = computed(() => {
     }
     result = filtered
   }
+
+  if (genderFilter.value) {
+    const filtered = {}
+    for (const [workName, students] of Object.entries(result)) {
+      const matchedStudents = students.filter(s => s.gender === genderFilter.value)
+      if (matchedStudents.length > 0) {
+        filtered[workName] = matchedStudents
+      }
+    }
+    result = filtered
+  }
   
   return result
 })
@@ -539,40 +619,51 @@ const saveTeacherEdit = () => {
     alert('请填写姓名和班级')
     return
   }
+
+  // 1. 如果是编辑模式，先从原来的位置移除
+  if (editingTeacher.value) {
+    const oldClassId = editingTeacher.value.classId
+    const oldName = editingTeacher.value.name
+    const oldClassData = fullRosterSnapshot.value[oldClassId]
+    
+    if (oldClassData) {
+      // 检查是否是班主任
+      if (oldClassData.headTeacher?.name === oldName) {
+        oldClassData.headTeacher = { name: '', gender: 'female', origin: '', role: 'teacher' }
+      }
+      
+      // 检查是否在科任教师列表中
+      if (Array.isArray(oldClassData.teachers)) {
+        const idx = oldClassData.teachers.findIndex(t => t.name === oldName)
+        if (idx !== -1) {
+          oldClassData.teachers.splice(idx, 1)
+        }
+      }
+    }
+  }
   
-  const classData = fullRosterSnapshot.value[form.classId]
-  if (!classData) return
+  // 2. 添加到新位置
+  const newClassData = fullRosterSnapshot.value[form.classId]
+  if (!newClassData) return
   
   if (form.isHeadTeacher) {
-    classData.headTeacher = {
+    newClassData.headTeacher = {
       name: form.name,
       gender: form.gender,
       origin: form.origin,
       role: 'teacher'
     }
   } else {
-    if (!classData.teachers) classData.teachers = []
+    if (!newClassData.teachers) newClassData.teachers = []
+    if (!Array.isArray(newClassData.teachers)) newClassData.teachers = []
     
-    if (editingTeacher.value) {
-      const idx = classData.teachers.findIndex(t => t.name === editingTeacher.value.name)
-      if (idx !== -1) {
-        classData.teachers[idx] = {
-          name: form.name,
-          gender: form.gender,
-          origin: form.origin,
-          subject: form.subject,
-          role: 'teacher'
-        }
-      }
-    } else {
-      classData.teachers.push({
-        name: form.name,
-        gender: form.gender,
-        origin: form.origin,
-        subject: form.subject,
-        role: 'teacher'
-      })
-    }
+    newClassData.teachers.push({
+      name: form.name,
+      gender: form.gender,
+      origin: form.origin,
+      subject: form.subject,
+      role: 'teacher'
+    })
   }
   
   showTeacherEditor.value = false
@@ -987,10 +1078,54 @@ const deleteCharacter = async (char) => {
   }
 }
 
+// 同步角色池数据到快照（确保保存时包含最新修改）
+const syncCharacterPoolToSnapshot = () => {
+  console.log('[RosterFilter] Syncing character pool to snapshot...')
+  // 创建映射，注意如果有重名角色（虽然不应该），后面的会覆盖前面的
+  const poolMap = new Map(characterPool.value.map(c => [c.name, c]))
+  
+  for (const [classId, classInfo] of Object.entries(fullRosterSnapshot.value)) {
+    // 同步学生信息
+    if (Array.isArray(classInfo.students)) {
+      classInfo.students.forEach(student => {
+        const updated = poolMap.get(student.name)
+        if (updated) {
+          // 同步选课倾向
+          if (updated.electivePreference) {
+            student.electivePreference = updated.electivePreference
+          }
+          // 同步日程标签
+          if (updated.scheduleTag) {
+            student.scheduleTag = updated.scheduleTag
+          }
+        }
+      })
+    }
+    
+    // 同步教师信息（如科目等）
+    if (Array.isArray(classInfo.teachers)) {
+      classInfo.teachers.forEach(teacher => {
+        const updated = poolMap.get(teacher.name)
+        if (updated && updated.subject) {
+          teacher.subject = updated.subject
+        }
+      })
+    }
+    
+    // 同步班主任
+    if (classInfo.headTeacher?.name) {
+      // 班主任属性通常较少变动，暂不特别处理，除非有具体需求
+    }
+  }
+}
+
 // ==================== 保存与重置 ====================
 const handleSave = async () => {
   saving.value = true
   try {
+    // 关键修复：保存前先同步角色池的最新修改到快照
+    syncCharacterPoolToSnapshot()
+    
     const changes = []
     
     for (const [classId, studentStateMap] of Object.entries(currentRosterState.value)) {
@@ -1101,7 +1236,8 @@ const refreshData = async () => {
     loading.value = true
     try {
       await gameStore.loadClassData()
-      await loadData()
+      // 关键修复：传入 true 强制使用世界书数据覆盖本地备份
+      await loadData(true)
       await loadCharacterPool()
       alert('名册数据已更新')
     } catch (e) {
@@ -1118,22 +1254,44 @@ const restoreFromBackup = async () => {
   
   loading.value = true
   try {
-    const backupData = await restoreFromBackupWorldbook()
-    if (backupData) {
-      fullRosterSnapshot.value = backupData
-      await saveRosterBackup(backupData)
+    const backupResult = await restoreFromBackupWorldbook()
+    
+    if (backupResult) {
+      // 提取未分配角色
+      const unassigned = backupResult._unassigned || []
+      delete backupResult._unassigned
       
-      for (const [classId, classInfo] of Object.entries(backupData)) {
+      fullRosterSnapshot.value = backupResult
+      await saveRosterBackup(backupResult)
+      
+      // 恢复未分配角色到 characterPool (通过 IndexedDB)
+      if (unassigned.length > 0) {
+        console.log('[RosterFilter] Restoring unassigned characters:', unassigned.length)
+        let savedPool = await getFullCharacterPool() || []
+        
+        unassigned.forEach(c => {
+          const idx = savedPool.findIndex(s => s.name === c.name)
+          if (idx !== -1) {
+            savedPool[idx] = { ...savedPool[idx], ...c }
+          } else {
+            savedPool.push(c)
+          }
+        })
+        await saveFullCharacterPool(deepClone(savedPool))
+      }
+      
+      // 恢复班级数据
+      for (const [classId, classInfo] of Object.entries(backupResult)) {
         gameStore.allClassData[classId] = JSON.parse(JSON.stringify(classInfo))
       }
       
-      for (const classId of Object.keys(backupData)) {
-        await updateClassDataInWorldbook(classId, backupData[classId])
+      for (const classId of Object.keys(backupResult)) {
+        await updateClassDataInWorldbook(classId, backupResult[classId])
       }
       
       await loadData()
       await loadCharacterPool()
-      alert('已从备份恢复所有角色数据')
+      alert(`已从备份恢复所有角色数据 (包含 ${unassigned.length} 个未分配角色)`)
     } else {
       alert('未找到备份数据')
     }
@@ -1150,8 +1308,25 @@ const createBackup = async () => {
   
   loading.value = true
   try {
+    // 关键修复：备份前先同步最新修改
+    syncCharacterPoolToSnapshot()
+    
+    // 收集未分配角色
+    const assignedNames = new Set()
+    for (const classInfo of Object.values(fullRosterSnapshot.value)) {
+      if (classInfo.headTeacher?.name) assignedNames.add(classInfo.headTeacher.name)
+      // 修复：使用 Array.isArray
+      const teachers = Array.isArray(classInfo.teachers) ? classInfo.teachers : []
+      teachers.forEach(t => t.name && assignedNames.add(t.name))
+      const students = Array.isArray(classInfo.students) ? classInfo.students : []
+      students.forEach(s => s.name && assignedNames.add(s.name))
+    }
+    
+    const unassignedCharacters = characterPool.value.filter(c => !assignedNames.has(c.name))
+    console.log('[RosterFilter] Backing up unassigned characters:', unassignedCharacters.length)
+    
     // 修复：传递时使用深拷贝避免 Proxy 问题
-    await createDefaultRosterBackupWorldbook(deepClone(fullRosterSnapshot.value))
+    await createDefaultRosterBackupWorldbook(deepClone(fullRosterSnapshot.value), deepClone(unassignedCharacters))
     alert('备份世界书已创建/更新')
   } catch (e) {
     console.error('[RosterFilter] Error creating backup:', e)
@@ -1273,7 +1448,15 @@ watch(activeTab, async (newTab) => {
                   </option>
                 </select>
               </div>
-              <button class="clear-filters-btn" @click="clubFilter = ''; electiveFilter = ''">清除筛选</button>
+              <div class="filter-item">
+                <label>性别：</label>
+                <select v-model="genderFilter" class="filter-select">
+                  <option value="">全部</option>
+                  <option value="male">男</option>
+                  <option value="female">女</option>
+                </select>
+              </div>
+              <button class="clear-filters-btn" @click="clubFilter = ''; electiveFilter = ''; genderFilter = ''">清除筛选</button>
             </div>
             
             <!-- 统计信息 -->
@@ -1429,10 +1612,36 @@ watch(activeTab, async (newTab) => {
               </div>
             </div>
             
+            <!-- 移动端视图切换提示/控制 -->
+            <div class="mobile-view-controls">
+              <button 
+                class="mobile-tab-btn" 
+                :class="{ active: composerMobileView === 'class' }"
+                @click="composerMobileView = 'class'"
+              >
+                🏫 班级概览
+              </button>
+              <button 
+                class="mobile-tab-btn" 
+                :class="{ active: composerMobileView === 'pool' }"
+                @click="composerMobileView = 'pool'"
+              >
+                👥 添加角色
+              </button>
+            </div>
+
             <div class="composer-layout">
               <!-- 当前班级成员 -->
-              <div class="composer-panel current-class">
-                <h4>当前班级配置</h4>
+              <div 
+                class="composer-panel current-class"
+                :class="{ 'mobile-hidden': composerMobileView !== 'class' }"
+              >
+                <div class="panel-header-row">
+                  <h4>当前班级配置</h4>
+                  <button class="add-member-btn-mobile" @click="composerMobileView = 'pool'">
+                    + 添加成员
+                  </button>
+                </div>
                 
                 <!-- 班主任 -->
                 <div class="composer-section">
@@ -1491,8 +1700,16 @@ watch(activeTab, async (newTab) => {
               </div>
               
               <!-- 可用角色池 -->
-              <div class="composer-panel available-pool">
-                <h4>可用角色池 ({{ availableCharacters.length }})</h4>
+              <div 
+                class="composer-panel available-pool"
+                :class="{ 'mobile-hidden': composerMobileView !== 'pool' }"
+              >
+                <div class="panel-header-row">
+                  <h4>可用角色池 ({{ availableCharacters.length }})</h4>
+                  <button class="back-to-class-btn" @click="composerMobileView = 'class'">
+                    🔙 返回班级
+                  </button>
+                </div>
                 <div class="pool-toolbar">
                   <input 
                     type="text" 
@@ -1607,9 +1824,9 @@ watch(activeTab, async (newTab) => {
         <div class="panel-footer">
           <div class="left-actions">
             <button class="action-btn text-btn" @click="handleReset">🔄 重置全选</button>
-            <button class="action-btn text-btn" @click="refreshData">📥 读取新名册</button>
+            <button class="action-btn text-btn" @click="refreshData" :disabled="isLocked">📥 读取新名册</button>
             <button class="action-btn text-btn" @click="createBackup">💾 创建备份</button>
-            <button class="action-btn text-btn" @click="restoreFromBackup">📤 从备份恢复</button>
+            <button class="action-btn text-btn" @click="restoreFromBackup" :disabled="isLocked">📤 从备份恢复</button>
             <div class="lock-wrapper">
               <button 
                 class="action-btn icon-btn" 
@@ -1752,7 +1969,7 @@ watch(activeTab, async (newTab) => {
               <div v-for="(axis, key) in PERSONALITY_AXES" :key="key" class="axis-row">
                 <label>{{ axis.name }}：</label>
                 <input type="range" :min="axis.min" :max="axis.max" v-model.number="characterEditForm.personality[key]" />
-                <span class="axis-value">{{ characterEditForm.personality[key] }}</span>
+                <input type="number" :min="axis.min" :max="axis.max" v-model.number="characterEditForm.personality[key]" class="axis-input" />
               </div>
             </div>
             
@@ -2809,6 +3026,16 @@ watch(activeTab, async (newTab) => {
 
 .text-btn:hover { background: rgba(25, 118, 210, 0.1); }
 
+.text-btn:disabled {
+  color: #999;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.text-btn:disabled:hover {
+  background: none;
+}
+
 .icon-btn {
   font-size: 0.85rem;
   border: 1px solid #ccc;
@@ -2927,6 +3154,17 @@ watch(activeTab, async (newTab) => {
   font-size: 0.85rem;
 }
 
+.axis-input {
+  width: 60px;
+  text-align: right;
+  font-weight: 600;
+  font-size: 0.85rem;
+  padding: 2px 4px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin-left: 8px;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -2973,11 +3211,107 @@ watch(activeTab, async (newTab) => {
   .toolbar { flex-direction: column; align-items: stretch; }
   .search-wrapper { max-width: none; }
   
-  .composer-layout { grid-template-columns: 1fr; }
+  .composer-layout { display: block; }
+  .composer-panel { height: calc(100vh - 280px); display: flex; flex-direction: column; }
+  .composer-list { flex: 1; max-height: none; }
+  .composer-list.compact { max-height: none; flex: 0 0 auto; }
+  
+  .mobile-hidden { display: none !important; }
+  
+  .mobile-view-controls {
+    display: flex;
+    margin-bottom: 12px;
+    background: #e0e0e0;
+    border-radius: 8px;
+    padding: 4px;
+  }
+  
+  .mobile-tab-btn {
+    flex: 1;
+    border: none;
+    background: none;
+    padding: 8px;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #666;
+  }
+  
+  .mobile-tab-btn.active {
+    background: white;
+    color: var(--primary-color);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+
+  .panel-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+
+  .add-member-btn-mobile, .back-to-class-btn {
+    display: inline-block;
+    padding: 4px 12px;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-size: 0.8rem;
+  }
+  
+  .back-to-class-btn { background: #666; }
+
   .student-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
   
   .panel-footer { padding: 12px 16px; }
   .left-actions { width: 100%; margin-bottom: 8px; }
   .right-actions { width: 100%; justify-content: space-between; }
+
+  /* 移动端固定底部操作栏 */
+  .composer-actions {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background: white;
+    padding: 12px 16px;
+    box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+    z-index: 100;
+    box-sizing: border-box;
+    display: flex;
+    gap: 12px;
+  }
+
+  .composer-actions .action-btn {
+    flex: 1;
+    justify-content: center;
+    margin: 0;
+  }
+  
+  /* 给列表增加底部留白，防止被固定按钮遮挡 */
+  .composer-list {
+    padding-bottom: 70px;
+  }
+}
+
+/* 极度窄屏下隐藏次要信息，优先显示名字 */
+@media (max-width: 480px) {
+  .item-meta {
+    display: none;
+  }
+  /* 同时也隐藏分配标签，节省空间 */
+  .assigned-tag {
+    display: none;
+  }
+}
+
+/* 桌面端隐藏移动端控件 */
+@media (min-width: 769px) {
+  .mobile-view-controls, 
+  .add-member-btn-mobile, 
+  .back-to-class-btn { 
+    display: none; 
+  }
 }
 </style>

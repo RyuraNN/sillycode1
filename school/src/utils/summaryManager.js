@@ -479,9 +479,10 @@ export function getSummaryContent(floor, type) {
 
 /**
  * 检查是否需要生成大总结
+ * @param {number} currentFloor 当前楼层
  * @returns {{needed: boolean, floors?: number[]}}
  */
-export function checkMajorSummaryNeeded() {
+export function checkMajorSummaryNeeded(currentFloor) {
   const gameStore = useGameStore()
   const settings = gameStore.settings.summarySystem
   
@@ -500,8 +501,16 @@ export function checkMajorSummaryNeeded() {
     .filter(s => s.type === 'major')
     .forEach(s => s.coveredFloors.forEach(f => coveredByMajor.add(f)))
   
-  // 找出未被覆盖的小总结
-  const uncoveredMinors = minorSummaries.filter(s => !coveredByMajor.has(s.floor))
+  // 找出未被覆盖的小总结，且必须已经超出保护范围（距离 > 25）
+  // 这样保证生成的“大总结”包含的所有内容都是已经可以显示的
+  const uncoveredMinors = minorSummaries.filter(s => {
+    if (coveredByMajor.has(s.floor)) return false
+    
+    // 检查距离：只有当小总结距离当前楼层超过 majorSummaryStartFloor 时，才认为它可以被合并
+    // 对应需求：等待小总结超出的层数大于5的时候再用大总结进行替换
+    const distance = currentFloor - s.floor
+    return distance >= settings.majorSummaryStartFloor
+  })
   
   if (uncoveredMinors.length >= settings.minorCountForMajor) {
     // 取最老的 N 个小总结进行合并
@@ -517,9 +526,10 @@ export function checkMajorSummaryNeeded() {
 
 /**
  * 检查是否需要生成超级总结（支持递归）
+ * @param {number} currentFloor 当前楼层
  * @returns {{needed: boolean, summaryFloors?: number[], sourceType?: 'major' | 'super'}}
  */
-export function checkSuperSummaryNeeded() {
+export function checkSuperSummaryNeeded(currentFloor) {
   const gameStore = useGameStore()
   const settings = gameStore.settings.summarySystem
   
@@ -547,7 +557,16 @@ export function checkSuperSummaryNeeded() {
     })
   })
   
-  const uncoveredMajors = majorSummaries.filter(s => !coveredBySuper.has(s.floor))
+  // 筛选未被覆盖的大总结，且必须是“生效”的大总结
+  // 生效定义：在游戏中实际替换了上下文（即距离 > majorSummaryStartFloor）
+  // 我们检查大总结的最大楼层是否也超出了保护范围，确保整个大总结都已经生效
+  const uncoveredMajors = majorSummaries.filter(s => {
+    if (coveredBySuper.has(s.floor)) return false
+
+    const maxFloor = Math.max(...s.coveredFloors)
+    const distance = currentFloor - maxFloor
+    return distance >= settings.majorSummaryStartFloor
+  })
   
   if (uncoveredMajors.length >= settings.majorCountForSuper) {
     const toMerge = uncoveredMajors.slice(0, settings.majorCountForSuper)
@@ -574,7 +593,14 @@ export function checkSuperSummaryNeeded() {
     })
   })
 
-  const uncoveredSupers = superSummaries.filter(s => !coveredSupers.has(s.floor))
+  // 同样需要检查超级总结是否“生效”，虽然超级总结通常肯定很老了，但保持逻辑一致性
+  const uncoveredSupers = superSummaries.filter(s => {
+    if (coveredSupers.has(s.floor)) return false
+    
+    const maxFloor = Math.max(...s.coveredFloors)
+    const distance = currentFloor - maxFloor
+    return distance >= settings.majorSummaryStartFloor
+  })
 
   if (uncoveredSupers.length >= settings.majorCountForSuper) { // 复用大总结的阈值设置
     const toMerge = uncoveredSupers.slice(0, settings.majorCountForSuper)
@@ -616,20 +642,20 @@ export async function processPostReply(content, floor, preGeneratedMinorSummary 
   if (settings.useAssistantForSummary && gameStore.settings.assistantAI?.enabled) {
     setTimeout(async () => {
       try {
-        const majorCheck = checkMajorSummaryNeeded()
+        const majorCheck = checkMajorSummaryNeeded(floor)
         if (majorCheck.needed) {
           console.log('[SummaryManager] Generating major summary for floors:', majorCheck.floors)
           await generateMajorSummary(majorCheck.floors)
         }
         
         // 3. 检查是否需要生成超级总结 (循环检查以支持多层递归)
-        let superCheck = checkSuperSummaryNeeded()
+        let superCheck = checkSuperSummaryNeeded(floor)
         while (superCheck.needed) {
           console.log(`[SummaryManager] Generating super summary from ${superCheck.sourceType}s:`, superCheck.summaryFloors)
           await generateSuperSummary(superCheck.summaryFloors, superCheck.sourceType)
           
           // 重新检查，看是否能继续向上合并
-          superCheck = checkSuperSummaryNeeded()
+          superCheck = checkSuperSummaryNeeded(floor)
         }
       } catch (e) {
         console.error('[SummaryManager] Error in background summary generation:', e)

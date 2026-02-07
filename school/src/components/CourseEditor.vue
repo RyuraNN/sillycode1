@@ -6,7 +6,8 @@ import {
   GRADE_2_COURSES, 
   GRADE_3_COURSES, 
   IDOL_COURSES,
-  resetCourseData
+  resetCourseData,
+  saveCoursePoolToWorldbook
 } from '../data/coursePoolData'
 
 const emit = defineEmits(['close'])
@@ -85,6 +86,9 @@ const saveEdit = () => {
       currentArray.value[index] = editingCourse.value
     }
   }
+  
+  // 保存到世界书
+  saveCoursePoolToWorldbook()
   editingCourse.value = null
 }
 
@@ -93,6 +97,8 @@ const deleteCourse = (course) => {
     const index = currentArray.value.findIndex(c => c.id === course.id)
     if (index !== -1) {
       currentArray.value.splice(index, 1)
+      // 保存到世界书
+      saveCoursePoolToWorldbook()
     }
   }
 }
@@ -100,6 +106,8 @@ const deleteCourse = (course) => {
 const handleReset = () => {
   if (confirm('确定要重置所有课程数据吗？这将丢失所有未保存的修改。')) {
     resetCourseData()
+    // 保存到世界书
+    saveCoursePoolToWorldbook()
   }
 }
 

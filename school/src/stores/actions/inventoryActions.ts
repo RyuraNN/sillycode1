@@ -282,5 +282,10 @@ export const inventoryActions = {
     this.updateEffects()
     this.handleForumTurnEnd()
     this.handlePartTimeJobTurnEnd()
+    
+    // 递减新游戏引导回合数
+    if (this.player.newGameGuideTurns > 0) {
+      this.player.newGameGuideTurns--
+    }
   }
 }

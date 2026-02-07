@@ -160,6 +160,10 @@ const initializeGameWorld = async () => {
   } else {
     await setVariableParsingWorldbookStatus(true)
   }
+  
+  // 初始化NPC日程系统
+  await gameStore.initNpcScheduleSystem()
+  
   console.log('[GameMain] Game world initialized')
 }
 
@@ -721,7 +725,25 @@ const sendMessage = async () => {
 }
 
 const processAIResponse = async (response) => {
-  const cleanResponse = removeThinking(response)
+  let cleanResponse = removeThinking(response)
+
+  // 提取弹幕内容
+  const danmuRegex = /<danmu>([\s\S]*?)<\/danmu>/gi
+  let danmuContent = ''
+  cleanResponse = cleanResponse.replace(danmuRegex, (match, content) => {
+    danmuContent += content + '\n'
+    return '' // 从显示内容中移除
+  })
+
+  if (danmuContent.trim()) {
+    const danmuItems = danmuContent.split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+    
+    if (danmuItems.length > 0) {
+      showDanmaku(danmuItems, 'chat')
+    }
+  }
 
   // 提取吐槽内容
   const tucao = extractTucao(cleanResponse)
@@ -802,6 +824,14 @@ const processAIResponse = async (response) => {
         const assistantSummary = extractSummary(cleanAssistantResponse, 'minor')
         if (assistantSummary) {
           preGeneratedSummary = assistantSummary
+        }
+
+        // 如果主AI没有生成建议回复，且开启了建议回复功能，尝试从辅助AI回复中提取
+        if (gameStore.settings.suggestedReplies && suggestedReplies.value.length === 0) {
+          const assistantReplies = extractSuggestedReplies(cleanAssistantResponse)
+          if (assistantReplies?.length > 0) {
+            suggestedReplies.value = assistantReplies
+          }
         }
       }
 
@@ -1081,6 +1111,72 @@ const handleReroll = async () => {
     await gameStore.syncWorldbook()
     inputText.value = ''
     await sendMessage()
+  }
+}
+
+// 变量思考重roll - 仅重新运行辅助AI处理
+const handleAssistantReroll = async () => {
+  showMenu.value = false
+  
+  if (!gameStore.settings.assistantAI?.enabled) return
+  
+  const log = gameLog.value
+  if (log.length === 0) return
+  
+  const lastLog = log[log.length - 1]
+  if (lastLog.type !== 'ai') return
+  
+  // 如果有 preVariableSnapshot，先恢复到辅助AI执行前的状态
+  if (lastLog.preVariableSnapshot) {
+    gameStore.restoreGameState(lastLog.preVariableSnapshot)
+    await gameStore.syncWorldbook()
+  }
+  
+  // 获取原始内容
+  const sourceContent = lastLog.rawContent || lastLog.content
+  if (!sourceContent) return
+  
+  // 清理内容，只保留给辅助AI分析的文本
+  let contentOnly = sourceContent
+    .replace(/\[GAME_DATA\][\s\S]*?\[\/GAME_DATA\]/g, '')
+    .replace(/<minor_summary>[\s\S]*?<\/minor_summary>/g, '')
+    .replace(/<imgthink[\s\S]*?<\/imgthink>/gi, '')
+    .replace(/<image>[\s\S]*?<\/image>/gi, '')
+    .replace(/<generate_image[^>]*\/?>/gi, '')
+    .replace(/<image-ref\s+[^>]*\/?>/gi, '')
+  
+  isAssistantProcessing.value = true
+  
+  try {
+    const assistantResponse = await callAssistantAI(contentOnly)
+    
+    if (gameStore.settings.debugMode) {
+      assistantLogs.value.push({
+        id: Date.now(),
+        floor: gameStore.currentFloor,
+        content: `[Variable Assistant Reroll]\n${assistantResponse}`
+      })
+    }
+    
+    const cleanAssistantResponse = removeThinking(assistantResponse)
+    const assistantDataList = parseGameData(cleanAssistantResponse)
+    
+    // 使用 mergeGameData 将数组合并成对象，然后应用游戏数据
+    const finalData = mergeGameData([], assistantDataList)
+    const changes = applyGameData(finalData)
+    showDanmaku(changes)
+    
+    // 更新日志快照
+    lastLog.snapshot = gameStore.getGameState()
+    
+    // 自动保存
+    gameStore.createAutoSave(gameLog.value, gameStore.currentFloor)
+    
+  } catch (e) {
+    console.error('变量思考重roll失败:', e)
+    showDanmaku(['变量思考重roll失败: ' + e.message])
+  } finally {
+    isAssistantProcessing.value = false
   }
 }
 
@@ -1443,6 +1539,11 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
             <button class="plus-btn" @click.stop="showMenu = !showMenu" title="更多选项">+</button>
             <div v-if="showMenu" class="menu-popup">
               <div class="menu-item" @click="handleReroll">AI回复重roll</div>
+              <div 
+                v-if="gameStore.settings.assistantAI?.enabled" 
+                class="menu-item" 
+                @click="handleAssistantReroll"
+              >变量思考重roll</div>
             </div>
           </div>
 

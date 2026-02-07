@@ -9,6 +9,7 @@ import CourseEditor from './CourseEditor.vue'
 import SchoolRosterFilterPanel from './SchoolRosterFilterPanel.vue'
 import EventEditorPanel from './EventEditorPanel.vue'
 import NpcScheduleEditorPanel from './NpcScheduleEditorPanel.vue'
+import DataTransferPanel from './DataTransferPanel.vue'
 import { setPlayerClass } from '../utils/worldbookParser'
 import { DEFAULT_FORUM_POSTS, saveForumToWorldbook } from '../utils/forumWorldbook'
 import { getCoursePoolState } from '../data/coursePoolData'
@@ -26,6 +27,7 @@ const showCourseEditor = ref(false)
 const showFilterPanel = ref(false)
 const showEventEditor = ref(false)
 const showScheduleEditor = ref(false)
+const showTransferPanel = ref(false)
 
 const formData = ref({
   name: '',
@@ -647,6 +649,7 @@ const confirmSignature = async () => {
           <button class="action-btn small" @click="showFilterPanel = true">筛选全校名册</button>
           <button class="action-btn small" @click="showScheduleEditor = true">角色日程编辑器</button>
           <button class="action-btn small" @click="showEventEditor = true">事件编辑器</button>
+          <button class="action-btn small highlight" @click="showTransferPanel = true">导出/导入设置</button>
         </div>
         <img src="https://files.catbox.moe/efg1xe.png" alt="School Logo" class="school-logo" />
         <h1 class="doc-title">入学通知书</h1>
@@ -929,6 +932,12 @@ const confirmSignature = async () => {
     <NpcScheduleEditorPanel
       v-if="showScheduleEditor"
       @close="showScheduleEditor = false"
+    />
+
+    <!-- 数据迁移面板 -->
+    <DataTransferPanel
+      v-if="showTransferPanel"
+      @close="showTransferPanel = false"
     />
   </div>
 </template>
@@ -1371,5 +1380,13 @@ const confirmSignature = async () => {
   font-size: 0.8rem;
   padding: 4px 10px;
   min-width: 90px;
+}
+
+.action-btn.small.highlight {
+  background-color: #f57c00; /* 橙色高亮 */
+}
+
+.action-btn.small.highlight:hover {
+  background-color: #ef6c00;
 }
 </style>

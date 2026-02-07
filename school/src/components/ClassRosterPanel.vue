@@ -518,7 +518,7 @@ const handleConfirm = async () => {
           <div v-for="(axis, key) in PERSONALITY_AXES" :key="key" class="axis-row">
             <label>{{ axis.name }}（{{ axis.labels.min }}/{{ axis.labels.max }}）：</label>
             <input type="range" :min="axis.min" :max="axis.max" v-model.number="editForm.personality[key]" />
-            <span class="axis-value">{{ editForm.personality[key] }}</span>
+            <input type="number" :min="axis.min" :max="axis.max" v-model.number="editForm.personality[key]" class="axis-input" />
           </div>
         </div>
 
@@ -584,7 +584,7 @@ const handleConfirm = async () => {
                   <div v-for="(axis, key) in RELATIONSHIP_AXES" :key="key" class="axis-row">
                     <label>{{ axis.name }}（{{ axis.labels.min }}/{{ axis.labels.max }}）：</label>
                     <input type="range" :min="axis.min" :max="axis.max" v-model.number="relationForm[key]" />
-                    <span class="axis-value">{{ relationForm[key] }}</span>
+                    <input type="number" :min="axis.min" :max="axis.max" v-model.number="relationForm[key]" class="axis-input" />
                   </div>
                 </div>
 
@@ -633,7 +633,7 @@ const handleConfirm = async () => {
               <div v-for="(axis, key) in PERSONALITY_AXES" :key="key" class="axis-row">
                 <label>{{ axis.name }}（{{ axis.labels.min }}/{{ axis.labels.max }}）：</label>
                 <input type="range" :min="axis.min" :max="axis.max" v-model.number="personalityForm[key]" />
-                <span class="axis-value">{{ personalityForm[key] }}</span>
+                <input type="number" :min="axis.min" :max="axis.max" v-model.number="personalityForm[key]" class="axis-input" />
               </div>
             </div>
 
@@ -660,7 +660,7 @@ const handleConfirm = async () => {
               <div v-for="(priority, key) in PRIORITY_TYPES" :key="key" class="axis-row">
                 <label>{{ priority.icon }} {{ priority.name }}：</label>
                 <input type="range" min="0" max="100" v-model.number="prioritiesForm[key]" />
-                <span class="axis-value">{{ prioritiesForm[key] }}</span>
+                <input type="number" min="0" max="100" v-model.number="prioritiesForm[key]" class="axis-input" />
               </div>
             </div>
           </div>
@@ -1088,6 +1088,16 @@ const handleConfirm = async () => {
   width: 40px;
   text-align: right;
   font-weight: bold;
+}
+
+.axis-input {
+  width: 60px;
+  text-align: right;
+  font-weight: bold;
+  padding: 2px 4px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin-left: 8px;
 }
 
 .groups-section {

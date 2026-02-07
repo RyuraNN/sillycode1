@@ -74,8 +74,18 @@ const trackedNpcsInfo = computed(() => {
   return getTrackedNpcsWithLocations(gameStore)
 })
 
+// 计算当前选中末端地点的NPC列表
+const leafLocationNpcs = computed(() => {
+  npcUpdateTrigger.value
+  if (currentLeafItem.value) {
+    return getNpcsAtLocation(currentLeafItem.value.id, gameStore)
+  }
+  return []
+})
+
 // 获取地点的NPC数量（用于显示在地点卡片上）
 const getLocationNpcCount = (locationId) => {
+  npcUpdateTrigger.value // 依赖触发器以确保更新
   return getNpcCountAtLocation(locationId)
 }
 
@@ -661,6 +671,9 @@ const getSubItemStyle = (subItem, parentItem) => {
             :title="item.desc"
           >
             <div class="item-name" :style="getItemNameStyle(item)">{{ item.name }}</div>
+            <div v-if="getLocationNpcCount(item.id) > 0" class="item-npc-count">
+              👥 {{ getLocationNpcCount(item.id) }}
+            </div>
             <div class="item-type">{{ item.type }}</div>
             <div v-if="item.openTime" class="item-time">{{ item.openTime }}</div>
             
@@ -774,32 +787,62 @@ const getSubItemStyle = (subItem, parentItem) => {
 
       <!-- 前往/选择确认弹窗 -->
       <div v-if="showLeafModal" class="leaf-modal-overlay">
-        <div class="leaf-modal">
-          <h3>{{ isSelectionMode ? '选择确认' : '前往确认' }}</h3>
-          <p>确定要{{ isSelectionMode ? '选择' : '前往' }} <strong>{{ currentLeafItem?.name }}</strong> 吗？</p>
-          <p class="desc-text">{{ currentLeafItem?.desc }}</p>
-          
-          <div v-if="currentLeafItem?.openTime">
-            <strong>开放时间:</strong> {{ currentLeafItem.openTime }}
-          </div>
-          <div v-if="currentLeafItem?.unlockCondition">
-            <strong>解锁条件:</strong> {{ currentLeafItem.unlockCondition }}
+        <div class="leaf-modal-container">
+          <div class="leaf-modal">
+            <h3>{{ isSelectionMode ? '选择确认' : '前往确认' }}</h3>
+            <p>确定要{{ isSelectionMode ? '选择' : '前往' }} <strong>{{ currentLeafItem?.name }}</strong> 吗？</p>
+            <p class="desc-text">{{ currentLeafItem?.desc }}</p>
+            
+            <div v-if="currentLeafItem?.openTime">
+              <strong>开放时间:</strong> {{ currentLeafItem.openTime }}
+            </div>
+            <div v-if="currentLeafItem?.unlockCondition">
+              <strong>解锁条件:</strong> {{ currentLeafItem.unlockCondition }}
+            </div>
+
+            <div v-if="!isSelectionMode && !currentAccessStatus.allowed" class="modal-warning">
+              ⛔ {{ currentAccessStatus.reason }}
+            </div>
+
+            <div class="modal-actions">
+              <button 
+                class="action-btn" 
+                :class="{ disabled: !isSelectionMode && !currentAccessStatus.allowed }"
+                @click="confirmTravel"
+                :disabled="!isSelectionMode && !currentAccessStatus.allowed"
+              >
+                {{ isSelectionMode ? '发送此位置' : '出发' }}
+              </button>
+              <button class="action-btn secondary" @click="showLeafModal = false">取消</button>
+            </div>
           </div>
 
-          <div v-if="!isSelectionMode && !currentAccessStatus.allowed" class="modal-warning">
-            ⛔ {{ currentAccessStatus.reason }}
-          </div>
-
-          <div class="modal-actions">
-            <button 
-              class="action-btn" 
-              :class="{ disabled: !isSelectionMode && !currentAccessStatus.allowed }"
-              @click="confirmTravel"
-              :disabled="!isSelectionMode && !currentAccessStatus.allowed"
-            >
-              {{ isSelectionMode ? '发送此位置' : '出发' }}
-            </button>
-            <button class="action-btn secondary" @click="showLeafModal = false">取消</button>
+          <!-- 末端地点 NPC 列表 -->
+          <div v-if="leafLocationNpcs.length > 0" class="leaf-npc-list">
+            <div class="leaf-npc-header">
+              <span>👥 在此处的角色 ({{ leafLocationNpcs.length }})</span>
+            </div>
+            <div class="leaf-npc-content">
+              <div 
+                v-for="npc in leafLocationNpcs" 
+                :key="npc.id" 
+                class="leaf-npc-item"
+              >
+                <span class="leaf-npc-avatar">{{ npc.gender === 'female' ? '👩' : '👨' }}</span>
+                <div class="leaf-npc-info">
+                  <div class="leaf-npc-name">{{ npc.name }}</div>
+                  <div class="leaf-npc-role">{{ getRoleLabel(npc.role) }}</div>
+                </div>
+                <button 
+                  class="track-btn" 
+                  :class="{ tracked: isNpcTracked(npc.id) }"
+                  @click.stop="toggleNpcTracking(npc.id)"
+                  :title="isNpcTracked(npc.id) ? '取消跟踪' : '跟踪此角色'"
+                >
+                  {{ isNpcTracked(npc.id) ? '📌' : '📍' }}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1065,6 +1108,18 @@ const getSubItemStyle = (subItem, parentItem) => {
   font-weight: 500;
 }
 
+.item-npc-count {
+  font-size: 0.85rem;
+  color: var(--text-tertiary);
+  margin-bottom: 4px;
+  position: relative;
+  z-index: 10;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
 /* 玩家位置标记 */
 .player-marker {
   position: absolute;
@@ -1193,6 +1248,20 @@ const getSubItemStyle = (subItem, parentItem) => {
   z-index: 2000;
 }
 
+.leaf-modal-container {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  animation: modal-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.leaf-modal-container {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  animation: modal-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
 .leaf-modal {
   background: white;
   padding: 28px;
@@ -1200,7 +1269,117 @@ const getSubItemStyle = (subItem, parentItem) => {
   width: 340px;
   text-align: center;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-  animation: modal-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  flex-shrink: 0;
+}
+
+.leaf-npc-list {
+  background: white;
+  padding: 20px;
+  border-radius: 20px;
+  width: 280px;
+  max-height: 400px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+}
+
+.leaf-npc-header {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(0,0,0,0.1);
+  text-align: left;
+}
+
+.leaf-npc-content {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.leaf-npc-item {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  border-radius: 8px;
+  margin-bottom: 4px;
+  background: rgba(0,0,0,0.02);
+}
+
+.leaf-npc-avatar {
+  font-size: 1.2rem;
+  margin-right: 10px;
+}
+
+.leaf-npc-info {
+  flex: 1;
+  text-align: left;
+}
+
+.leaf-npc-name {
+  font-weight: 500;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.leaf-npc-role {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.leaf-npc-list {
+  background: white;
+  padding: 20px;
+  border-radius: 20px;
+  width: 280px;
+  max-height: 400px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+}
+
+.leaf-npc-header {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(0,0,0,0.1);
+  text-align: left;
+}
+
+.leaf-npc-content {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.leaf-npc-item {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  border-radius: 8px;
+  margin-bottom: 4px;
+  background: rgba(0,0,0,0.02);
+}
+
+.leaf-npc-avatar {
+  font-size: 1.2rem;
+  margin-right: 10px;
+}
+
+.leaf-npc-info {
+  flex: 1;
+  text-align: left;
+}
+
+.leaf-npc-name {
+  font-weight: 500;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.leaf-npc-role {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
 }
 
 @keyframes modal-pop {
@@ -1378,6 +1557,27 @@ const getSubItemStyle = (subItem, parentItem) => {
 
 :global(body.dark-mode) .leaf-modal h3 {
   color: var(--accent-warm);
+}
+
+:global(body.dark-mode) .leaf-npc-list {
+  background: linear-gradient(180deg, #2a2a3e 0%, #1e1e2f 100%);
+}
+
+:global(body.dark-mode) .leaf-npc-header {
+  color: var(--text-primary);
+  border-bottom-color: rgba(255, 255, 255, 0.05);
+}
+
+:global(body.dark-mode) .leaf-npc-name {
+  color: var(--text-primary);
+}
+
+:global(body.dark-mode) .leaf-npc-role {
+  color: var(--text-secondary);
+}
+
+:global(body.dark-mode) .leaf-npc-item {
+  background: rgba(255, 255, 255, 0.05);
 }
 
 :global(body.dark-mode) .desc-text {

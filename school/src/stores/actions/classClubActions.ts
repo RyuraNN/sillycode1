@@ -26,20 +26,105 @@ export const classClubActions = {
       console.warn('[GameStore] Failed to load class data from Worldbook')
       this.allClassData = {}
     }
+    
+    // 初始化所有班级的 NPC 数据
+    this.initializeAllClassNpcs()
+  },
+
+  /**
+   * 初始化所有班级的 NPC
+   * 将所有班级数据中的学生和老师添加到全局 NPC 列表中，确保他们能被日程系统调度
+   */
+  initializeAllClassNpcs(this: any) {
+    if (!this.allClassData) return
+    
+    console.log('[GameStore] Initializing all class NPCs...')
+    let count = 0
+    
+    for (const [classId, classInfo] of Object.entries(this.allClassData)) {
+      const info = classInfo as any
+      
+      const addNpc = (name: string, role: 'student' | 'teacher' = 'student') => {
+        if (!name) return
+        const charId = generateCharId(name)
+        
+        // 检查是否存在
+        const existingNpc = this.npcs.find((n: NpcStats) => n.id === charId)
+        if (!existingNpc) {
+          this.npcs.push({
+            id: charId,
+            name: name,
+            relationship: 0,
+            isAlive: true, // 默认为活跃状态，以便在地图上显示
+            location: classId, // 初始位置
+            classId: classId,
+            role: role
+          })
+          count++
+        } else {
+          // 如果已存在，确保 classId 被正确设置
+          if (!existingNpc.classId) {
+            existingNpc.classId = classId
+          }
+          // 确保状态为活跃
+          if (existingNpc.isAlive === false) {
+            existingNpc.isAlive = true
+          }
+        }
+      }
+
+      // 添加班主任
+      if (info.headTeacher?.name) {
+        addNpc(info.headTeacher.name, 'teacher')
+      }
+      
+      // 添加任课老师
+      if (info.teachers && Array.isArray(info.teachers)) {
+        info.teachers.forEach((t: any) => addNpc(t.name, 'teacher'))
+      }
+      
+      // 添加学生
+      if (info.students && Array.isArray(info.students)) {
+        info.students.forEach((s: any) => {
+          if (s.name && s.name !== this.player.name) {
+            addNpc(s.name, 'student')
+          }
+        })
+      }
+    }
+    
+    console.log(`[GameStore] Initialized ${count} new NPCs from class data. Total NPCs: ${this.npcs.length}`)
   },
 
   /**
    * 加载社团数据
+   * 注意：合并而非覆盖玩家创建的社团（以 player_club_ 前缀识别）
    */
   async loadClubData(this: any) {
     console.log('[GameStore] Loading club data...')
+    
+    // 保存玩家创建的社团（ID 以 player_club_ 开头）
+    const playerCreatedClubs: Record<string, ClubData> = {}
+    if (this.allClubs) {
+      for (const [clubId, club] of Object.entries(this.allClubs)) {
+        if (clubId.startsWith('player_club_')) {
+          playerCreatedClubs[clubId] = club as ClubData
+        }
+      }
+    }
+    
     const clubData = await fetchClubDataFromWorldbook()
     if (clubData) {
       console.log('[GameStore] Loaded club data from Worldbook', clubData)
-      this.allClubs = clubData as Record<string, ClubData>
+      // 合并世界书数据与玩家创建的社团
+      this.allClubs = {
+        ...(clubData as Record<string, ClubData>),
+        ...playerCreatedClubs
+      }
     } else {
       console.warn('[GameStore] Failed to load club data from Worldbook')
-      this.allClubs = {}
+      // 保留玩家创建的社团
+      this.allClubs = playerCreatedClubs
     }
   },
 
@@ -87,6 +172,7 @@ export const classClubActions = {
           relationship: 0,
           isAlive: false,
           location: classId,
+          classId: classId, // 显式设置 classId，用于日程系统
           role: role
         })
       }
@@ -347,7 +433,7 @@ export const classClubActions = {
   /**
    * 玩家创建新社团
    */
-  async createClub(this: any, clubInfo: { name: string; description: string; coreSkill?: string; activityDay?: string; location?: string }) {
+  async createClub(this: any, clubInfo: { name: string; description: string; coreSkill?: string; activityDay?: string; location?: string; advisor?: string }) {
     // 生成社团 ID
     const clubId = `player_club_${Date.now().toString(36)}`
 
@@ -358,7 +444,9 @@ export const classClubActions = {
       coreSkill: clubInfo.coreSkill || '',
       activityDay: clubInfo.activityDay || '',
       location: clubInfo.location || '',
-      president: this.player.name // 玩家是部长
+      advisor: clubInfo.advisor || '',
+      president: this.player.name, // 玩家是部长
+      members: [this.player.name] // 确保玩家在成员列表中
     }
 
     // 创建世界书条目
@@ -389,9 +477,47 @@ export const classClubActions = {
   async syncWorldbook(this: any) {
     console.log('[GameStore] Syncing worldbook after rollback...')
     
+    // 同步社团状态
+    await syncClubWorldbookState(this.currentRunId)
+    
+    // 同步班级状态
+    if (this.player.classId) {
+      await setPlayerClass(this.player.classId)
+    }
+    
+    // 同步选修课状态
+    try {
+      const { syncElectiveWorldbookState } = await import('../../utils/electiveWorldbook.js')
+      await syncElectiveWorldbookState(this.currentRunId)
+    } catch (e) {
+      console.warn('[GameStore] Failed to sync elective worldbook:', e)
+    }
+    
+    // 同步社交数据
     await restoreWorldbookFromStore()
-    await saveForumToWorldbook(this.player.forum.posts, this.currentRunId, this.settings.forumWorldbookLimit)
     await saveSocialRelationshipOverview()
+    
+    // 同步论坛数据
+    await saveForumToWorldbook(this.player.forum.posts, this.currentRunId, this.settings.forumWorldbookLimit)
+    
+    // 同步兼职数据
+    try {
+      const { restorePartTimeWorldbookFromStore } = await import('../../utils/partTimeWorldbook.js')
+      await restorePartTimeWorldbookFromStore()
+    } catch (e) {
+      console.warn('[GameStore] Failed to sync part-time worldbook:', e)
+    }
+    
+    // 同步印象数据
+    try {
+      const { restoreImpressionWorldbookFromStore } = await import('../../utils/impressionWorldbook.js')
+      await restoreImpressionWorldbookFromStore()
+    } catch (e) {
+      console.warn('[GameStore] Failed to sync impression worldbook:', e)
+    }
+    
+    // 确保变量解析条目状态正确
+    await setVariableParsingWorldbookStatus(!this.settings.assistantAI?.enabled)
     
     console.log('[GameStore] Worldbook sync complete')
   },

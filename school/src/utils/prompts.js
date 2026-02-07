@@ -1,6 +1,7 @@
 import {
   getCurrentClassStatus,
   getTodayScheduleSummary,
+  getNextDayScheduleSummary,
   getWeekdayChinese,
   getTermInfo,
   checkDayStatus,
@@ -260,10 +261,20 @@ export const buildSchedulePrompt = (gameTime, weeklySchedule) => {
       break
     case 'after_classes':
       prompt += `\n[当前状态] ${classStatus.message}`
+      prompt += getNextDayScheduleSummary(gameTime, weeklySchedule)
+      break
+    case 'exam':
+      prompt += `\n[当前状态] ${classStatus.message}`
+      if (gameTime.hour >= 18) {
+        prompt += getNextDayScheduleSummary(gameTime, weeklySchedule)
+      }
       break
     case 'weekend':
     case 'holiday':
       prompt += `\n[当前状态] ${classStatus.message}`
+      if (gameTime.hour >= 18) {
+        prompt += getNextDayScheduleSummary(gameTime, weeklySchedule)
+      }
       break
     default:
       break

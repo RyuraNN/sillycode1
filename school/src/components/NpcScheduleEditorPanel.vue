@@ -1624,6 +1624,8 @@ const getPeriodName = (periodId) => {
   flex-shrink: 0;
   scrollbar-width: none;
   -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
 }
 
 .tabs-container::-webkit-scrollbar {
@@ -1724,6 +1726,8 @@ const getPeriodName = (periodId) => {
   flex: 1;
   overflow-y: auto;
   padding-right: 6px;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .list-container::-webkit-scrollbar {
@@ -1940,6 +1944,8 @@ const getPeriodName = (periodId) => {
   flex: 1;
   overflow-y: auto;
   padding-right: 6px;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .slot-card {
@@ -2172,6 +2178,8 @@ const getPeriodName = (periodId) => {
   padding: 24px;
   overflow-y: auto;
   flex: 1;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .modal-footer {
@@ -2264,6 +2272,7 @@ const getPeriodName = (periodId) => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  touch-action: pan-y pinch-zoom;
 }
 
 .checkbox-item {
@@ -2300,6 +2309,7 @@ const getPeriodName = (periodId) => {
   border-radius: 12px;
   padding: 14px;
   border: 1px solid rgba(255, 255, 255, 0.06);
+  touch-action: pan-y;
 }
 
 .location-row {
@@ -2324,6 +2334,7 @@ const getPeriodName = (periodId) => {
   border-radius: 12px;
   padding: 14px;
   border: 1px solid rgba(255, 255, 255, 0.06);
+  touch-action: pan-y;
 }
 
 .effect-row {
@@ -2427,6 +2438,8 @@ const getPeriodName = (periodId) => {
   max-height: 280px;
   overflow-y: auto;
   padding-right: 4px;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .map-list-item {

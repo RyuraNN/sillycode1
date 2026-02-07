@@ -427,6 +427,7 @@ export interface NpcStats {
   gender?: 'male' | 'female'
   relationship: number
   isAlive: boolean
+  aliveRemaining?: number
   location: string
   role?: 'student' | 'teacher' | 'other'
   mood?: NpcMoodType

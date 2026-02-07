@@ -3,12 +3,16 @@ import { watch, onMounted } from 'vue'
 import HomeLayout from './components/HomeLayout.vue'
 import { useGameStore } from './stores/gameStore'
 import { requestPersistence } from './utils/indexedDB'
+import { loadCoursePoolFromWorldbook } from './data/coursePoolData'
 
 const gameStore = useGameStore()
 
 onMounted(async () => {
   // 尝试申请持久化存储
   await requestPersistence()
+  
+  // 加载自定义课程池
+  await loadCoursePoolFromWorldbook()
   
   // 初始化时从本地存储加载存档
   gameStore.initFromStorage()

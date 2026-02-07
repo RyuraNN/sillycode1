@@ -25,7 +25,8 @@ export const cleanSystemTags = (text) => {
   const htmlTags = [
     'button', 'span', 'div', 'p', 'br', 'b', 'i', 'strong', 'em', 'u', 's', 'strike', 
     'font', 'blockquote', 'code', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 
-    'ul', 'ol', 'li', 'table', 'tr', 'td', 'th', 'thead', 'tbody', 'img', 'a', 'hr', 'small', 'big'
+    'ul', 'ol', 'li', 'table', 'tr', 'td', 'th', 'thead', 'tbody', 'img', 'a', 'hr', 'small', 'big',
+    'ruby', 'rt', 'rp'
   ]
   const keepTags = ['think', 'thought', 'thinking', 'generate_image', ...contentTags, ...htmlTags]
   const keepPattern = keepTags.join('|')

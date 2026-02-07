@@ -1,14 +1,16 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, defineAsyncComponent } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { switchSaveSlot, restoreWorldbookFromStore } from '../utils/socialWorldbook'
-import GameStart from './GameStart.vue'
-import SavePanel from './SavePanel.vue'
-import Settings from './Settings.vue'
-import GameMain from './GameMain.vue'
-import MapEditorPanel from './MapEditorPanel.vue'
-import EventEditorPanel from './EventEditorPanel.vue'
-import NpcScheduleEditorPanel from './NpcScheduleEditorPanel.vue'
+
+// 使用异步组件以优化首屏加载性能
+const GameStart = defineAsyncComponent(() => import('./GameStart.vue'))
+const SavePanel = defineAsyncComponent(() => import('./SavePanel.vue'))
+const Settings = defineAsyncComponent(() => import('./Settings.vue'))
+const GameMain = defineAsyncComponent(() => import('./GameMain.vue'))
+const MapEditorPanel = defineAsyncComponent(() => import('./MapEditorPanel.vue'))
+const EventEditorPanel = defineAsyncComponent(() => import('./EventEditorPanel.vue'))
+const NpcScheduleEditorPanel = defineAsyncComponent(() => import('./NpcScheduleEditorPanel.vue'))
 
 const gameStore = useGameStore()
 const currentView = ref('menu') // 'menu', 'start', 'load', 'settings', 'game'

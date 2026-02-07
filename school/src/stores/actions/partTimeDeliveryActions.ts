@@ -186,7 +186,8 @@ export const partTimeDeliveryActions = {
       duration += 24 * 60
     }
 
-    const hourlyWage = jobData?.hourlyWage || 15
+    // 兼容多种工资字段名：hourlyWage, wage, salary
+    const hourlyWage = jobData?.hourlyWage || jobData?.wage || jobData?.salary || 15
     const earnings = Math.floor((duration / 60) * hourlyWage)
 
     this.player.money += earnings

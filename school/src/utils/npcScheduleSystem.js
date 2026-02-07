@@ -1380,7 +1380,19 @@ export function resolveLocationPlaceholder(locationId, npcData, gameStore) {
       return getClassroom()
       
     case 'class_location': // 跑班制核心逻辑
-      if (!gameStore || !npcData.classId) return getClassroom()
+      // 尝试查找 classId
+      let currentClassId = npcData.classId
+      if (!currentClassId && gameStore?.allClassData) {
+        for (const [id, classData] of Object.entries(gameStore.allClassData)) {
+          if (classData.students?.some(s => s.name === npcData.name)) {
+            currentClassId = id
+            break
+          }
+        }
+      }
+      
+      if (!gameStore || !currentClassId) return getClassroom()
+      
       const { hour, minute, year, month, day } = gameStore.gameTime
       const currentTimeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
       
@@ -1399,10 +1411,10 @@ export function resolveLocationPlaceholder(locationId, npcData, gameStore) {
       
       if (currentPeriod) {
         // 2. 生成/获取当前课表
-        const classInfo = gameStore.allClassData?.[npcData.classId] || {}
+        const classInfo = gameStore.allClassData?.[currentClassId] || {}
         const termInfo = getTermInfo(year, month, day)
         // 确保同一周的课表一致
-        const schedule = generateWeeklySchedule(npcData.classId, classInfo, termInfo.weekNumber)
+        const schedule = generateWeeklySchedule(currentClassId, classInfo, termInfo.weekNumber)
         const weekdayEng = getWeekdayEnglish(gameStore.gameTime.weekday)
         const todaySchedule = schedule[weekdayEng]
         
@@ -1501,6 +1513,10 @@ export function parseScheduleTemplates(text) {
   if (!text) return
   const lines = text.split('\n')
   let currentTemplate = null
+  
+  // 临时存储，确保加载完整后再应用
+  const newTimePeriods = {}
+  
   for (const line of lines) {
     const trimmed = line.trim()
     if (!trimmed || trimmed.startsWith('#')) continue
@@ -1540,8 +1556,40 @@ export function parseScheduleTemplates(text) {
           DEFAULT_ROLE_TEMPLATE_MAP[parts[1].trim()] = parts[2].trim()
         }
         break
+      case 'PERIOD': // 新增：解析时间段
+        if (parts.length >= 5) {
+          const id = parts[1].trim()
+          const name = parts[2].trim()
+          const start = parseInt(parts[3].trim())
+          const end = parseInt(parts[4].trim())
+          // 使用 key 作为对象的键，如果文件中包含 key 则使用，否则用大写 ID
+          const key = id.toUpperCase() 
+          newTimePeriods[key] = { id, name, start, end }
+        }
+        break
+      case 'MODIFIER': // 新增：解析修正
+        if (parts.length >= 4) {
+          const type = parts[1].trim().toLowerCase()
+          const key = parts[2].trim()
+          const effects = parseModifierEffects(parts[3].trim())
+          
+          if (type === 'weather') {
+            WEATHER_MODIFIERS[key] = effects
+          } else if (type === 'mood') {
+            MOOD_MODIFIERS[key] = effects
+          }
+        }
+        break
     }
   }
+  
+  // 如果加载了新的时间段，更新系统配置
+  if (Object.keys(newTimePeriods).length > 0) {
+    // 清空现有时间段并应用新的
+    for (const key in TIME_PERIODS) delete TIME_PERIODS[key]
+    Object.assign(TIME_PERIODS, newTimePeriods)
+  }
+  
   console.log(`[NpcSchedule] Loaded ${loadedTemplates.size} templates, ${npcAssignments.size} assignments`)
 }
 
@@ -1892,13 +1940,9 @@ export function updateAllNpcLocations(gameStore, force = false) {
   for (let i = 0; i < npcs.length; i += batchSize) {
     const batch = npcs.slice(i, i + batchSize)
     for (const npc of batch) {
-      if (!npc.isAlive) {
-        const loc = calculateNpcLocation(npc, gameTime, gameStore, force)
-        results.set(npc.id, loc)
-        continue 
-      }
       const locationId = calculateNpcLocation(npc, gameTime, gameStore, force)
       results.set(npc.id, locationId)
+      
       if (locationId !== UNKNOWN_LOCATION) {
         if (!locationNpcIndex.has(locationId)) locationNpcIndex.set(locationId, new Set())
         locationNpcIndex.get(locationId).add(npc.id)
@@ -2002,13 +2046,22 @@ export function setScheduleConfig(config) {
 }
 
 export async function saveScheduleToWorldbook() {
-  if (typeof window.saveWorldbookEntry !== 'function') {
+  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
     console.warn('[NpcSchedule] Worldbook API not available')
     return false
   }
   
   let templateContent = '# NPC日程模板配置\n\n'
   
+  // 1. 保存时间段
+  templateContent += '# 时间段配置\n'
+  for (const [key, period] of Object.entries(TIME_PERIODS)) {
+    templateContent += `PERIOD | ${period.id} | ${period.name} | ${period.start} | ${period.end}\n`
+  }
+  templateContent += '\n'
+
+  // 2. 保存日程模板
+  templateContent += '# 日程模板\n'
   for (const [id, template] of loadedTemplates) {
     templateContent += `TEMPLATE | ${id} | ${template.name || id}\n`
     for (const slot of template.slots) {
@@ -2018,12 +2071,91 @@ export async function saveScheduleToWorldbook() {
     templateContent += '\n'
   }
   
+  // 3. 保存角色映射
+  templateContent += '# 角色映射\n'
   for (const [role, templateId] of Object.entries(DEFAULT_ROLE_TEMPLATE_MAP)) {
     templateContent += `DEFAULT | ${role} | ${templateId}\n`
   }
+  templateContent += '\n'
+
+  // 4. 保存天气修正
+  templateContent += '# 天气修正\n'
+  for (const [weather, effects] of Object.entries(WEATHER_MODIFIERS)) {
+    const effectStr = Object.entries(effects).map(([k, v]) => `${k}:${v}`).join(',')
+    if (effectStr) {
+      templateContent += `MODIFIER | weather | ${weather} | ${effectStr}\n`
+    }
+  }
+  templateContent += '\n'
+
+  // 5. 保存心情修正
+  templateContent += '# 心情修正\n'
+  for (const [mood, effects] of Object.entries(MOOD_MODIFIERS)) {
+    const effectStr = Object.entries(effects).map(([k, v]) => `${k}:${v}`).join(',')
+    if (effectStr) {
+      templateContent += `MODIFIER | mood | ${mood} | ${effectStr}\n`
+    }
+  }
   
   try {
-    await window.saveWorldbookEntry('current', '[TH_NPCSchedule] NPC日程模板库', templateContent, ['system', 'schedule'], false)
+    const books = window.getCharWorldbookNames('current')
+    const bookName = books.primary || (books.additional && books.additional[0])
+    
+    if (!bookName) {
+      console.warn('[NpcSchedule] No worldbook bound to current character')
+      return false
+    }
+
+    const entryName = '[TH_NPCSchedule] NPC日程模板库'
+
+    await window.updateWorldbookWith(bookName, (entries) => {
+      const newEntries = [...entries]
+      const idx = newEntries.findIndex(e => e.name === entryName)
+      
+      const newEntry = {
+        name: entryName,
+        content: templateContent,
+        key: ['system', 'schedule'],
+        enabled: false,
+        strategy: {
+          type: 'constant', // 蓝灯，但默认禁用
+          keys: [],
+          keys_secondary: { logic: 'and_any', keys: [] },
+          scan_depth: 'same_as_global'
+        },
+        position: {
+          type: 'before_character_definition',
+          order: 100
+        },
+        probability: 100,
+        recursion: {
+          prevent_incoming: true,
+          prevent_outgoing: true,
+          delay_until: null
+        },
+        effect: {
+          sticky: null,
+          cooldown: null,
+          delay: null
+        }
+      }
+
+      if (idx !== -1) {
+        // 更新现有条目，保留启用状态
+        newEntries[idx] = { 
+          ...newEntries[idx], 
+          content: templateContent,
+          key: ['system', 'schedule']
+        }
+      } else {
+        // 创建新条目
+        newEntries.push(newEntry)
+      }
+      
+      return newEntries
+    })
+    
+    console.log('[NpcSchedule] Schedule saved to worldbook:', bookName)
   } catch (e) {
     console.error('保存模板失败:', e)
     return false
@@ -2072,8 +2204,12 @@ export async function loadScheduleDataFromWorldbook() {
   } catch (e) {
     console.error('[NpcSchedule] Error loading schedule data:', e)
   }
-  console.log('[NpcSchedule] No worldbook schedule data found, using defaults')
-  return false
+  
+  console.log('[NpcSchedule] No worldbook schedule data found, creating default entry...')
+  // 如果没有找到数据，创建默认的世界书条目（禁用状态）
+  await saveScheduleToWorldbook()
+  
+  return false // 仍然返回 false，表示使用了默认数据（内存中已是默认值）
 }
 
 export async function initializeScheduleSystem(gameStore) {

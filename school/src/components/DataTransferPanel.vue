@@ -1,0 +1,936 @@
+<script setup>
+import { ref, computed, toRaw } from 'vue'
+import { useGameStore } from '../stores/gameStore'
+import { mapData, setMapData } from '../data/mapData'
+import { getScheduleConfig, setScheduleConfig, saveScheduleToWorldbook } from '../utils/npcScheduleSystem'
+import { getCoursePoolState, restoreCoursePoolState, saveCoursePoolToWorldbook } from '../data/coursePoolData'
+import { getFullCharacterPool, saveFullCharacterPool, saveRosterBackup } from '../utils/indexedDB'
+import { updateClassDataInWorldbook, saveMapDataToWorldbook } from '../utils/worldbookParser'
+
+const emit = defineEmits(['close'])
+const gameStore = useGameStore()
+
+// ==================== 状态 ====================
+const mode = ref('export') // 'export' | 'import'
+const loading = ref(false)
+const importFile = ref(null)
+const importData = ref(null)
+const importError = ref('')
+
+// 导出选择
+const exportSelection = ref({
+  map: true,
+  schedule: true,
+  roster: true,
+  characterPool: true,
+  course: true,
+  events: true
+})
+
+// 导入选择（根据文件内容动态生成）
+const importSelection = ref({
+  map: false,
+  schedule: false,
+  roster: false,
+  characterPool: false,
+  course: false,
+  events: false
+})
+
+const syncToWorldbook = ref(false)
+
+// 模块标签
+const moduleLabels = {
+  map: { name: '地图数据', icon: '🗺️', desc: '地图编辑器的自定义地点' },
+  schedule: { name: 'NPC日程', icon: '📅', desc: 'NPC日程模板和配置' },
+  roster: { name: '班级名册', icon: '📋', desc: '班级、教师和学生分配' },
+  characterPool: { name: '角色池', icon: '👥', desc: '所有角色（含未分配）' },
+  course: { name: '课程表', icon: '📚', desc: '课程池和选修课配置' },
+  events: { name: '事件数据', icon: '🎭', desc: '自定义事件和触发器' }
+}
+
+// 深拷贝辅助
+const deepClone = (data) => {
+  return JSON.parse(JSON.stringify(toRaw(data)))
+}
+
+// ==================== 导出功能 ====================
+const handleExport = async () => {
+  loading.value = true
+  try {
+    const exportData = {
+      version: '1.0',
+      timestamp: Date.now(),
+      exportDate: new Date().toLocaleString('zh-CN'),
+      modules: {}
+    }
+
+    // 收集选中的模块数据
+    if (exportSelection.value.map) {
+      exportData.modules.map = deepClone(mapData)
+    }
+
+    if (exportSelection.value.schedule) {
+      exportData.modules.schedule = deepClone(getScheduleConfig())
+    }
+
+    if (exportSelection.value.roster) {
+      exportData.modules.roster = deepClone(gameStore.allClassData)
+    }
+
+    if (exportSelection.value.characterPool) {
+      const pool = await getFullCharacterPool()
+      exportData.modules.characterPool = pool || []
+    }
+
+    if (exportSelection.value.course) {
+      exportData.modules.course = deepClone(getCoursePoolState())
+    }
+
+    if (exportSelection.value.events) {
+      // eventLibrary 是 Map，需要转换为数组
+      const eventArray = []
+      for (const [id, event] of gameStore.eventLibrary) {
+        eventArray.push({ id, ...deepClone(event) })
+      }
+      exportData.modules.events = {
+        library: eventArray,
+        triggers: deepClone(gameStore.eventTriggers),
+        calendar: deepClone(gameStore.player.customCalendarEvents || [])
+      }
+    }
+
+    // 生成文件名
+    const date = new Date()
+    const dateStr = `${date.getFullYear()}${(date.getMonth()+1).toString().padStart(2,'0')}${date.getDate().toString().padStart(2,'0')}`
+    const fileName = `天华校园_自定义数据_${dateStr}.json`
+
+    // 下载文件
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+
+    alert('导出成功！')
+
+  } catch (e) {
+    console.error('[DataTransfer] Export error:', e)
+    alert('导出失败：' + e.message)
+  } finally {
+    loading.value = false
+  }
+}
+
+// ==================== 导入功能 ====================
+const handleFileSelect = (event) => {
+  const file = event.target.files[0]
+  if (!file) return
+
+  importFile.value = file
+  importData.value = null
+  importError.value = ''
+
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result)
+      
+      // 验证格式
+      if (!data.version || !data.modules) {
+        throw new Error('无效的数据格式')
+      }
+
+      importData.value = data
+
+      // 根据文件内容设置可导入的模块
+      importSelection.value = {
+        map: !!data.modules.map,
+        schedule: !!data.modules.schedule,
+        roster: !!data.modules.roster,
+        characterPool: !!data.modules.characterPool,
+        course: !!data.modules.course,
+        events: !!data.modules.events
+      }
+
+    } catch (err) {
+      importError.value = '文件解析失败：' + err.message
+      importData.value = null
+    }
+  }
+  reader.onerror = () => {
+    importError.value = '文件读取失败'
+  }
+  reader.readAsText(file)
+}
+
+const availableModules = computed(() => {
+  if (!importData.value) return []
+  return Object.keys(importData.value.modules).filter(key => importData.value.modules[key])
+})
+
+const handleImport = async () => {
+  if (!importData.value) return
+
+  loading.value = true
+  try {
+    const data = importData.value.modules
+    const results = []
+
+    // 导入地图
+    if (importSelection.value.map && data.map) {
+      setMapData(data.map)
+      if (syncToWorldbook.value) {
+        await saveMapDataToWorldbook(data.map)
+      }
+      results.push('地图数据')
+    }
+
+    // 导入日程
+    if (importSelection.value.schedule && data.schedule) {
+      setScheduleConfig(data.schedule)
+      if (syncToWorldbook.value) {
+        await saveScheduleToWorldbook()
+      }
+      results.push('NPC日程')
+    }
+
+    // 导入班级名册
+    if (importSelection.value.roster && data.roster) {
+      // 更新 gameStore
+      for (const [classId, classInfo] of Object.entries(data.roster)) {
+        gameStore.allClassData[classId] = JSON.parse(JSON.stringify(classInfo))
+        // 如果开启同步，更新世界书
+        if (syncToWorldbook.value) {
+          await updateClassDataInWorldbook(classId, classInfo)
+        }
+      }
+      // 同步到 IndexedDB
+      await saveRosterBackup(data.roster)
+      results.push('班级名册')
+    }
+
+    // 导入角色池
+    if (importSelection.value.characterPool && data.characterPool) {
+      await saveFullCharacterPool(data.characterPool)
+      results.push('角色池')
+    }
+
+    // 导入课程
+    if (importSelection.value.course && data.course) {
+      restoreCoursePoolState(data.course)
+      gameStore.customCoursePool = JSON.parse(JSON.stringify(data.course))
+      if (syncToWorldbook.value) {
+        await saveCoursePoolToWorldbook()
+      }
+      results.push('课程表')
+    }
+
+    // 导入事件
+    if (importSelection.value.events && data.events) {
+      // 清空并重建 eventLibrary
+      gameStore.eventLibrary.clear()
+      if (data.events.library) {
+        for (const event of data.events.library) {
+          const id = event.id
+          const eventData = { ...event }
+          delete eventData.id // 移除多余的 id 字段
+          gameStore.eventLibrary.set(id, eventData)
+        }
+      }
+      
+      // 恢复触发器
+      if (data.events.triggers) {
+        gameStore.eventTriggers = [...data.events.triggers]
+      }
+      
+      // 恢复日历事件
+      if (data.events.calendar) {
+        gameStore.player.customCalendarEvents = [...data.events.calendar]
+      }
+      
+      results.push('事件数据')
+    }
+
+    if (results.length > 0) {
+      alert(`成功导入：${results.join('、')}`)
+      emit('close')
+    } else {
+      alert('未选择任何模块导入')
+    }
+
+  } catch (e) {
+    console.error('[DataTransfer] Import error:', e)
+    alert('导入失败：' + e.message)
+  } finally {
+    loading.value = false
+  }
+}
+
+// ==================== 辅助 ====================
+const selectedExportCount = computed(() => {
+  return Object.values(exportSelection.value).filter(Boolean).length
+})
+
+const selectedImportCount = computed(() => {
+  return Object.values(importSelection.value).filter(Boolean).length
+})
+
+const toggleAllExport = (val) => {
+  for (const key in exportSelection.value) {
+    exportSelection.value[key] = val
+  }
+}
+
+const toggleAllImport = (val) => {
+  if (!importData.value) return
+  for (const key in importSelection.value) {
+    if (importData.value.modules[key]) {
+      importSelection.value[key] = val
+    }
+  }
+}
+</script>
+
+<template>
+  <Teleport to="body">
+    <div class="transfer-overlay" @click.self="$emit('close')">
+      <div class="transfer-panel">
+        <!-- 头部 -->
+        <div class="panel-header">
+          <div class="header-content">
+            <span class="header-icon">📦</span>
+            <h3>导出/导入自定义设置</h3>
+          </div>
+          <button class="close-btn" @click="$emit('close')">×</button>
+        </div>
+
+        <!-- 模式切换 -->
+        <div class="mode-tabs">
+          <button 
+            class="mode-tab" 
+            :class="{ active: mode === 'export' }"
+            @click="mode = 'export'"
+          >
+            📤 导出数据
+          </button>
+          <button 
+            class="mode-tab" 
+            :class="{ active: mode === 'import' }"
+            @click="mode = 'import'"
+          >
+            📥 导入数据
+          </button>
+        </div>
+
+        <!-- 内容区 -->
+        <div class="panel-body">
+          <!-- 导出模式 -->
+          <div v-if="mode === 'export'" class="mode-content">
+            <div class="mode-intro">
+              <p>选择要导出的数据模块，生成 JSON 文件供分享或备份。</p>
+            </div>
+
+            <div class="select-actions">
+              <button class="select-btn" @click="toggleAllExport(true)">全选</button>
+              <button class="select-btn" @click="toggleAllExport(false)">全不选</button>
+              <span class="select-count">已选 {{ selectedExportCount }} 项</span>
+            </div>
+
+            <div class="module-list">
+              <label 
+                v-for="(info, key) in moduleLabels" 
+                :key="key" 
+                class="module-item"
+                :class="{ selected: exportSelection[key] }"
+              >
+                <input type="checkbox" v-model="exportSelection[key]" />
+                <span class="module-icon">{{ info.icon }}</span>
+                <div class="module-info">
+                  <span class="module-name">{{ info.name }}</span>
+                  <span class="module-desc">{{ info.desc }}</span>
+                </div>
+                <span class="check-mark">✓</span>
+              </label>
+            </div>
+
+            <div class="action-area">
+              <button 
+                class="action-btn primary" 
+                @click="handleExport" 
+                :disabled="loading || selectedExportCount === 0"
+              >
+                <span v-if="loading" class="spinner"></span>
+                <span>{{ loading ? '导出中...' : '📥 生成并下载' }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 导入模式 -->
+          <div v-if="mode === 'import'" class="mode-content">
+            <div class="mode-intro">
+              <p>上传之前导出的 JSON 文件，选择要导入的模块。</p>
+            </div>
+
+            <!-- 文件选择 -->
+            <div class="file-upload-area">
+              <input 
+                type="file" 
+                accept=".json,application/json"
+                @change="handleFileSelect"
+                id="import-file-input"
+                class="file-input"
+              />
+              <label for="import-file-input" class="file-label">
+                <span class="upload-icon">📂</span>
+                <span v-if="!importFile">点击选择文件或拖放到此处</span>
+                <span v-else class="file-name">{{ importFile.name }}</span>
+              </label>
+            </div>
+
+            <!-- 错误提示 -->
+            <div v-if="importError" class="error-message">
+              ⚠️ {{ importError }}
+            </div>
+
+            <!-- 文件信息 -->
+            <div v-if="importData" class="file-info">
+              <div class="info-row">
+                <span class="info-label">版本：</span>
+                <span class="info-value">{{ importData.version }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">导出时间：</span>
+                <span class="info-value">{{ importData.exportDate || new Date(importData.timestamp).toLocaleString('zh-CN') }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">包含模块：</span>
+                <span class="info-value">{{ availableModules.length }} 个</span>
+              </div>
+            </div>
+
+            <!-- 模块选择 -->
+            <div v-if="importData" class="import-section">
+              <div class="select-actions">
+                <button class="select-btn" @click="toggleAllImport(true)">全选</button>
+                <button class="select-btn" @click="toggleAllImport(false)">全不选</button>
+                <span class="select-count">已选 {{ selectedImportCount }} 项</span>
+              </div>
+
+              <div class="options-row">
+                <label class="checkbox-label" title="尝试将导入的数据同步更新到世界书条目中（可能会覆盖现有条目）">
+                  <input type="checkbox" v-model="syncToWorldbook">
+                  <span>立刻同步到世界书</span>
+                </label>
+              </div>
+
+              <div class="module-list">
+                <label 
+                  v-for="(info, key) in moduleLabels" 
+                  :key="key" 
+                  class="module-item"
+                  :class="{ 
+                    selected: importSelection[key], 
+                    disabled: !importData.modules[key] 
+                  }"
+                >
+                  <input 
+                    type="checkbox" 
+                    v-model="importSelection[key]"
+                    :disabled="!importData.modules[key]"
+                  />
+                  <span class="module-icon">{{ info.icon }}</span>
+                  <div class="module-info">
+                    <span class="module-name">{{ info.name }}</span>
+                    <span class="module-desc">
+                      {{ importData.modules[key] ? info.desc : '(文件中不包含此数据)' }}
+                    </span>
+                  </div>
+                  <span class="check-mark" v-if="importData.modules[key]">✓</span>
+                  <span class="unavailable-mark" v-else>—</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="action-area">
+              <button 
+                class="action-btn primary" 
+                @click="handleImport" 
+                :disabled="loading || !importData || selectedImportCount === 0"
+              >
+                <span v-if="loading" class="spinner"></span>
+                <span>{{ loading ? '导入中...' : '📤 确认导入' }}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 底部提示 -->
+        <div class="panel-footer">
+          <span class="footer-tip">💡 提示：导入会覆盖现有数据，建议先导出备份</span>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+</template>
+
+<style scoped>
+.transfer-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.transfer-panel {
+  width: 100%;
+  max-width: 500px;
+  max-height: 90vh;
+  background: linear-gradient(135deg, #fdfbf3 0%, #fff9e6 100%);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 头部 */
+.panel-header {
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.header-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: white;
+}
+
+.header-icon {
+  font-size: 1.5rem;
+}
+
+.panel-header h3 {
+  margin: 0;
+  font-size: 1.2rem;
+  font-family: 'Ma Shan Zheng', cursive;
+}
+
+.close-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: white;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.close-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: rotate(90deg);
+}
+
+/* 模式切换 */
+.mode-tabs {
+  display: flex;
+  border-bottom: 2px solid #e0e0e0;
+  background: #fafafa;
+  flex-shrink: 0;
+}
+
+.mode-tab {
+  flex: 1;
+  padding: 12px 16px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 1rem;
+  font-family: 'Ma Shan Zheng', cursive;
+  color: #666;
+  transition: all 0.2s ease;
+  border-bottom: 3px solid transparent;
+}
+
+.mode-tab:hover {
+  background: #f0f0f0;
+}
+
+.mode-tab.active {
+  color: #667eea;
+  border-bottom-color: #667eea;
+  background: white;
+}
+
+/* 内容区 */
+.panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mode-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mode-intro {
+  background: #e3f2fd;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  color: #1565c0;
+}
+
+.mode-intro p {
+  margin: 0;
+}
+
+/* 选择操作 */
+.select-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.select-btn {
+  padding: 6px 12px;
+  background: #e0e0e0;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.2s ease;
+}
+
+.select-btn:hover {
+  background: #d0d0d0;
+}
+
+.select-count {
+  margin-left: auto;
+  color: #666;
+  font-size: 0.85rem;
+}
+
+/* 模块列表 */
+.module-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.module-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: white;
+  border: 2px solid #e0e0e0;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.module-item:hover:not(.disabled) {
+  border-color: #667eea;
+  background: #f8f9ff;
+}
+
+.module-item.selected {
+  border-color: #667eea;
+  background: linear-gradient(135deg, #f0f4ff 0%, #e8ecff 100%);
+}
+
+.module-item.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.module-item input[type="checkbox"] {
+  display: none;
+}
+
+.module-icon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.module-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.module-name {
+  display: block;
+  font-weight: 600;
+  color: #333;
+  font-size: 0.95rem;
+}
+
+.module-desc {
+  display: block;
+  font-size: 0.8rem;
+  color: #888;
+  margin-top: 2px;
+}
+
+.check-mark {
+  font-size: 1.2rem;
+  color: #667eea;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.module-item.selected .check-mark {
+  opacity: 1;
+}
+
+.unavailable-mark {
+  font-size: 1.2rem;
+  color: #ccc;
+}
+
+/* 文件上传 */
+.file-upload-area {
+  position: relative;
+}
+
+.file-input {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.file-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+  background: white;
+  border: 2px dashed #ccc;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.file-label:hover {
+  border-color: #667eea;
+  background: #f8f9ff;
+}
+
+.upload-icon {
+  font-size: 2rem;
+  margin-bottom: 8px;
+}
+
+.file-name {
+  color: #667eea;
+  font-weight: 600;
+}
+
+/* 错误信息 */
+.error-message {
+  background: #ffebee;
+  color: #c62828;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+/* 文件信息 */
+.file-info {
+  background: #f5f5f5;
+  padding: 12px 16px;
+  border-radius: 8px;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 0.9rem;
+}
+
+.info-label {
+  color: #666;
+}
+
+.info-value {
+  color: #333;
+  font-weight: 500;
+}
+
+/* 导入区域 */
+.import-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.options-row {
+  padding: 8px 12px;
+  background: #fff3e0;
+  border: 1px solid #ffe0b2;
+  border-radius: 8px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: #e65100;
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+.checkbox-label input {
+  width: 18px;
+  height: 18px;
+  accent-color: #f57c00;
+}
+
+/* 操作区 */
+.action-area {
+  padding-top: 8px;
+}
+
+.action-btn {
+  width: 100%;
+  padding: 14px 24px;
+  border: none;
+  border-radius: 25px;
+  cursor: pointer;
+  font-size: 1.1rem;
+  font-family: 'Ma Shan Zheng', cursive;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.action-btn.primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.35);
+}
+
+.action-btn.primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.45);
+}
+
+.action-btn:disabled {
+  background: #bdbdbd;
+  box-shadow: none;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 底部 */
+.panel-footer {
+  padding: 12px 20px;
+  background: #f5f5f5;
+  border-top: 1px solid #e0e0e0;
+  flex-shrink: 0;
+}
+
+.footer-tip {
+  font-size: 0.85rem;
+  color: #888;
+}
+
+/* 滚动条 */
+.panel-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.panel-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.panel-body::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 3px;
+}
+
+.panel-body::-webkit-scrollbar-thumb:hover {
+  background: #aaa;
+}
+
+/* 移动端适配 */
+@media (max-width: 480px) {
+  .transfer-panel {
+    max-height: 100vh;
+    border-radius: 0;
+  }
+
+  .panel-header {
+    padding: 14px 16px;
+  }
+
+  .panel-header h3 {
+    font-size: 1.1rem;
+  }
+
+  .panel-body {
+    padding: 16px;
+  }
+
+  .module-item {
+    padding: 10px 12px;
+  }
+
+  .module-icon {
+    font-size: 1.3rem;
+  }
+
+  .file-label {
+    padding: 24px 16px;
+  }
+}
+</style>

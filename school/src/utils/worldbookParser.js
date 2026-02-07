@@ -1357,9 +1357,11 @@ const DEFAULT_ROSTER_BACKUP_WORLDBOOK_NAME = '天华校园-默认角色备份'
  * 创建或更新默认角色备份世界书
  * 该世界书 enabled=false，用于保存所有角色的原始数据
  * @param {Object} allClassData 所有班级数据
+ * @param {Array} unassignedCharacters 未分配班级的角色列表
  * @returns {Promise<boolean>} 是否成功
  */
-export async function createDefaultRosterBackupWorldbook(allClassData) {if (typeof window.createOrReplaceWorldbook !== 'function') {
+export async function createDefaultRosterBackupWorldbook(allClassData, unassignedCharacters = []) {
+  if (typeof window.createOrReplaceWorldbook !== 'function') {
     console.warn('[WorldbookParser] createOrReplaceWorldbook API not available')
     return false
   }
@@ -1399,6 +1401,59 @@ export async function createDefaultRosterBackupWorldbook(allClassData) {if (type
         }
       })
     }
+
+    // 处理未分配角色
+    if (unassignedCharacters && unassignedCharacters.length > 0) {
+      const teachers = unassignedCharacters.filter(c => c.role === 'teacher')
+      const students = unassignedCharacters.filter(c => c.role !== 'teacher')
+      
+      let unassignedContent = '未分配角色:{\n'
+      
+      if (teachers.length > 0) {
+        unassignedContent += '  科任教师: {\n'
+        teachers.forEach(t => {
+          const subject = t.subject || '待定'
+          unassignedContent += `    ${subject}: ${formatPerson(t)}\n`
+        })
+        unassignedContent += '  }\n'
+      }
+      
+      if (students.length > 0) {
+        unassignedContent += '  学生列表: {\n'
+        students.forEach((s, i) => {
+          unassignedContent += `    ${i + 1}. ${formatPerson(s)}\n`
+        })
+        unassignedContent += '  }\n'
+      }
+      unassignedContent += '}'
+      
+      entries.push({
+        name: '[Backup:Unassigned] 未分配角色',
+        content: unassignedContent,
+        enabled: false, // 关键：默认不启用
+        strategy: {
+          type: 'selective',
+          keys: [],
+          keys_secondary: { logic: 'and_any', keys: [] },
+          scan_depth: 'same_as_global'
+        },
+        position: {
+          type: 'before_character_definition',
+          order: 100
+        },
+        probability: 100,
+        recursion: {
+          prevent_incoming: true,
+          prevent_outgoing: true,
+          delay_until: null
+        },
+        effect: {
+          sticky: null,
+          cooldown: null,
+          delay: null
+        }
+      })
+    }
     
     // 添加一个元数据条目
     entries.push({
@@ -1407,7 +1462,8 @@ export async function createDefaultRosterBackupWorldbook(allClassData) {if (type
         createdAt: Date.now(),
         classCount: Object.keys(allClassData).length,
         totalStudents: Object.values(allClassData).reduce((sum, c) => sum + (c.students?.length || 0), 0),
-        totalTeachers: Object.values(allClassData).reduce((sum, c) => sum + (c.teachers?.length || 0) + (c.headTeacher?.name ? 1 : 0), 0)
+        totalTeachers: Object.values(allClassData).reduce((sum, c) => sum + (c.teachers?.length || 0) + (c.headTeacher?.name ? 1 : 0), 0),
+        unassignedCount: unassignedCharacters.length
       }),
       enabled: false,
       strategy: {
@@ -1463,8 +1519,10 @@ export async function restoreFromBackupWorldbook() {
     }
     
     const allClassData = {}
+    let unassignedCharacters = []
     
     for (const entry of entries) {
+      // 匹配班级
       const match = entry.name && entry.name.match(/\[BackupClass:([0-3]-[A-Z])\]/)
       if (match) {
         const classId = match[1]
@@ -1473,10 +1531,24 @@ export async function restoreFromBackupWorldbook() {
           allClassData[classId] = parsedData[classId]
         }
       }
+      
+      // 匹配未分配角色
+      if (entry.name === '[Backup:Unassigned] 未分配角色') {
+        const parsedData = parseClassData(entry.content)
+        // parseClassData 会返回以 "未分配角色" (或其他名字) 为 key 的对象
+        // 我们取第一个 value
+        const data = Object.values(parsedData)[0]
+        if (data) {
+          if (data.teachers) unassignedCharacters.push(...data.teachers)
+          if (data.students) unassignedCharacters.push(...data.students)
+        }
+      }
     }
     
-    if (Object.keys(allClassData).length > 0) {
-      console.log(`[WorldbookParser] Restored ${Object.keys(allClassData).length} classes from backup`)
+    if (Object.keys(allClassData).length > 0 || unassignedCharacters.length > 0) {
+      console.log(`[WorldbookParser] Restored ${Object.keys(allClassData).length} classes and ${unassignedCharacters.length} unassigned characters`)
+      // 将未分配角色挂载到返回对象上
+      allClassData._unassigned = unassignedCharacters
       return allClassData
     }
     

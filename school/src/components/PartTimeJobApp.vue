@@ -129,8 +129,12 @@ const endWork = async () => {
   
   try {
     stopWorkTimer()
-    const earnings = await gameStore.endWorking(currentJobInfo.value)
-    alert(`工作结束！本次获得 ¥${earnings.toFixed(2)}`)
+    const result = await gameStore.endWorking(currentJobInfo.value)
+    if (result.success && result.earnings !== undefined) {
+      alert(`工作结束！本次获得 ¥${result.earnings.toFixed(2)}`)
+    } else {
+      alert(result.message || '工作结束')
+    }
   } catch (e) {
     alert('结束工作失败: ' + e.message)
   }
