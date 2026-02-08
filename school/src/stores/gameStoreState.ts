@@ -22,6 +22,7 @@ export function createInitialState(): GameState {
     npcRelationships: {},
     player: {
       name: 'Player',
+      gender: 'male',
       characterFeature: '',
       backgroundStory: '',
       level: 1,
@@ -90,6 +91,7 @@ export function createInitialState(): GameState {
       location: 'th_main_gate',
       pendingCommands: [],
       holdMessages: [],
+      systemNotifications: [],
       social: {
         friends: [],
         groups: [],

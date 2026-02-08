@@ -1706,6 +1706,7 @@ export function getCurrentPeriod(hour) {
 export function calculateNpcLocation(npc, gameTime, gameStore, forceRecalculate = false) {
   if (!npc || !npc.id) return UNKNOWN_LOCATION
 
+  // 在场的 NPC 位置跟随玩家
   if (npc.isAlive && gameStore?.player?.location) {
     return gameStore.player.location
   }
@@ -1722,9 +1723,8 @@ export function calculateNpcLocation(npc, gameTime, gameStore, forceRecalculate 
   }
   // ======================================
   
-  if (!npc.isAlive && (gameTime.hour >= 21 || gameTime.hour < 5)) {
-    return UNKNOWN_LOCATION
-  }
+  // 注意：不再在此处根据 isAlive 和时间返回 UNKNOWN
+  // 让日程系统正常计算位置，只有 home 位置会在最后被转换为 UNKNOWN
 
   const cacheKey = `${npc.id}_${gameTime.hour}`
   if (!forceRecalculate && locationCache.has(cacheKey)) {
@@ -1838,8 +1838,20 @@ export function calculateNpcLocation(npc, gameTime, gameStore, forceRecalculate 
     }
     // ======================================
 
+    // 如果位置不存在于地图中，尝试使用备选位置
     if (resolvedId !== UNKNOWN_LOCATION && resolvedId !== 'home' && !getItem(resolvedId)) {
-      return { id: UNKNOWN_LOCATION, weight: 0 }
+      // 对于教室类型的位置，使用教学区作为备选
+      if (resolvedId.startsWith('classroom_')) {
+        resolvedId = 'th_teaching_area'
+        // 如果教学区也不存在，尝试主楼
+        if (!getItem(resolvedId)) {
+          resolvedId = 'mb_main_building'
+        }
+      }
+      // 仍然验证备选位置
+      if (!getItem(resolvedId)) {
+        return { id: UNKNOWN_LOCATION, weight: 0 }
+      }
     }
 
     let weight = loc.weight
@@ -1894,7 +1906,8 @@ export function calculateNpcLocation(npc, gameTime, gameStore, forceRecalculate 
     }
   }
   
-  if (selectedLocation === 'home' && !npc.isAlive) {
+  // home 位置无法在地图上显示（没有具体的家庭住址），统一转换为 UNKNOWN
+  if (selectedLocation === 'home') {
     selectedLocation = UNKNOWN_LOCATION
   }
 

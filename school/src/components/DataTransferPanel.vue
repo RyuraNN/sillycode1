@@ -17,6 +17,14 @@ const importFile = ref(null)
 const importData = ref(null)
 const importError = ref('')
 
+// Debug 模式专用状态
+const debugExportJson = ref('') // 导出的 JSON 文本
+const showDebugExportPanel = ref(false) // 显示导出结果面板
+const debugImportText = ref('') // 用户粘贴的导入文本
+
+// 计算属性：是否为 Debug 模式
+const isDebugMode = computed(() => gameStore.settings.debugMode)
+
 // 导出选择
 const exportSelection = ref({
   map: true,
@@ -100,29 +108,89 @@ const handleExport = async () => {
       }
     }
 
-    // 生成文件名
-    const date = new Date()
-    const dateStr = `${date.getFullYear()}${(date.getMonth()+1).toString().padStart(2,'0')}${date.getDate().toString().padStart(2,'0')}`
-    const fileName = `天华校园_自定义数据_${dateStr}.json`
+    const jsonString = JSON.stringify(exportData, null, 2)
 
-    // 下载文件
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = fileName
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    // Debug 模式：显示文本框面板
+    if (isDebugMode.value) {
+      debugExportJson.value = jsonString
+      showDebugExportPanel.value = true
+    } else {
+      // 正常模式：下载文件
+      const date = new Date()
+      const dateStr = `${date.getFullYear()}${(date.getMonth()+1).toString().padStart(2,'0')}${date.getDate().toString().padStart(2,'0')}`
+      const fileName = `天华校园_自定义数据_${dateStr}.json`
 
-    alert('导出成功！')
+      const blob = new Blob([jsonString], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+
+      alert('导出成功！')
+    }
 
   } catch (e) {
     console.error('[DataTransfer] Export error:', e)
     alert('导出失败：' + e.message)
   } finally {
     loading.value = false
+  }
+}
+
+// Debug 模式：复制导出的 JSON 到剪贴板
+const copyExportJson = async () => {
+  try {
+    await navigator.clipboard.writeText(debugExportJson.value)
+    alert('已复制到剪贴板！')
+  } catch (e) {
+    console.error('[DataTransfer] Copy error:', e)
+    alert('复制失败，请手动选择复制')
+  }
+}
+
+// Debug 模式：关闭导出面板
+const closeDebugExportPanel = () => {
+  showDebugExportPanel.value = false
+  debugExportJson.value = ''
+}
+
+// Debug 模式：解析粘贴的 JSON 文本
+const parseDebugImportText = () => {
+  importError.value = ''
+  importData.value = null
+
+  if (!debugImportText.value.trim()) {
+    importError.value = '请粘贴 JSON 数据'
+    return
+  }
+
+  try {
+    const data = JSON.parse(debugImportText.value)
+    
+    // 验证格式
+    if (!data.version || !data.modules) {
+      throw new Error('无效的数据格式')
+    }
+
+    importData.value = data
+
+    // 根据数据内容设置可导入的模块
+    importSelection.value = {
+      map: !!data.modules.map,
+      schedule: !!data.modules.schedule,
+      roster: !!data.modules.roster,
+      characterPool: !!data.modules.characterPool,
+      course: !!data.modules.course,
+      events: !!data.modules.events
+    }
+
+  } catch (err) {
+    importError.value = 'JSON 解析失败：' + err.message
+    importData.value = null
   }
 }
 
@@ -331,53 +399,107 @@ const toggleAllImport = (val) => {
         <div class="panel-body">
           <!-- 导出模式 -->
           <div v-if="mode === 'export'" class="mode-content">
-            <div class="mode-intro">
-              <p>选择要导出的数据模块，生成 JSON 文件供分享或备份。</p>
-            </div>
-
-            <div class="select-actions">
-              <button class="select-btn" @click="toggleAllExport(true)">全选</button>
-              <button class="select-btn" @click="toggleAllExport(false)">全不选</button>
-              <span class="select-count">已选 {{ selectedExportCount }} 项</span>
-            </div>
-
-            <div class="module-list">
-              <label 
-                v-for="(info, key) in moduleLabels" 
-                :key="key" 
-                class="module-item"
-                :class="{ selected: exportSelection[key] }"
-              >
-                <input type="checkbox" v-model="exportSelection[key]" />
-                <span class="module-icon">{{ info.icon }}</span>
-                <div class="module-info">
-                  <span class="module-name">{{ info.name }}</span>
-                  <span class="module-desc">{{ info.desc }}</span>
+            <!-- Debug 模式导出结果面板 -->
+            <div v-if="showDebugExportPanel" class="debug-export-panel">
+              <div class="debug-panel-header">
+                <span class="debug-icon">🔧</span>
+                <span>Debug 模式 - 导出数据</span>
+                <button class="debug-close-btn" @click="closeDebugExportPanel">×</button>
+              </div>
+              <div class="debug-panel-content">
+                <p class="debug-hint">复制下方 JSON 数据，可在其他设备粘贴导入：</p>
+                <textarea 
+                  class="debug-textarea" 
+                  :value="debugExportJson" 
+                  readonly
+                  @focus="$event.target.select()"
+                ></textarea>
+                <div class="debug-actions">
+                  <button class="action-btn secondary" @click="copyExportJson">📋 复制到剪贴板</button>
+                  <button class="action-btn" @click="closeDebugExportPanel">关闭</button>
                 </div>
-                <span class="check-mark">✓</span>
-              </label>
+              </div>
             </div>
 
-            <div class="action-area">
-              <button 
-                class="action-btn primary" 
-                @click="handleExport" 
-                :disabled="loading || selectedExportCount === 0"
-              >
-                <span v-if="loading" class="spinner"></span>
-                <span>{{ loading ? '导出中...' : '📥 生成并下载' }}</span>
-              </button>
-            </div>
+            <!-- 正常导出选择界面 -->
+            <template v-else>
+              <div class="mode-intro">
+                <p>选择要导出的数据模块，生成 JSON 文件供分享或备份。</p>
+                <p v-if="isDebugMode" class="debug-note">🔧 Debug 模式：导出后将显示文本框而非下载文件</p>
+              </div>
+
+              <div class="select-actions">
+                <button class="select-btn" @click="toggleAllExport(true)">全选</button>
+                <button class="select-btn" @click="toggleAllExport(false)">全不选</button>
+                <span class="select-count">已选 {{ selectedExportCount }} 项</span>
+              </div>
+
+              <div class="module-list">
+                <label 
+                  v-for="(info, key) in moduleLabels" 
+                  :key="key" 
+                  class="module-item"
+                  :class="{ selected: exportSelection[key] }"
+                >
+                  <input type="checkbox" v-model="exportSelection[key]" />
+                  <span class="module-icon">{{ info.icon }}</span>
+                  <div class="module-info">
+                    <span class="module-name">{{ info.name }}</span>
+                    <span class="module-desc">{{ info.desc }}</span>
+                  </div>
+                  <span class="check-mark">✓</span>
+                </label>
+              </div>
+
+              <div class="action-area">
+                <button 
+                  class="action-btn primary" 
+                  @click="handleExport" 
+                  :disabled="loading || selectedExportCount === 0"
+                >
+                  <span v-if="loading" class="spinner"></span>
+                  <span>{{ loading ? '导出中...' : (isDebugMode ? '🔧 生成 JSON' : '📥 生成并下载') }}</span>
+                </button>
+              </div>
+            </template>
           </div>
 
           <!-- 导入模式 -->
           <div v-if="mode === 'import'" class="mode-content">
             <div class="mode-intro">
-              <p>上传之前导出的 JSON 文件，选择要导入的模块。</p>
+              <p v-if="!isDebugMode">上传之前导出的 JSON 文件，选择要导入的模块。</p>
+              <p v-else>🔧 Debug 模式：粘贴导出的 JSON 数据，点击解析后导入。</p>
             </div>
 
-            <!-- 文件选择 -->
-            <div class="file-upload-area">
+            <!-- Debug 模式：文本输入区域 -->
+            <div v-if="isDebugMode" class="debug-import-section">
+              <textarea 
+                v-model="debugImportText"
+                class="debug-import-textarea"
+                placeholder="在此粘贴 JSON 数据..."
+                :disabled="!!importData"
+              ></textarea>
+              <div class="debug-import-actions">
+                <button 
+                  v-if="!importData"
+                  class="action-btn secondary" 
+                  @click="parseDebugImportText"
+                  :disabled="!debugImportText.trim()"
+                >
+                  🔍 解析数据
+                </button>
+                <button 
+                  v-else
+                  class="action-btn secondary" 
+                  @click="importData = null; debugImportText = ''; importError = ''"
+                >
+                  🔄 重新输入
+                </button>
+              </div>
+            </div>
+
+            <!-- 正常模式：文件选择 -->
+            <div v-else class="file-upload-area">
               <input 
                 type="file" 
                 accept=".json,application/json"
@@ -902,6 +1024,155 @@ const toggleAllImport = (val) => {
   background: #aaa;
 }
 
+/* Debug 模式提示 */
+.debug-note {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: #fff3e0;
+  border-radius: 4px;
+  color: #e65100;
+  font-size: 0.85rem;
+}
+
+/* Debug 导出面板 */
+.debug-export-panel {
+  background: #f5f5f5;
+  border: 2px solid #ff9800;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.debug-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+  color: white;
+  font-weight: 600;
+}
+
+.debug-icon {
+  font-size: 1.2rem;
+}
+
+.debug-close-btn {
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.debug-close-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.debug-panel-content {
+  padding: 16px;
+}
+
+.debug-hint {
+  margin: 0 0 12px;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.debug-textarea {
+  width: 100%;
+  height: 200px;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  resize: vertical;
+  background: white;
+  box-sizing: border-box;
+}
+
+.debug-textarea:focus {
+  outline: none;
+  border-color: #ff9800;
+}
+
+.debug-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.debug-actions .action-btn {
+  flex: 1;
+  padding: 10px 16px;
+  font-size: 0.95rem;
+}
+
+.action-btn.secondary {
+  background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(255, 152, 0, 0.35);
+}
+
+.action-btn.secondary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(255, 152, 0, 0.45);
+}
+
+/* Debug 导入区域 */
+.debug-import-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.debug-import-textarea {
+  width: 100%;
+  height: 150px;
+  padding: 12px;
+  border: 2px dashed #ff9800;
+  border-radius: 12px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  resize: vertical;
+  background: #fffbf5;
+  box-sizing: border-box;
+  transition: all 0.2s ease;
+}
+
+.debug-import-textarea:focus {
+  outline: none;
+  border-style: solid;
+  border-color: #ff9800;
+  background: white;
+}
+
+.debug-import-textarea:disabled {
+  background: #f5f5f5;
+  border-color: #ccc;
+  color: #666;
+}
+
+.debug-import-actions {
+  display: flex;
+  justify-content: center;
+}
+
+.debug-import-actions .action-btn {
+  width: auto;
+  padding: 10px 24px;
+}
+
 /* 移动端适配 */
 @media (max-width: 480px) {
   .transfer-panel {
@@ -931,6 +1202,16 @@ const toggleAllImport = (val) => {
 
   .file-label {
     padding: 24px 16px;
+  }
+
+  .debug-textarea,
+  .debug-import-textarea {
+    height: 120px;
+    font-size: 0.8rem;
+  }
+
+  .debug-actions {
+    flex-direction: column;
   }
 }
 </style>

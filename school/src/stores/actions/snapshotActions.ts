@@ -18,6 +18,7 @@ export const snapshotActions = {
       settings: this.settings,
       worldState: this.worldState,
       allClassData: this.allClassData,
+      allClubs: this.allClubs,
       currentRunId: this.currentRunId,
       currentFloor: this.currentFloor
     }))
@@ -64,6 +65,7 @@ export const snapshotActions = {
       settings: this.settings,
       worldState: this.worldState,
       allClassData: this.allClassData,
+      allClubs: this.allClubs,
       currentRunId: this.currentRunId,
       currentFloor: this.currentFloor
     }))
@@ -158,6 +160,9 @@ export const snapshotActions = {
     if (state.allClassData) {
       this.allClassData = state.allClassData
     }
+    if (state.allClubs) {
+      this.allClubs = state.allClubs
+    }
     
     this.currentRunId = state.currentRunId || Date.now().toString(36)
     this.currentFloor = state.currentFloor || 0
@@ -166,6 +171,11 @@ export const snapshotActions = {
 
     await this.rebuildWorldbookState()
     this.checkAndNotifyDeliveries()
+    
+    // 确保所有 NPC 都被初始化（处理旧存档只有本班 NPC 的情况）
+    if (this.initializeAllClassNpcs) {
+      this.initializeAllClassNpcs()
+    }
 
     return fullSnapshot
   },
@@ -204,7 +214,8 @@ export const snapshotActions = {
       gameTime: this.gameTime,
       settings: this.settings,
       worldState: this.worldState,
-      allClassData: this.allClassData
+      allClassData: this.allClassData,
+      allClubs: this.allClubs
     }))
   },
 
@@ -224,6 +235,8 @@ export const snapshotActions = {
       this.initializeNpcRelationships()
     }
     if (data.worldState) this.worldState = data.worldState
+    if (data.allClassData) this.allClassData = data.allClassData
+    if (data.allClubs) this.allClubs = data.allClubs
     // @ts-ignore
     if (data.currentRunId) this.currentRunId = data.currentRunId
     // @ts-ignore

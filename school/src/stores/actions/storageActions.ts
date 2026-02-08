@@ -131,8 +131,10 @@ export const storageActions = {
         this.currentRunId = lastRunId
       }
       
-      this.initializeNpcRelationships()
       await this.rebuildWorldbookState()
+      // 注意：initializeNpcRelationships 必须在 rebuildWorldbookState 之后调用，
+      // 因为 rebuildWorldbookState 会加载班级数据，而关系初始化需要用到班级数据中的角色列表
+      this.initializeNpcRelationships()
       this.checkAndNotifyDeliveries()
       
       console.log('[GameStore] Initialized from storage (IndexedDB)')
@@ -263,6 +265,37 @@ export const storageActions = {
 
       this.saveSnapshots = processedSnapshots
       this.saveToStorage(true)
+      
+      // 在 rebuildWorldbookState 之前，从最新快照预加载玩家创建的社团
+      // 这是为了确保玩家创建的社团在导入到新设备时能被正确重建
+      if (processedSnapshots.length > 0) {
+        const sortedSnapshots = [...processedSnapshots].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+        const latestSnapshot = sortedSnapshots[0]
+        
+        if (latestSnapshot) {
+          const details = await getSnapshotData(latestSnapshot.id)
+          if (details && details.gameState) {
+            // 预加载玩家创建的社团（ID 以 player_club_ 开头）
+            if (details.gameState.allClubs) {
+              if (!this.allClubs) this.allClubs = {}
+              for (const [clubId, club] of Object.entries(details.gameState.allClubs)) {
+                if (clubId.startsWith('player_club_')) {
+                  console.log(`[GameStore] Pre-loading player created club: ${clubId}`)
+                  this.allClubs[clubId] = club
+                }
+              }
+            }
+            
+            // 同时恢复 currentRunId 和 player，因为 rebuildWorldbookState 需要用到
+            if (details.gameState.currentRunId) {
+              this.currentRunId = details.gameState.currentRunId
+            }
+            if (details.gameState.player) {
+              this.player = details.gameState.player
+            }
+          }
+        }
+      }
       
       await this.rebuildWorldbookState()
       

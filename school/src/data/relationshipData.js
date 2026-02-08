@@ -1506,29 +1506,35 @@ export function calculateRelationshipScore(relationship) {
 /**
  * 获取关系心意描述
  * @param {Object} relationship - 关系数据
+ * @param {string} playerGender - 玩家性别 ('male' | 'female')
+ * @param {string} targetGender - 目标角色性别 ('male' | 'female')
  * @returns {Object} { text: string, class: string }
  */
-export function getEmotionalState(relationship) {
+export function getEmotionalState(relationship, playerGender = 'male', targetGender = 'female') {
   if (!relationship) return { text: '陌生人', class: 'level-stranger' }
   
   const { intimacy = 0, trust = 0, passion = 0, hostility = 0 } = relationship
   const score = calculateRelationshipScore(relationship)
   
+  // 检查是否允许浪漫关系
+  // 如果玩家是男性，且目标也是男性，则不显示浪漫相关的状态
+  const isRomanceBlocked = (playerGender === 'male' && targetGender === 'male')
+
   // 特殊状态判断 (优先级高)
   if (hostility >= 80) return { text: '死敌', class: 'level-hostile-extreme' }
-  if (hostility >= 40 && passion >= 50) return { text: '爱恨交织', class: 'level-complex' }
+  if (!isRomanceBlocked && hostility >= 40 && passion >= 50) return { text: '爱恨交织', class: 'level-complex' }
   if (hostility >= 50) return { text: '敌对', class: 'level-hostile' }
   
   // 正向状态判断
-  if (intimacy >= 80 && trust >= 80 && passion >= 70) return { text: '灵魂伴侣', class: 'level-soulmate' }
-  if (intimacy >= 70 && trust >= 70 && passion >= 50) return { text: '恋人', class: 'level-lover' }
-  if (passion >= 70 && intimacy < 40) return { text: '迷恋', class: 'level-crush' } // 单相思/憧憬
+  if (!isRomanceBlocked && intimacy >= 80 && trust >= 80 && passion >= 70) return { text: '灵魂伴侣', class: 'level-soulmate' }
+  if (!isRomanceBlocked && intimacy >= 70 && trust >= 70 && passion >= 50) return { text: '恋人', class: 'level-lover' }
+  if (!isRomanceBlocked && passion >= 70 && intimacy < 40) return { text: '迷恋', class: 'level-crush' } // 单相思/憧憬
   
   if (intimacy >= 80 && trust >= 80) return { text: '挚友', class: 'level-best' }
-  if (intimacy >= 60 && trust < 40) return { text: '损友', class: 'level-bad-friend' } // 亲密但不信赖
-  if (trust >= 70 && intimacy < 40) return { text: '可靠伙伴', class: 'level-partner' } // 信赖但不亲密
+  if (intimacy >= 60 && trust < 40) return { text: '损友', class: 'level-bad-friend' } 
+  if (trust >= 70 && intimacy < 40) return { text: '可靠伙伴', class: 'level-partner' }
   
-  // 基础等级
+  // 基础
   if (score >= 60) return { text: '好友', class: 'level-good' }
   if (score >= 30) return { text: '朋友', class: 'level-friend' }
   if (score >= 10) return { text: '熟人', class: 'level-known' }

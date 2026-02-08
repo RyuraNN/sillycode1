@@ -38,28 +38,33 @@ export function initializeRelationships() {
   const relationships = {}
   
   for (const charName of allCharacters) {
-    // 尝试从班级数据中获取自定义性格
+    // 尝试从班级数据中获取自定义性格和性别
     let customPersonality = null
+    let charGender = 'female' // 默认为女性
+
     if (gameStore.allClassData) {
       for (const classData of Object.values(gameStore.allClassData)) {
         // 检查班主任
-        if (classData.headTeacher && classData.headTeacher.name === charName && classData.headTeacher.personality) {
-          customPersonality = classData.headTeacher.personality
+        if (classData.headTeacher && classData.headTeacher.name === charName) {
+          if (classData.headTeacher.personality) customPersonality = classData.headTeacher.personality
+          if (classData.headTeacher.gender) charGender = classData.headTeacher.gender
           break
         }
         // 检查教师
         if (classData.teachers) {
           const teacher = classData.teachers.find(t => t.name === charName)
-          if (teacher && teacher.personality) {
-            customPersonality = teacher.personality
+          if (teacher) {
+            if (teacher.personality) customPersonality = teacher.personality
+            if (teacher.gender) charGender = teacher.gender
             break
           }
         }
         // 检查学生
         if (classData.students) {
           const student = classData.students.find(s => s.name === charName)
-          if (student && student.personality) {
-            customPersonality = student.personality
+          if (student) {
+            if (student.personality) customPersonality = student.personality
+            if (student.gender) charGender = student.gender
             break
           }
         }
@@ -67,6 +72,7 @@ export function initializeRelationships() {
     }
 
     relationships[charName] = {
+      gender: charGender,
       // 性格轴 (优先使用自定义数据，其次是默认数据)
       personality: customPersonality || DEFAULT_PERSONALITIES[charName] || {
         order: 0,
@@ -269,6 +275,13 @@ export function getAllCharacterNames(gameStore) {
           names.add(member)
         }
       }
+    }
+  }
+  
+  // 从 NPC 列表中收集（作为备选数据源，确保在 allClassData/allClubs 为空时也能获取角色）
+  if (gameStore.npcs && gameStore.npcs.length > 0) {
+    for (const npc of gameStore.npcs) {
+      if (npc.name) names.add(npc.name)
     }
   }
   

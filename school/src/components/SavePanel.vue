@@ -22,6 +22,15 @@ const gameStore = useGameStore()
 const editingId = ref(null)
 const editingLabel = ref('')
 
+// Debug 模式专用状态
+const debugExportJson = ref('') // 导出的 JSON 文本
+const showDebugExportPanel = ref(false) // 显示导出结果面板
+const debugImportText = ref('') // 用户粘贴的导入文本
+const showDebugImportPanel = ref(false) // 显示导入文本输入面板
+
+// 计算属性：是否为 Debug 模式
+const isDebugMode = computed(() => gameStore.settings.debugMode)
+
 // 聊天预览相关
 const showChatPreview = ref(false)
 const previewSnapshot = ref(null)
@@ -167,32 +176,66 @@ const closePreview = () => {
 // 导出存档
 const handleExport = async () => {
   const btn = document.querySelector('.io-btn.export')
-  const originalText = btn.innerHTML
-  btn.innerHTML = '<span class="io-icon">⌛</span> 导出中...'
-  btn.disabled = true
+  const originalText = btn?.innerHTML || ''
+  if (btn) {
+    btn.innerHTML = '<span class="io-icon">⌛</span> 导出中...'
+    btn.disabled = true
+  }
   
   try {
     const data = await gameStore.getExportData()
-    const blob = new Blob([data], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `school_save_${new Date().toISOString().slice(0,10)}.json`
-    a.click()
-    URL.revokeObjectURL(url)
+    
+    // Debug 模式：显示文本框
+    if (isDebugMode.value) {
+      debugExportJson.value = data
+      showDebugExportPanel.value = true
+    } else {
+      // 正常模式：下载文件
+      const blob = new Blob([data], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `school_save_${new Date().toISOString().slice(0,10)}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+    }
   } catch (e) {
     console.error('Export failed:', e)
     alert('导出存档失败，请重试')
   } finally {
-    btn.innerHTML = originalText
-    btn.disabled = false
+    if (btn) {
+      btn.innerHTML = originalText
+      btn.disabled = false
+    }
   }
+}
+
+// Debug 模式：复制导出的 JSON 到剪贴板
+const copyExportJson = async () => {
+  try {
+    await navigator.clipboard.writeText(debugExportJson.value)
+    alert('已复制到剪贴板！')
+  } catch (e) {
+    console.error('Copy failed:', e)
+    alert('复制失败，请手动选择复制')
+  }
+}
+
+// Debug 模式：关闭导出面板
+const closeDebugExportPanel = () => {
+  showDebugExportPanel.value = false
+  debugExportJson.value = ''
 }
 
 // 导入存档
 const fileInput = ref(null)
 const triggerImport = () => {
-  fileInput.value.click()
+  // Debug 模式：显示文本输入面板
+  if (isDebugMode.value) {
+    showDebugImportPanel.value = true
+  } else {
+    fileInput.value.click()
+  }
 }
 
 const handleImport = (event) => {
@@ -211,6 +254,33 @@ const handleImport = (event) => {
     event.target.value = ''
   }
   reader.readAsText(file)
+}
+
+// Debug 模式：解析粘贴的 JSON 文本并导入
+const handleDebugImport = async () => {
+  if (!debugImportText.value.trim()) {
+    alert('请粘贴 JSON 数据')
+    return
+  }
+  
+  try {
+    const success = await gameStore.importSaveData(debugImportText.value)
+    if (success) {
+      alert('存档导入成功！')
+      closeDebugImportPanel()
+    } else {
+      alert('导入失败：数据格式错误或损坏')
+    }
+  } catch (e) {
+    console.error('Debug import failed:', e)
+    alert('导入失败：' + e.message)
+  }
+}
+
+// Debug 模式：关闭导入面板
+const closeDebugImportPanel = () => {
+  showDebugImportPanel.value = false
+  debugImportText.value = ''
 }
 </script>
 
@@ -251,10 +321,60 @@ const handleImport = (event) => {
         </div>
       </div>
 
+      <!-- Debug 导出面板 -->
+      <div v-if="showDebugExportPanel" class="debug-overlay">
+        <div class="debug-panel-header">
+          <span class="debug-icon">🔧</span>
+          <span>Debug 模式 - 导出存档</span>
+          <button class="debug-close-btn" @click="closeDebugExportPanel">×</button>
+        </div>
+        <div class="debug-panel-content">
+          <p class="debug-hint">复制下方 JSON 数据，可在其他设备粘贴导入：</p>
+          <textarea 
+            class="debug-textarea" 
+            :value="debugExportJson" 
+            readonly
+            @focus="$event.target.select()"
+          ></textarea>
+          <div class="debug-actions">
+            <button class="debug-btn primary" @click="copyExportJson">📋 复制到剪贴板</button>
+            <button class="debug-btn" @click="closeDebugExportPanel">关闭</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Debug 导入面板 -->
+      <div v-if="showDebugImportPanel" class="debug-overlay">
+        <div class="debug-panel-header">
+          <span class="debug-icon">🔧</span>
+          <span>Debug 模式 - 导入存档</span>
+          <button class="debug-close-btn" @click="closeDebugImportPanel">×</button>
+        </div>
+        <div class="debug-panel-content">
+          <p class="debug-hint">粘贴之前导出的 JSON 数据：</p>
+          <textarea 
+            v-model="debugImportText"
+            class="debug-textarea" 
+            placeholder="在此粘贴 JSON 数据..."
+          ></textarea>
+          <div class="debug-actions">
+            <button 
+              class="debug-btn primary" 
+              @click="handleDebugImport"
+              :disabled="!debugImportText.trim()"
+            >
+              📥 确认导入
+            </button>
+            <button class="debug-btn" @click="closeDebugImportPanel">取消</button>
+          </div>
+        </div>
+      </div>
+
       <div class="panel-header">
         <div class="header-title-area">
           <span class="header-icon">{{ mode === 'save' ? '💾' : '📂' }}</span>
           <h2>{{ mode === 'save' ? '存档管理' : '读取存档' }}</h2>
+          <span v-if="isDebugMode" class="debug-badge">🔧 Debug</span>
         </div>
         <button class="close-btn" @click="emit('close')">×</button>
       </div>
@@ -1171,5 +1291,205 @@ const handleImport = (event) => {
   color: #86efac;
   background: linear-gradient(135deg, rgba(134, 239, 172, 0.15) 0%, rgba(134, 239, 172, 0.1) 100%);
   border-color: rgba(134, 239, 172, 0.25);
+}
+
+/* ==================== Debug 面板样式 ==================== */
+.debug-badge {
+  padding: 4px 10px;
+  background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+  color: white;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.debug-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(180deg, #fffdf5 0%, #f5f0e1 100%);
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px;
+}
+
+.debug-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+  color: white;
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.debug-icon {
+  font-size: 1.3rem;
+}
+
+.debug-close-btn {
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.debug-close-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.debug-panel-content {
+  flex: 1;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.debug-hint {
+  margin: 0 0 12px;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.debug-textarea {
+  flex: 1;
+  width: 100%;
+  min-height: 200px;
+  padding: 14px;
+  border: 2px solid #ddd;
+  border-radius: 12px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  resize: none;
+  background: white;
+  box-sizing: border-box;
+}
+
+.debug-textarea:focus {
+  outline: none;
+  border-color: #ff9800;
+}
+
+.debug-textarea::placeholder {
+  color: #aaa;
+}
+
+.debug-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.debug-btn {
+  flex: 1;
+  padding: 12px 20px;
+  border: 1px solid rgba(139, 69, 19, 0.2);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 249, 230, 0.9) 100%);
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #5d4037;
+}
+
+.debug-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(139, 69, 19, 0.15);
+}
+
+.debug-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.debug-btn.primary {
+  background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+  color: white;
+  border: none;
+  box-shadow: 0 4px 15px rgba(255, 152, 0, 0.35);
+}
+
+.debug-btn.primary:hover:not(:disabled) {
+  box-shadow: 0 6px 20px rgba(255, 152, 0, 0.45);
+}
+
+/* 夜间模式 - Debug 面板 */
+.dark-mode .debug-overlay {
+  background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+}
+
+.dark-mode .debug-panel-header {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+}
+
+.dark-mode .debug-hint {
+  color: #94a3b8;
+}
+
+.dark-mode .debug-textarea {
+  background: rgba(30, 30, 50, 0.9);
+  border-color: rgba(245, 158, 11, 0.3);
+  color: #e0e7ff;
+}
+
+.dark-mode .debug-textarea:focus {
+  border-color: #f59e0b;
+}
+
+.dark-mode .debug-textarea::placeholder {
+  color: #64748b;
+}
+
+.dark-mode .debug-btn {
+  background: linear-gradient(135deg, rgba(30, 30, 50, 0.9) 0%, rgba(40, 40, 70, 0.9) 100%);
+  border-color: rgba(245, 158, 11, 0.3);
+  color: #e0e7ff;
+}
+
+.dark-mode .debug-btn:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2);
+}
+
+.dark-mode .debug-btn.primary {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(245, 158, 11, 0.4);
+}
+
+.dark-mode .debug-btn.primary:hover:not(:disabled) {
+  box-shadow: 0 6px 20px rgba(245, 158, 11, 0.5);
+}
+
+/* 移动端适配 - Debug 面板 */
+@media (max-width: 480px) {
+  .debug-textarea {
+    min-height: 150px;
+    font-size: 0.8rem;
+  }
+
+  .debug-actions {
+    flex-direction: column;
+  }
 }
 </style>

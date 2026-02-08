@@ -445,6 +445,7 @@ const confirmSignature = async () => {
 
   // 这里将来会处理开始游戏的逻辑，比如保存数据到 store
   gameStore.setPlayerName(formData.value.name)
+  gameStore.player.gender = formData.value.gender
   gameStore.player.characterFeature = formData.value.characterFeature
   gameStore.player.backgroundStory = formData.value.backgroundStory
   gameStore.player.newGameGuideTurns = 3 // 初始化新游戏引导回合数

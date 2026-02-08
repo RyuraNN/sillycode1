@@ -385,6 +385,7 @@ const handleImageRestore = (historyId) => {
 
 const sendMessage = async () => {
   gameStore.cleanupSnapshots(gameLog.value)
+  suggestedReplies.value = [] // 清空建议回复，等待下一轮生成
 
   let messageContent = inputText.value.trim()
   let isRetry = false
@@ -1407,6 +1408,14 @@ watch(() => gameStore.mapSelectionMode, (newVal) => {
 
 watch(gameLog, (newVal) => {
   gameStore.syncCurrentChatLog(newVal)
+}, { deep: true })
+
+// 监听系统通知（如天赋触发、加入社团等），直接显示为弹幕
+watch(() => gameStore.player.systemNotifications, (newVal) => {
+  if (newVal && newVal.length > 0) {
+    showDanmaku(newVal, 'system')
+    gameStore.clearSystemNotifications()
+  }
 }, { deep: true })
 
 watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {

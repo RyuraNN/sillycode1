@@ -160,6 +160,10 @@ const commentContent = ref('')
 const friends = computed(() => gameStore.player.social.friends)
 const groups = computed(() => gameStore.player.social.groups)
 
+// 分类好友列表
+const normalContacts = computed(() => friends.value.filter(f => !f.isSystem))
+const systemContacts = computed(() => friends.value.filter(f => f.isSystem))
+
 // 检查拒绝好友通知
 const checkNotifications = () => {
   if (!gameStore.player.social.notifications) return
@@ -262,6 +266,7 @@ const chatSessions = computed(() => {
 
 const showFriends = ref(true)
 const showGroups = ref(true)
+const showSystem = ref(true)
 
 const currentMessages = ref([])
 
@@ -823,9 +828,22 @@ const postComment = async () => {
 }
 
 // 添加好友相关逻辑
-const openAddFriendModal = () => {
+const openAddFriendModal = async () => {
   searchKeyword.value = ''
   searchResults.value = []
+  
+  // 确保角色数据已加载
+  // 如果 allClassData 为空且 npcs 也为空，尝试重新加载数据
+  if (Object.keys(gameStore.allClassData || {}).length === 0 && (gameStore.npcs || []).length === 0) {
+    console.log('[SocialApp] Character data not loaded, attempting to load...')
+    try {
+      await gameStore.loadClassData()
+      await gameStore.loadClubData()
+    } catch (e) {
+      console.error('[SocialApp] Failed to load character data:', e)
+    }
+  }
+  
   showAddFriendModal.value = true
 }
 
@@ -839,6 +857,8 @@ const performSearch = () => {
   const allNames = getAllCharacterNames(gameStore)
   
   searchResults.value = allNames.filter(name => {
+    // 确保 name 是有效的字符串
+    if (!name || typeof name !== 'string') return false
     // 排除自己
     if (name === gameStore.player.name) return false
     // 排除已是好友的
@@ -968,6 +988,29 @@ const handleSendFriendRequest = (charName) => {
 
           <!-- 通讯录 -->
           <div v-if="activeTab === 'contacts'" class="contact-list">
+            <!-- 系统通知 -->
+            <div v-if="systemContacts.length > 0" class="contact-group">
+              <div class="group-header" @click="showSystem = !showSystem">
+                <span class="arrow-icon" :class="{ expanded: showSystem }">▶</span>
+                <span>系统通知</span>
+                <span class="group-count">{{ systemContacts.length }}</span>
+              </div>
+              <div v-if="showSystem" class="group-content">
+                <div v-for="contact in systemContacts" :key="contact.id" class="contact-item" @click="openChat({ ...contact, type: 'friend' })">
+                  <div class="item-avatar sm">
+                    <span class="avatar-emoji">{{ contact.avatar || '🔔' }}</span>
+                  </div>
+                  <div class="contact-info">
+                    <span class="item-name">{{ contact.name }}</span>
+                    <span class="item-status online">
+                      <span class="status-dot"></span>
+                      系统
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- 群组 -->
             <div class="contact-group">
               <div class="group-header" @click="showGroups = !showGroups">
@@ -992,10 +1035,10 @@ const handleSendFriendRequest = (charName) => {
               <div class="group-header" @click="showFriends = !showFriends">
                 <span class="arrow-icon" :class="{ expanded: showFriends }">▶</span>
                 <span>好友</span>
-                <span class="group-count">{{ friends.length }}</span>
+                <span class="group-count">{{ normalContacts.length }}</span>
               </div>
               <div v-if="showFriends" class="group-content">
-                <div v-for="friend in friends" :key="friend.id" class="contact-item" @click="openChat({ ...friend, type: 'friend' })">
+                <div v-for="friend in normalContacts" :key="friend.id" class="contact-item" @click="openChat({ ...friend, type: 'friend' })">
                   <div class="item-avatar sm" :class="getAvatarGenderClass(friend)">
                     <img v-if="isImage(friend.avatar)" :src="friend.avatar" />
                     <span v-else class="avatar-emoji">{{ friend.avatar || '👤' }}</span>

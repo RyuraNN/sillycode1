@@ -771,6 +771,7 @@ export let GRADE_1_COURSES = JSON.parse(JSON.stringify(DEFAULT_GRADE_1_COURSES))
 export let GRADE_2_COURSES = JSON.parse(JSON.stringify(DEFAULT_GRADE_2_COURSES))
 export let GRADE_3_COURSES = JSON.parse(JSON.stringify(DEFAULT_GRADE_3_COURSES))
 export let IDOL_COURSES = JSON.parse(JSON.stringify(DEFAULT_IDOL_COURSES))
+export let CUSTOM_CLASS_COURSES = {} // { classId: { required: [], electives: [] } }
 
 // ============ 世界书持久化 ============
 
@@ -832,7 +833,7 @@ function parseCourseLine(line) {
  * 保存课程池到世界书
  */
 export async function saveCoursePoolToWorldbook() {
-  if (typeof window.saveWorldbookEntry !== 'function') {
+  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
     console.warn('[CoursePool] Worldbook API not available')
     return false
   }
@@ -863,10 +864,64 @@ export async function saveCoursePoolToWorldbook() {
   processIdol('2年E班', IDOL_COURSES.grade2)
   processIdol('3年E班', IDOL_COURSES.grade3)
   
+  // 保存自定义班级课程
+  Object.keys(CUSTOM_CLASS_COURSES).forEach(classId => {
+    const data = CUSTOM_CLASS_COURSES[classId]
+    if ((data.required && data.required.length > 0) || (data.electives && data.electives.length > 0)) {
+      content += `\n# --- ${classId} (自定义) ---\n`
+      if (data.required) {
+        data.required.forEach(c => content += serializeCourse(classId, c, '必修') + '\n')
+      }
+      if (data.electives) {
+        data.electives.forEach(c => content += serializeCourse(classId, c, '选修') + '\n')
+      }
+    }
+  })
+  
   try {
-    // 保存到当前聊天
-    await window.saveWorldbookEntry('current', WB_ENTRY_NAME, content, ['system', 'course'], false)
-    console.log('[CoursePool] Saved to worldbook')
+    const books = window.getCharWorldbookNames('current')
+    // 优先保存到当前主世界书
+    const bookName = books.primary || (books.additional && books.additional[0])
+    
+    if (!bookName) {
+      console.warn('[CoursePool] No worldbook bound to current character')
+      return false
+    }
+
+    await window.updateWorldbookWith(bookName, (entries) => {
+      const newEntries = [...entries]
+      const index = newEntries.findIndex(e => e.name === WB_ENTRY_NAME)
+      
+      const newEntry = {
+        name: WB_ENTRY_NAME,
+        content: content,
+        key: ['system', 'course'],
+        strategy: {
+          type: 'selective' // 绿灯
+        },
+        position: {
+          type: 'before_character_definition',
+          order: 100
+        },
+        probability: 100,
+        enabled: false, // 禁用，仅作为数据存储，不让AI看到
+        recursion: {
+          prevent_outgoing: true // 防止递归
+        }
+      }
+
+      if (index !== -1) {
+        // 更新现有条目
+        newEntries[index] = { ...newEntries[index], ...newEntry }
+      } else {
+        // 创建新条目
+        newEntries.push(newEntry)
+      }
+      
+      return newEntries
+    })
+
+    console.log('[CoursePool] Saved to worldbook:', bookName)
     return true
   } catch (e) {
     console.error('[CoursePool] Save failed:', e)
@@ -924,6 +979,9 @@ export async function loadCoursePoolFromWorldbook() {
     IDOL_COURSES.grade1.required.length = 0; IDOL_COURSES.grade1.electives.length = 0
     IDOL_COURSES.grade2.required.length = 0; IDOL_COURSES.grade2.electives.length = 0
     IDOL_COURSES.grade3.required.length = 0; IDOL_COURSES.grade3.electives.length = 0
+    
+    // 清空自定义班级数据
+    for (const key in CUSTOM_CLASS_COURSES) delete CUSTOM_CLASS_COURSES[key]
 
     for (const line of lines) {
       const trimmed = line.trim()
@@ -948,6 +1006,12 @@ export async function loadCoursePoolFromWorldbook() {
         isRequired ? IDOL_COURSES.grade2.required.push(course) : IDOL_COURSES.grade2.electives.push(course)
       } else if (category === '3年E班') {
         isRequired ? IDOL_COURSES.grade3.required.push(course) : IDOL_COURSES.grade3.electives.push(course)
+      } else {
+        // 自定义班级处理
+        if (!CUSTOM_CLASS_COURSES[category]) {
+          CUSTOM_CLASS_COURSES[category] = { required: [], electives: [] }
+        }
+        isRequired ? CUSTOM_CLASS_COURSES[category].required.push(course) : CUSTOM_CLASS_COURSES[category].electives.push(course)
       }
     }
     
@@ -974,6 +1038,8 @@ export function resetCourseData() {
   Object.assign(GRADE_2_COURSES, JSON.parse(JSON.stringify(DEFAULT_GRADE_2_COURSES)))
   Object.assign(GRADE_3_COURSES, JSON.parse(JSON.stringify(DEFAULT_GRADE_3_COURSES)))
   Object.assign(IDOL_COURSES, JSON.parse(JSON.stringify(DEFAULT_IDOL_COURSES)))
+  // 清空自定义班级
+  for (const key in CUSTOM_CLASS_COURSES) delete CUSTOM_CLASS_COURSES[key]
 }
 
 /**
@@ -985,7 +1051,8 @@ export function getCoursePoolState() {
     GRADE_1_COURSES,
     GRADE_2_COURSES,
     GRADE_3_COURSES,
-    IDOL_COURSES
+    IDOL_COURSES,
+    CUSTOM_CLASS_COURSES
   }
 }
 
@@ -1003,6 +1070,10 @@ export function restoreCoursePoolState(state) {
   if (state.GRADE_2_COURSES) Object.assign(GRADE_2_COURSES, state.GRADE_2_COURSES)
   if (state.GRADE_3_COURSES) Object.assign(GRADE_3_COURSES, state.GRADE_3_COURSES)
   if (state.IDOL_COURSES) Object.assign(IDOL_COURSES, state.IDOL_COURSES)
+  if (state.CUSTOM_CLASS_COURSES) {
+    for (const key in CUSTOM_CLASS_COURSES) delete CUSTOM_CLASS_COURSES[key]
+    Object.assign(CUSTOM_CLASS_COURSES, state.CUSTOM_CLASS_COURSES)
+  }
 }
 
 // ============ 辅助函数 ============
@@ -1034,20 +1105,26 @@ export function isIdolClass(classId) {
  */
 export function getRequiredCourses(classId) {
   const grade = getGradeFromClassId(classId)
+  let courses = []
   
   // 偶像科使用专用课程
   if (isIdolClass(classId)) {
-    if (grade === 1) return IDOL_COURSES.grade1.required
-    if (grade === 2) return IDOL_COURSES.grade2.required
-    if (grade === 3) return IDOL_COURSES.grade3.required
+    if (grade === 1) courses = [...IDOL_COURSES.grade1.required]
+    else if (grade === 2) courses = [...IDOL_COURSES.grade2.required]
+    else if (grade === 3) courses = [...IDOL_COURSES.grade3.required]
+  } else {
+    // 普通班级
+    if (grade === 1) courses = [...GRADE_1_COURSES.required]
+    else if (grade === 2) courses = [...GRADE_2_COURSES.required]
+    else if (grade === 3) courses = [...GRADE_3_COURSES.required]
+  }
+
+  // 合并自定义班级课程
+  if (CUSTOM_CLASS_COURSES[classId] && CUSTOM_CLASS_COURSES[classId].required) {
+    courses = [...courses, ...CUSTOM_CLASS_COURSES[classId].required]
   }
   
-  // 普通班级
-  if (grade === 1) return GRADE_1_COURSES.required
-  if (grade === 2) return GRADE_2_COURSES.required
-  if (grade === 3) return GRADE_3_COURSES.required
-  
-  return []
+  return courses
 }
 
 /**
@@ -1064,14 +1141,18 @@ export function getElectiveCourses(classId) {
     if (grade === 1) electives.push(...IDOL_COURSES.grade1.electives)
     if (grade === 2) electives.push(...IDOL_COURSES.grade2.electives)
     if (grade === 3) electives.push(...IDOL_COURSES.grade3.electives)
-    return electives
+  } else {
+    // 添加年级专属选修课
+    if (grade === 2) {
+      electives.push(...GRADE_2_COURSES.electives)
+    } else if (grade === 3) {
+      electives.push(...GRADE_3_COURSES.electives)
+    }
   }
-  
-  // 添加年级专属选修课
-  if (grade === 2) {
-    electives.push(...GRADE_2_COURSES.electives)
-  } else if (grade === 3) {
-    electives.push(...GRADE_3_COURSES.electives)
+
+  // 合并自定义班级课程
+  if (CUSTOM_CLASS_COURSES[classId] && CUSTOM_CLASS_COURSES[classId].electives) {
+    electives.push(...CUSTOM_CLASS_COURSES[classId].electives)
   }
   
   return electives
@@ -1161,6 +1242,12 @@ export function getCourseById(courseId) {
     ...IDOL_COURSES.grade3.required,
     ...IDOL_COURSES.grade3.electives
   ]
+
+  // 添加自定义课程
+  Object.values(CUSTOM_CLASS_COURSES).forEach(data => {
+    if (data.required) allCourses.push(...data.required)
+    if (data.electives) allCourses.push(...data.electives)
+  })
   
   return allCourses.find(c => c.id === courseId) || null
 }
@@ -1170,7 +1257,7 @@ export function getCourseById(courseId) {
  * @returns {Array} 所有选修课列表
  */
 export function getAllElectives() {
-  return [
+  const list = [
     ...UNIVERSAL_ELECTIVES,
     ...GRADE_2_COURSES.electives,
     ...GRADE_3_COURSES.electives,
@@ -1178,4 +1265,34 @@ export function getAllElectives() {
     ...IDOL_COURSES.grade2.electives,
     ...IDOL_COURSES.grade3.electives
   ]
+
+  // 添加自定义选修课程
+  Object.values(CUSTOM_CLASS_COURSES).forEach(data => {
+    if (data.electives) list.push(...data.electives)
+  })
+
+  return list
+}
+
+/**
+ * 初始化班级的自定义课程数据
+ * @param {string} classId 
+ */
+export function initCustomClass(classId) {
+  if (!CUSTOM_CLASS_COURSES[classId]) {
+    CUSTOM_CLASS_COURSES[classId] = {
+      required: [],
+      electives: []
+    }
+  }
+}
+
+/**
+ * 移除班级的自定义课程数据
+ * @param {string} classId 
+ */
+export function removeCustomClass(classId) {
+  if (CUSTOM_CLASS_COURSES[classId]) {
+    delete CUSTOM_CLASS_COURSES[classId]
+  }
 }

@@ -18,17 +18,31 @@ export const inventoryActions = {
   },
 
   /**
-   * 添加待发送指令
+   * 添加待发送指令或系统通知
    */
   addCommand(this: any, command: string | CommandEntry) {
     if (typeof command === 'string') {
-      this.player.pendingCommands.push({
-        id: Date.now(),
-        text: command,
-        type: 'other'
-      })
+      // 如果是系统通知（以 [ 开头），直接添加到通知列表，不进入待发送队列
+      if (command.startsWith('[') && this.player.systemNotifications) {
+        this.player.systemNotifications.push(command)
+      } else {
+        this.player.pendingCommands.push({
+          id: Date.now(),
+          text: command,
+          type: 'other'
+        })
+      }
     } else {
       this.player.pendingCommands.push(command)
+    }
+  },
+
+  /**
+   * 清除系统通知
+   */
+  clearSystemNotifications(this: any) {
+    if (this.player.systemNotifications) {
+      this.player.systemNotifications = []
     }
   },
 
@@ -71,6 +85,20 @@ export const inventoryActions = {
             this.applyInstantEffect(attr, -(value as number))
           }
         }
+      }
+    }
+  },
+
+  /**
+   * 丢弃物品
+   */
+  discardItem(this: any, item: Item, count: number = 1) {
+    const inventoryItem = this.player.inventory.find((i: Item) => i.id === item.id)
+    if (inventoryItem) {
+      inventoryItem.count -= count
+      if (inventoryItem.count <= 0) {
+        const index = this.player.inventory.indexOf(inventoryItem)
+        this.player.inventory.splice(index, 1)
       }
     }
   },

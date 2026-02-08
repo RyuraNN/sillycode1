@@ -30,6 +30,10 @@ const electiveFilter = ref('')
 const genderFilter = ref('')
 const showFilters = ref(false)
 
+// ==================== 教师视图状态 ====================
+const teacherViewMode = ref('work') // 'work' | 'class'
+const expandedTeacherGroups = ref({})
+
 // ==================== 教师编辑状态 ====================
 const showTeacherEditor = ref(false)
 const editingTeacher = ref(null)
@@ -321,6 +325,7 @@ const loadCharacterPool = async () => {
             classId: classId,
             role: 'teacher',
             subjects: new Set(),
+            subjectsByClass: {}, // 新增：保存每个班级对应的具体科目
             isHeadTeacher: false,
             electivePreference: 'general',
             scheduleTag: '',
@@ -331,7 +336,10 @@ const loadCharacterPool = async () => {
         // 收集科目
         const teacherObj = teacherMap.get(t.name)
         if (t.subject) {
-          // 支持逗号、顿号分隔
+          // 保存该班级对应的原始科目
+          teacherObj.subjectsByClass[classId] = t.subject
+          
+          // 支持逗号、顿号分隔（用于合并后的显示）
           t.subject.split(/[,，、]/).forEach(s => {
             const trimmed = s.trim()
             if (trimmed) teacherObj.subjects.add(trimmed)
@@ -558,33 +566,134 @@ const totalStats = computed(() => {
   return { total: totalStudents, selected: selectedStudents }
 })
 
-// ==================== 教师数据 ====================
-const allTeachers = computed(() => {
-  const teachers = []
-  for (const [classId, classInfo] of Object.entries(fullRosterSnapshot.value)) {
-    if (classInfo.headTeacher?.name) {
-      teachers.push({
-        ...classInfo.headTeacher,
-        classId,
-        className: classInfo.name,
-        isHeadTeacher: true
-      })
-    }
-    // 修复：使用 Array.isArray 确保是数组
-    const classTeachers = Array.isArray(classInfo.teachers) ? classInfo.teachers : []
-    classTeachers.forEach(t => {
-      if (t.name) {
-        teachers.push({
-          ...t,
+// ==================== 教师数据处理 ====================
+const processedTeacherGroups = computed(() => {
+  const groups = {}
+
+  if (teacherViewMode.value === 'class') {
+    // 按班级分组（班内去重）
+    for (const [classId, classInfo] of Object.entries(fullRosterSnapshot.value)) {
+      const className = classInfo.name || classId
+      const teacherMap = new Map()
+
+      // 1. 处理班主任
+      if (classInfo.headTeacher?.name) {
+        teacherMap.set(classInfo.headTeacher.name, {
+          ...classInfo.headTeacher,
           classId,
-          className: classInfo.name,
-          isHeadTeacher: false
+          className,
+          roles: ['班主任'],
+          isHeadTeacher: true
         })
       }
-    })
+
+      // 2. 处理科任
+      const teachers = Array.isArray(classInfo.teachers) ? classInfo.teachers : []
+      teachers.forEach(t => {
+        if (!t.name) return
+        if (teacherMap.has(t.name)) {
+          // 已存在（即班主任），追加科目
+          const existing = teacherMap.get(t.name)
+          if (t.subject && !existing.roles.includes(t.subject)) {
+            existing.roles.push(t.subject)
+          }
+        } else {
+          teacherMap.set(t.name, {
+            ...t,
+            classId,
+            className,
+            roles: [t.subject || '教师'],
+            isHeadTeacher: false
+          })
+        }
+      })
+
+      if (teacherMap.size > 0) {
+        groups[className] = Array.from(teacherMap.values()).map(t => ({
+          ...t,
+          displayRole: t.roles.join(' / ')
+        }))
+      }
+    }
+  } else {
+    // 按作品分组（全局去重）
+    const globalTeacherMap = new Map()
+
+    for (const [classId, classInfo] of Object.entries(fullRosterSnapshot.value)) {
+      const className = classInfo.name || classId
+
+      // 辅助函数：合并到全局Map
+      const mergeToGlobal = (teacher, roleDesc, isHead = false) => {
+        if (!teacher.name) return
+        if (!globalTeacherMap.has(teacher.name)) {
+          globalTeacherMap.set(teacher.name, {
+            name: teacher.name,
+            gender: teacher.gender || 'female',
+            origin: teacher.origin || '未知',
+            assignments: [],
+            isHeadTeacher: false,
+            // 保留第一个找到的 classId 用于定位（虽然可能有多个）
+            classId: classId
+          })
+        }
+        const entry = globalTeacherMap.get(teacher.name)
+        if (isHead) entry.isHeadTeacher = true
+        entry.assignments.push({ className, role: roleDesc, classId })
+        // 更新 Origin (以防之前是未知的)
+        if (teacher.origin && entry.origin === '未知') entry.origin = teacher.origin
+      }
+
+      // 1. 班主任
+      if (classInfo.headTeacher?.name) {
+        mergeToGlobal(classInfo.headTeacher, '班主任', true)
+      }
+
+      // 2. 科任
+      const teachers = Array.isArray(classInfo.teachers) ? classInfo.teachers : []
+      teachers.forEach(t => {
+        mergeToGlobal(t, t.subject || '教师')
+      })
+    }
+
+    // 按 Origin 分组
+    for (const teacher of globalTeacherMap.values()) {
+      let origin = '未知'
+      if (teacher.origin) {
+        const match = teacher.origin.match(/^[\(（\[【](.+?)[\)）\]】]$/)
+        origin = match ? match[1] : teacher.origin
+      }
+      
+      if (!groups[origin]) groups[origin] = []
+      groups[origin].push(teacher)
+    }
   }
-  return teachers
+  
+  // 排序：组名排序
+  const sortedGroups = {}
+  Object.keys(groups).sort().forEach(key => {
+    sortedGroups[key] = groups[key]
+  })
+
+  return sortedGroups
 })
+
+const toggleTeacherGroup = (groupName) => {
+  expandedTeacherGroups.value[groupName] = !expandedTeacherGroups.value[groupName]
+}
+
+const expandAllTeachers = () => {
+  const groups = Object.keys(processedTeacherGroups.value)
+  const allExpanded = groups.every(g => expandedTeacherGroups.value[g])
+  const target = !allExpanded
+  groups.forEach(g => expandedTeacherGroups.value[g] = target)
+}
+
+// 监听数据变化，默认展开所有教师分组
+watch(processedTeacherGroups, (newGroups) => {
+  if (Object.keys(expandedTeacherGroups.value).length === 0) {
+    Object.keys(newGroups).forEach(g => expandedTeacherGroups.value[g] = true)
+  }
+}, { immediate: true })
 
 // ==================== 教师编辑 ====================
 const startEditTeacher = (teacher) => {
@@ -759,7 +868,7 @@ const updateAvailableCharacters = () => {
   
   // 过滤和标记角色
   availableCharacters.value = characterPool.value
-    .filter(c => !currentMembers.has(c.name))
+    .filter(c => !currentMembers.has(c.name) || c.role === 'teacher')
     .map(c => {
       const assignment = assignmentMap.get(c.name)
       return {
@@ -802,13 +911,33 @@ const filteredAvailableCharacters = computed(() => {
 // 添加角色到班级
 const addCharacterToClass = (char) => {
   if (char.role === 'teacher') {
-    // 教师
+    // 教师：优先使用该教师在目标班级的原始科目
+    let subjectForClass = ''
+    
+    // 1. 首先尝试从 subjectsByClass 获取（角色池中保存的班级特定科目）
+    if (char.subjectsByClass && char.subjectsByClass[composerTargetClass.value]) {
+      subjectForClass = char.subjectsByClass[composerTargetClass.value]
+    }
+    
+    // 2. 如果没有，尝试从原始快照获取（该教师在目标班级的原始科目）
+    if (!subjectForClass) {
+      const targetClassSnapshot = fullRosterSnapshot.value[composerTargetClass.value]
+      if (targetClassSnapshot?.teachers) {
+        const originalTeacher = targetClassSnapshot.teachers.find(t => t.name === char.name)
+        if (originalTeacher?.subject) {
+          subjectForClass = originalTeacher.subject
+        }
+      }
+    }
+    
+    // 3. 都没有时留空，让用户手动填写
+    
     if (!composerClassData.value.teachers) composerClassData.value.teachers = []
     composerClassData.value.teachers.push({
       name: char.name,
       gender: char.gender,
       origin: char.origin,
-      subject: char.subject || '',
+      subject: subjectForClass,
       role: 'teacher'
     })
   } else {
@@ -1484,23 +1613,65 @@ watch(activeTab, async (newTab) => {
               <div class="section-header">
                 <span class="section-icon">👨‍🏫</span>
                 <h4>教师名册</h4>
-                <button class="add-btn-small" @click="addNewTeacher">+ 添加</button>
-              </div>
-              <div class="teacher-grid">
-                <div 
-                  v-for="teacher in allTeachers" 
-                  :key="`${teacher.classId}-${teacher.name}`"
-                  class="teacher-card"
-                  @click="startEditTeacher(teacher)"
-                >
-                  <div class="teacher-info">
-                    <span class="teacher-name">{{ teacher.name }}</span>
-                    <span class="teacher-meta">{{ teacher.gender === 'female' ? '♀' : '♂' }}</span>
-                    <span class="teacher-role">{{ teacher.isHeadTeacher ? '班主任' : teacher.subject }}</span>
-                  </div>
-                  <div class="teacher-class">{{ teacher.className }}</div>
-                  <button class="delete-btn-small" @click.stop="deleteTeacher(teacher)">×</button>
+                <div class="view-controls">
+                  <button 
+                    class="view-btn" 
+                    :class="{ active: teacherViewMode === 'work' }"
+                    @click="teacherViewMode = 'work'"
+                  >按作品</button>
+                  <button 
+                    class="view-btn" 
+                    :class="{ active: teacherViewMode === 'class' }"
+                    @click="teacherViewMode = 'class'"
+                  >按班级</button>
                 </div>
+                <div class="header-actions">
+                   <button class="toolbar-btn small" @click="expandAllTeachers" title="全部展开/收起">📂</button>
+                   <button class="add-btn-small" @click="addNewTeacher">+ 添加</button>
+                </div>
+              </div>
+              
+              <div class="teacher-groups">
+                <div v-for="(teachers, groupName) in processedTeacherGroups" :key="groupName" class="teacher-group">
+                  <div class="group-header" @click="toggleTeacherGroup(groupName)">
+                    <span class="group-name">{{ groupName }} ({{ teachers.length }})</span>
+                    <span class="expand-icon">{{ expandedTeacherGroups[groupName] ? '▲' : '▼' }}</span>
+                  </div>
+                  
+                  <div v-if="expandedTeacherGroups[groupName]" class="teacher-grid">
+                    <div 
+                      v-for="teacher in teachers" 
+                      :key="teacher.name"
+                      class="teacher-card"
+                      :class="{ 'multi-role': teacher.assignments && teacher.assignments.length > 1 }"
+                      @click="startEditCharacter(teacher)"
+                    >
+                      <div class="teacher-info">
+                        <span class="teacher-name">{{ teacher.name }}</span>
+                        <span class="teacher-meta">{{ teacher.gender === 'female' ? '♀' : '♂' }}</span>
+                        <!-- 按班级模式显示合并角色 -->
+                        <span v-if="teacherViewMode === 'class'" class="teacher-role">{{ teacher.displayRole }}</span>
+                        <!-- 按作品模式显示统计 -->
+                        <span v-if="teacherViewMode === 'work'" class="teacher-role-tag" :class="{ 'is-head': teacher.isHeadTeacher }">
+                          {{ teacher.isHeadTeacher ? '班主任' : '教师' }}
+                        </span>
+                      </div>
+                      
+                      <!-- 按作品模式显示详细任职 -->
+                      <div v-if="teacherViewMode === 'work'" class="teacher-assignments">
+                        <div v-for="(assign, idx) in teacher.assignments" :key="idx" class="assign-item">
+                          {{ assign.className }} <span class="assign-role">{{ assign.role }}</span>
+                        </div>
+                      </div>
+                      
+                      <!-- 按班级模式不需要额外显示班级名，因为组名就是班级名 -->
+                      
+                      <!-- 只有在按班级模式下，才提供直接删除按钮（因为上下文明确） -->
+                      <button v-if="teacherViewMode === 'class'" class="delete-btn-small" @click.stop="deleteTeacher(teacher)">×</button>
+                    </div>
+                  </div>
+                </div>
+                 <div v-if="Object.keys(processedTeacherGroups).length === 0" class="empty-hint">暂无教师数据</div>
               </div>
             </div>
 
@@ -2306,6 +2477,38 @@ watch(activeTab, async (newTab) => {
   flex: 1;
 }
 
+.view-controls {
+  display: flex;
+  background: #e0e0e0;
+  border-radius: 6px;
+  padding: 2px;
+  margin-right: 10px;
+}
+
+.view-btn {
+  border: none;
+  background: none;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.view-btn.active {
+  background: white;
+  color: var(--primary-color);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  font-weight: 500;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .add-btn-small {
   padding: 4px 10px;
   background: var(--success-color);
@@ -2337,11 +2540,40 @@ watch(activeTab, async (newTab) => {
   cursor: not-allowed;
 }
 
+/* 教师分组 */
+.teacher-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.teacher-group {
+  border: 1px solid #eee;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.group-header {
+  padding: 10px 14px;
+  background: #f9f9f9;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 600;
+  color: #555;
+  transition: background 0.2s;
+}
+
+.group-header:hover { background: #f0f0f0; }
+
 /* 教师网格 */
 .teacher-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 10px;
+  padding: 10px;
+  background: white;
 }
 
 .teacher-card {
@@ -2352,6 +2584,9 @@ watch(activeTab, async (newTab) => {
   cursor: pointer;
   transition: all var(--transition-fast);
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .teacher-card:hover {
@@ -2359,25 +2594,57 @@ watch(activeTab, async (newTab) => {
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
+.teacher-card.multi-role { border-left: 3px solid var(--warning-color); }
+
 .teacher-info {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 4px;
+  flex-wrap: wrap;
 }
 
-.teacher-name { font-weight: 600; }
-.teacher-meta { color: #888; font-size: 0.9rem; }
+.teacher-name { font-weight: 600; color: #333; }
+.teacher-meta { color: #888; font-size: 0.85rem; }
 
 .teacher-role {
-  font-size: 0.8rem;
-  color: #666;
+  font-size: 0.75rem;
+  color: #555;
   background: #f0f0f0;
   padding: 2px 6px;
   border-radius: 4px;
 }
 
-.teacher-class { font-size: 0.8rem; color: #888; }
+.teacher-role-tag {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: #e3f2fd;
+  color: #1976d2;
+}
+
+.teacher-role-tag.is-head {
+  background: #fff8e1;
+  color: #f57c00;
+  border: 1px solid #ffe0b2;
+}
+
+.teacher-assignments {
+  font-size: 0.8rem;
+  color: #666;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.assign-item {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px dashed #eee;
+  padding-bottom: 2px;
+}
+
+.assign-role { color: #999; }
 
 .delete-btn-small {
   position: absolute;

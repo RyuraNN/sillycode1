@@ -183,8 +183,11 @@
                   {{ club.location }}
                 </div>
               </div>
-              <div class="club-role-badge president" v-if="club.president === gameStore.player.name">
+              <div class="club-role-badge president" v-if="isPresident(club, gameStore.player.name)">
                 <span>部长</span>
+              </div>
+              <div class="club-role-badge vice-president" v-else-if="isVicePresident(club, gameStore.player.name)">
+                <span>副部长</span>
               </div>
               <div class="club-role-badge member" v-else>
                 <span>成员</span>
@@ -315,14 +318,14 @@
                 <span class="info-icon">👑</span>
                 <div class="info-content">
                   <span class="info-label">部长</span>
-                  <span class="info-value">{{ selectedClub.president || '无' }}</span>
+                  <span class="info-value">{{ formatRoleList(selectedClub.president) }}</span>
                 </div>
               </div>
-              <div class="info-item" v-if="selectedClub.vicePresident">
+              <div class="info-item" v-if="selectedClub.vicePresident && (Array.isArray(selectedClub.vicePresident) ? selectedClub.vicePresident.length > 0 : selectedClub.vicePresident)">
                 <span class="info-icon">🎖️</span>
                 <div class="info-content">
                   <span class="info-label">副部长</span>
-                  <span class="info-value">{{ selectedClub.vicePresident }}</span>
+                  <span class="info-value">{{ formatRoleList(selectedClub.vicePresident) }}</span>
                 </div>
               </div>
               <div class="info-item">
@@ -381,7 +384,7 @@
                   <div class="status-hint">退出社团需通过剧情进行</div>
                 </div>
               </div>
-              <button v-if="selectedClub.president === gameStore.player.name" class="action-btn invite" @click="openInviteModal">
+              <button v-if="isPresident(selectedClub, gameStore.player.name)" class="action-btn invite" @click="openInviteModal">
                 <span>💌</span> 邀请成员
               </button>
             </template>
@@ -951,6 +954,9 @@ function isApplyingTo(clubId) {
 
 // 判断是否可以加入某社团
 function canJoinClub(clubId) {
+  // 学生会是特殊社团，不能主动加入
+  if (clubId === 'student_council') return false
+
   // 如果已经是成员，不能再加入
   if (gameStore.player.joinedClubs.includes(clubId)) return false
   
@@ -967,6 +973,33 @@ function canJoinClub(clubId) {
 // 检查是否是社团成员
 function isClubMember(clubId) {
   return gameStore.player.joinedClubs.includes(clubId)
+}
+
+// 检查是否是部长
+function isPresident(club, name) {
+  if (!club || !club.president) return false
+  if (Array.isArray(club.president)) {
+    return club.president.includes(name)
+  }
+  return club.president === name
+}
+
+// 检查是否是副部长
+function isVicePresident(club, name) {
+  if (!club || !club.vicePresident) return false
+  if (Array.isArray(club.vicePresident)) {
+    return club.vicePresident.includes(name)
+  }
+  return club.vicePresident === name
+}
+
+// 格式化职位列表
+function formatRoleList(roleData) {
+  if (!roleData) return '无'
+  if (Array.isArray(roleData)) {
+    return roleData.join('、')
+  }
+  return roleData
 }
 
 // 截断文本

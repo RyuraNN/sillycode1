@@ -3,7 +3,7 @@
  */
 
 import type { ClubData, Group, NpcStats } from '../gameStoreTypes'
-import { fetchClassDataFromWorldbook, fetchClubDataFromWorldbook, addPlayerToClubInWorldbook, removePlayerFromClubInWorldbook, syncClubWorldbookState, setPlayerClass, setVariableParsingWorldbookStatus, addNpcToClubInWorldbook, createClubInWorldbook } from '../../utils/worldbookParser'
+import { fetchClassDataFromWorldbook, fetchClubDataFromWorldbook, addPlayerToClubInWorldbook, removePlayerFromClubInWorldbook, syncClubWorldbookState, setPlayerClass, setVariableParsingWorldbookStatus, addNpcToClubInWorldbook, createClubInWorldbook, ensureClubExistsInWorldbook } from '../../utils/worldbookParser'
 import { DEFAULT_FORUM_POSTS, saveForumToWorldbook, switchForumSlot } from '../../utils/forumWorldbook'
 import { saveSocialData, switchSaveSlot, saveSocialRelationshipOverview, restoreWorldbookFromStore } from '../../utils/socialWorldbook'
 import { switchPartTimeSaveSlot, restorePartTimeWorldbookFromStore } from '../../utils/partTimeWorldbook'
@@ -55,7 +55,7 @@ export const classClubActions = {
             id: charId,
             name: name,
             relationship: 0,
-            isAlive: true, // 默认为活跃状态，以便在地图上显示
+            isAlive: false, // isAlive 表示与玩家在场，默认 false 让日程系统计算位置
             location: classId, // 初始位置
             classId: classId,
             role: role
@@ -65,10 +65,6 @@ export const classClubActions = {
           // 如果已存在，确保 classId 被正确设置
           if (!existingNpc.classId) {
             existingNpc.classId = classId
-          }
-          // 确保状态为活跃
-          if (existingNpc.isAlive === false) {
-            existingNpc.isAlive = true
           }
         }
       }
@@ -101,7 +97,7 @@ export const classClubActions = {
    * 注意：合并而非覆盖玩家创建的社团（以 player_club_ 前缀识别）
    */
   async loadClubData(this: any) {
-    console.log('[GameStore] Loading club data...')
+    console.log('[GameStore] Loading club data for run:', this.currentRunId)
     
     // 保存玩家创建的社团（ID 以 player_club_ 开头）
     const playerCreatedClubs: Record<string, ClubData> = {}
@@ -113,18 +109,48 @@ export const classClubActions = {
       }
     }
     
-    const clubData = await fetchClubDataFromWorldbook()
+    // 传入 currentRunId 确保只加载当前存档的社团数据
+    const clubData = await fetchClubDataFromWorldbook(this.currentRunId)
     if (clubData) {
       console.log('[GameStore] Loaded club data from Worldbook', clubData)
       // 合并世界书数据与玩家创建的社团
+      // 注意：如果世界书中已包含玩家社团，它们将在 clubData 中
       this.allClubs = {
-        ...(clubData as Record<string, ClubData>),
-        ...playerCreatedClubs
+        ...playerCreatedClubs,
+        ...(clubData as Record<string, ClubData>)
       }
     } else {
       console.warn('[GameStore] Failed to load club data from Worldbook')
       // 保留玩家创建的社团
       this.allClubs = playerCreatedClubs
+    }
+
+    // 确保系统社团（学生会）存在
+    await this.ensureSystemClubs()
+  },
+
+  /**
+   * 确保系统社团（如学生会）存在
+   */
+  async ensureSystemClubs(this: any) {
+    if (!this.allClubs['student_council']) {
+      const studentCouncil: ClubData = {
+        id: 'student_council',
+        name: '学生会',
+        description: '管理学校日常事务，维护校园秩序的自治组织。',
+        coreSkill: '领导力',
+        activityDay: '每日',
+        location: 'mb_student_council_room',
+        advisor: '校长',
+        president: '学生会长',
+        members: []
+      }
+      this.allClubs['student_council'] = studentCouncil
+      
+      // 确保在世界书中创建（通用绿灯策略）
+      // 学生会初始状态不带 runId，作为通用条目存在。
+      // 当玩家或NPC加入时，会自动创建带 runId 的副本并开启蓝灯。
+      await ensureClubExistsInWorldbook(studentCouncil, null as any)
     }
   },
 
@@ -389,9 +415,9 @@ export const classClubActions = {
   },
 
   /**
-   * 处理 NPC 接受社团邀请
+   * 处理接受社团邀请 (NPC 或 玩家)
    */
-  async handleClubInviteAccepted(this: any, clubId: string, npcName: string) {
+  async handleClubInviteAccepted(this: any, clubId: string, name: string) {
     const club = this.allClubs[clubId]
     if (!club) {
       console.warn(`[GameStore] Club ${clubId} not found`)
@@ -400,20 +426,30 @@ export const classClubActions = {
 
     // 更新社团成员列表
     if (!club.members) club.members = []
-    if (!club.members.includes(npcName)) {
-      club.members.push(npcName)
+    if (!club.members.includes(name)) {
+      club.members.push(name)
     }
 
-    // 更新世界书
-    await addNpcToClubInWorldbook(clubId, npcName, club, this.currentRunId)
+    // 区分玩家和 NPC
+    if (name === this.player.name) {
+      // 如果是玩家被邀请
+      if (!this.player.joinedClubs.includes(clubId)) {
+        this.player.joinedClubs.push(clubId)
+      }
+      await addPlayerToClubInWorldbook(clubId, name, club, this.currentRunId)
+      this.addCommand(`[系统提示] 你接受了邀请，加入了${club.name}`)
+    } else {
+      // 如果是 NPC
+      await addNpcToClubInWorldbook(clubId, name, club, this.currentRunId)
+      this.addCommand(`[系统提示] ${name}接受了邀请，加入了${club.name}`)
+    }
 
-    // 清除邀请状态
-    if (this.clubInvitation && this.clubInvitation.clubId === clubId && this.clubInvitation.targetName === npcName) {
+    // 清除邀请状态 (如果是玩家发起的邀请)
+    if (this.clubInvitation && this.clubInvitation.clubId === clubId && this.clubInvitation.targetName === name) {
       this.clubInvitation = null
     }
 
-    this.addCommand(`[系统提示] ${npcName}接受了邀请，加入了${club.name}`)
-    console.log(`[GameStore] ${npcName} joined club ${club.name}`)
+    console.log(`[GameStore] ${name} joined club ${club.name}`)
   },
 
   /**
@@ -527,7 +563,12 @@ export const classClubActions = {
    */
   async rebuildWorldbookState(this: any) {
     console.log('[GameStore] Rebuilding worldbook state for run:', this.currentRunId)
+
+    // 确保班级数据已加载（因为 setPlayerClass 和关系系统都依赖它）
+    await this.loadClassData()
     
+    // 在重新加载前，确保内存中的玩家社团数据被保留（如果需要）
+    // loadClubData 会尝试保留 playerCreatedClubs，但这依赖于 allClubs 此时有数据
     await this.loadClubData()
     
     if (this.player.classId) {
@@ -537,10 +578,15 @@ export const classClubActions = {
     const joinedClubsSet = new Set(this.player.joinedClubs)
     
     for (const [clubId, club] of Object.entries(this.allClubs)) {
+      // 检查并在必要时重建缺失的社团条目（特别是玩家创建的社团）
+      // 如果是在新环境中导入，世界书里可能根本没有这些条目
+      const clubData = club as ClubData
+      await ensureClubExistsInWorldbook(clubData, this.currentRunId)
+
       if (joinedClubsSet.has(clubId)) {
-        await addPlayerToClubInWorldbook(clubId, this.player.name, club as ClubData, this.currentRunId)
+        await addPlayerToClubInWorldbook(clubId, this.player.name, clubData, this.currentRunId)
       } else {
-        await removePlayerFromClubInWorldbook(clubId, this.player.name, club as ClubData, this.currentRunId)
+        await removePlayerFromClubInWorldbook(clubId, this.player.name, clubData, this.currentRunId)
       }
     }
 
@@ -577,6 +623,11 @@ export const classClubActions = {
    * 开始新游戏
    */
   async startNewGame(this: any) {
+    // 确保班级数据已加载
+    if (!this.allClassData || Object.keys(this.allClassData).length === 0) {
+      await this.loadClassData()
+    }
+
     this.currentRunId = Date.now().toString(36)
     this.currentFloor = 0
     
@@ -599,6 +650,9 @@ export const classClubActions = {
     this.clubRejection = null
     this.mapSelectionMode = false
     this.mapSelectionCallback = null
+
+    // 重新初始化所有班级的 NPC，确保地图上能显示所有角色
+    this.initializeAllClassNpcs()
 
     // 重置时间和世界状态
     this.gameTime = createInitialGameTime()

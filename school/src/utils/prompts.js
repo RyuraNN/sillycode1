@@ -560,6 +560,8 @@ export const buildSystemPromptContent = (gameState) => {
         const npcData = npcRelationships[npc.name]
         let details = `\n[NPC Status: ${npc.name}]\n`
         details += `Status: Alive\n`
+        details += `Gender: ${npcData?.gender || npc.gender || 'Unknown'}\n`
+        details += `Gender: ${npcData?.gender || npc.gender || 'Unknown'}\n`
         
         // 四维属性
         if (npcData && npcData.personality) {
@@ -606,7 +608,9 @@ export const buildSystemPromptContent = (gameState) => {
           // 对玩家的关系
           if (npcData.relations[player.name]) {
             const rel = npcData.relations[player.name]
-            const emotion = getEmotionalState(rel)
+            const playerGender = player.gender || 'male'
+            const npcGender = npcData.gender || npc.gender || 'female'
+            const emotion = getEmotionalState(rel, playerGender, npcGender)
             let relStr = `- To ${player.name}: [${emotion.text}] Intimacy(${rel.intimacy}), Trust(${rel.trust}), Passion(${rel.passion}), Hostility(${rel.hostility})`
             if (rel.tags && rel.tags.length > 0) {
               relStr += `, Tags: [${rel.tags.join(', ')}]`
@@ -618,7 +622,10 @@ export const buildSystemPromptContent = (gameState) => {
           for (const otherNpc of presentNpcs) {
             if (otherNpc.id !== npc.id && npcData.relations[otherNpc.name]) {
               const rel = npcData.relations[otherNpc.name]
-              const emotion = getEmotionalState(rel)
+              const npcGender = npcData.gender || npc.gender || 'female'
+              const otherNpcData = npcRelationships[otherNpc.name]
+              const otherNpcGender = otherNpcData?.gender || otherNpc.gender || 'female'
+              const emotion = getEmotionalState(rel, npcGender, otherNpcGender)
               relations.push(`- To ${otherNpc.name}: [${emotion.text}] Intimacy(${rel.intimacy}), Trust(${rel.trust}), Passion(${rel.passion}), Hostility(${rel.hostility})`)
             }
           }
@@ -757,6 +764,7 @@ ${player.name}邀请"${targetName}"加入"${clubName}"(社团ID: ${clubId})。
 [Current Game State]
 Time: ${timeStr}
 Player: ${player.name} (Lv.${player.level})
+Gender: ${player.gender || 'Unknown'}
 Class: ${className}
 Character Feature: ${player.characterFeature || '无'}
 ${backgroundPrompt}Location: ${locationName}
@@ -771,8 +779,7 @@ ${npcRelationsStr}${weatherPrompt}${schedulePrompt}${specialDatePrompt}${clubApp
 - 系统指令输出在 <content> 标签之外（前或后均可）。
 - 每次输出前必须先进行 <extrathink> 结构化思考，思考完成后再输出正文和指令。
 - 指令的文本长度不计入正文篇幅。即：即使本轮输出了大量指令，<content>内的正文也必须保持完整的、应有的篇幅和质量，不可因为输出了指令就缩短正文。
-- "本次玩家输入"代表玩家想让自己扮演的角色做的事、说的话。除非玩家明确要求，否则严格禁止在剧情中替玩家角色说话、做事、描写心理活动、做出决定，或补全任何玩家输入中未涉及的行为。
-
+- ⚠️ 先想清楚，再输出。所有的信息确认、错误检查、逻辑验证必须在<extrathink>中完成。<content>正文中不允许出现任何形式的中途纠错、找补或自我修正。如果你不确定某个细节，在思考阶段解决它，不要把不确定性带入正文。
 [Style]
 ※ 以下文风要求为最高优先级，若与其他要求冲突，以此为准。
 
@@ -826,8 +833,8 @@ ${npcRelationsStr}${weatherPrompt}${schedulePrompt}${specialDatePrompt}${clubApp
    - 严格遵循本世界观和设定中的内容。
    - 对于来自其他作品的角色，只参考其原作中的人设印象和人际关系作为性格基底。
    - 本世界观设定与原作冲突的部分，无条件优先参照本世界观。
-   - 不允许出现同位体（同一角色同时出现在两个地方）。
-   - 不允许过度参考或照搬原作的剧情、能力体系、世界观设定。
+   - 不允许出现同位体（同一角色同时出现在两个地方）。- 不允许过度参考或照搬原作的剧情、能力体系、世界观设定。
+   - 非常重要：角色的具体属性（年级、班级、年龄、辈分、住所、社团归属等）以本世界观设定为唯一标准。如果本世界观设定某些角色为同班同级，则禁止出现任何暗示他们不同年级的行为或对话（如"回到X年级教室""作为学妹/学姐"等）。
 
 5. 角色认知边界
    - 角色不会得知任何关于"剧情""设定""玩家""系统"等元概念。
@@ -838,11 +845,38 @@ ${npcRelationsStr}${weatherPrompt}${schedulePrompt}${specialDatePrompt}${clubApp
    - 如果玩家想要前往的地点太远，或不满足进入的时间/权限/状态条件，则通过自然的剧情演绎委婉告知玩家，并用剧情方式再次向玩家确认意图。
    - 不要用系统提示或旁白的口吻告知，而是融入场景中。
 
+7. 场景人员构成逻辑
+   不同类型的场景有不同的人员来源规则，禁止将"同班同学"作为所有场景的默认人员构成：
+   - 常规课堂：同班同学一起上课。
+   - 选修课/兴趣课：按个人选课结果组成，来自不同班级甚至不同年级的学生混合上课。玩家的同班同学不一定选了同一门选修课，除非上下文中有明确记录。
+   - 社团活动：按社团成员名单，跨班级、跨年级的情况是存在的。
+   - 公共区域（食堂、户外、校门等）：任何人都可能出现，但不应刻意安排大量熟人同时出现。
+   - 课外/放学后：角色各有各的安排，不应默认所有人都在同一地点。
+
+8.禁止输出中途纠错
+   所有的错误检查和修正必须在<extrathink>思考阶段完成。一旦进入<content>正文输出，内容必须从头到尾准确、自洽，禁止以任何形式在正文中进行中途纠错，包括但不限于：
+   - 禁止让角色用对话找补（如「啊不对，我是说……」「等等，我叫错了……」）
+   - 禁止用括号插入修正（如（注：此处应为XX）、（更正：……））
+   - 禁止用旁白/叙述修正（如"她意识到自己说错了名字"——如果这不是剧情需要的话）
+   - 禁止用任何伪装成角色行为的方式来掩盖生成错误
+   
+   判断标准：如果去掉这段"纠正"，前面的内容就是错的——那说明这是在找补，禁止这样做。
+   唯一的例外：角色在剧情逻辑上确实会口误/改口的场景（如紧张时说错话），但这必须是角色性格和当前情境的自然表现，而非用来掩盖AI的生成错误。
+
+9. 社交消息与剧情一致性
+   社交消息（私聊/群聊）是角色之间的真实沟通渠道，与当面对话具有同等的信息传递效力：
+   - 角色收到的消息 = 角色已知的信息。角色不会"忘记"收到过的消息。
+   - 通过消息达成的约定（如约好吃饭、约好见面等）必须在后续剧情中得到体现。
+   - 当玩家通过系统发送消息时，正文中应有简短的对应动作描写（如掏出手机、打字等），使消息行为融入叙事流。
+   - 当角色给玩家发消息时，正文中应有玩家感知到通知的描写（如手机震动等）。
+   - 禁止将社交消息视为与剧情无关的"系统层操作"——消息就是角色之间的对话，只不过载体是手机而非面对面。
+
 [System Commands - 社交系统]
 以下指令用于维护玩家的社交关系，输出在<content>标签之外。
 
 好友私聊（好友角色无论在不在场，想给玩家发私聊时使用）：
 <social_msg from="角色名称">消息内容</social_msg>
+※ 玩家不可给自己发消息
 
 消息状态（角色收到玩家私聊后的响应状态）：
 - 因客观原因（上课/睡觉/忙碌等）未能及时查看：<social_status name="角色名">hold</social_status>
@@ -854,10 +888,12 @@ ${npcRelationsStr}${weatherPrompt}${schedulePrompt}${specialDatePrompt}${clubApp
 ※ 使用前先检查玩家好友列表中是否已存在该角色，已存在则不重复输出。
 ※ 即使正文中已描写了"添加好友成功"的文字，此指令也必须同时输出，两者不是替代关系。
 ※ 如果系统提示词内提示某个角色收到了好友申请，请立即进行处理（无论该角色是否在场）。
+※ 玩家不可加自己为好友
 
 群聊消息（群内任意角色（不包括玩家）想在群聊中发言时使用）：
 <group_msg group="群组名称" sender="角色姓名">消息内容</group_msg>
 ※ 群组名称务必与玩家已加入的群名称完全一致，不要随意简写或改写。
+※ 不得代替玩家在群内发言
 
 [System Commands - 社团系统]
 以下指令用于处理社团相关事务，输出在<content>标签之外。

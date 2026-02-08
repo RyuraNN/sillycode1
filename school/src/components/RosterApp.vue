@@ -44,7 +44,12 @@ const charList = computed(() => {
         
         // 实时计算
         const score = calculateRelationshipScore(playerRel)
-        const emotion = getEmotionalState(playerRel)
+        
+        // Pass genders
+        const playerGender = gameStore.player.gender || 'male'
+        const npcGender = gameStore.npcRelationships[npc.name]?.gender || npc.gender || 'female'
+        
+        const emotion = getEmotionalState(playerRel, playerGender, npcGender)
         
         // 获取实时位置和心情
         const locationId = findNpcLocation(npc.id, gameStore)
@@ -114,7 +119,13 @@ const getHostilityStyle = (val) => {
 // 实际上 charList 已经预计算了，所以模板里可以直接用 char.emotionalState
 // 但为了详情页方便，保留一个包装函数或者直接在模板调用 getEmotionalState
 const getDisplayEmotionalState = (relation) => {
-    return getEmotionalState(relation)
+    // For detail view, we assume current selected char
+    if (!currentChar.value) return getEmotionalState(relation)
+    
+    const playerGender = gameStore.player.gender || 'male'
+    const npcGender = gameStore.npcRelationships[currentChar.value.name]?.gender || currentChar.value.gender || 'female'
+    
+    return getEmotionalState(relation, playerGender, npcGender)
 }
 
 // === 球形关系图逻辑 ===
@@ -523,8 +534,8 @@ onUnmounted(() => {
                   </div>
                   <div class="relation-level-display">
                       <span class="level-label">关系等级</span>
-                      <span class="level-badge" :class="getEmotionalState(playerRelations).class">
-                          {{ getEmotionalState(playerRelations).text }}
+                      <span class="level-badge" :class="getDisplayEmotionalState(playerRelations).class">
+                          {{ getDisplayEmotionalState(playerRelations).text }}
                       </span>
                   </div>
               </div>

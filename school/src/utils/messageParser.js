@@ -206,15 +206,20 @@ async function processMessage(match, type, gameStore) {
   } else {
     // 只有当它是 social 类型，且不是群组时，才添加为新好友
     if (type === 'social' && !isGroup) {
+       // 检测是否为系统通知
+       const systemKeywords = ['系统', '教务', '通知', '公告', '后勤', '宿管', '社团', '学生会']
+       const isSystem = systemKeywords.some(k => name.includes(k))
+
        gameStore.player.social.friends.push({
         id,
         name,
-        avatar: '👤',
-        signature: '新朋友',
+        avatar: isSystem ? '🔔' : '👤',
+        signature: isSystem ? '系统通知' : '新朋友',
         status: 'online',
         lastMessage: content,
         lastMessageTime: time,
-        unreadCount: data.unreadCount
+        unreadCount: data.unreadCount,
+        isSystem: isSystem
       })
     }
   }
@@ -895,13 +900,17 @@ export async function parseSocialTags(rawText) {
 export function extractSuggestedReplies(text) {
   if (!text) return []
   
-  // 1. 尝试匹配 <suggested_replies> 标签
-  const regex = /<suggested_replies>([\s\S]*?)<\/suggested_replies>/i
+  // 1. 尝试匹配 <suggested_replies> 标签 (增强版正则，支持属性和空格)
+  const regex = /<\s*suggested_replies[^>]*>([\s\S]*?)<\/\s*suggested_replies\s*>/i
   const match = regex.exec(text)
   
   if (match) {
+    const content = match[1].trim()
+    
+    // 调试日志
+    console.log('[MessageParser] Found suggested replies content:', content)
+
     try {
-      const content = match[1].trim()
       // 尝试解析 JSON 数组
       const replies = JSON.parse(content)
       if (Array.isArray(replies)) {
@@ -909,19 +918,41 @@ export function extractSuggestedReplies(text) {
       }
     } catch (e) {
       console.warn('[MessageParser] Failed to parse suggested replies JSON:', e)
-      // 如果 JSON 解析失败，尝试按行分割或其他方式？
-      // 暂时只支持标准 JSON 数组，或者我们可以尝试简单的正则提取字符串
+      
+      // Fallback: 尝试修复常见的 JSON 格式错误
       try {
-        // 匹配双引号中的内容
-        const strRegex = /"([^"]+)"/g
+        // 1. 处理可能存在的中文引号问题
+        let fixedContent = content.replace(/“/g, '"').replace(/”/g, '"')
+        // 2. 尝试再次解析
+        const replies = JSON.parse(fixedContent)
+        if (Array.isArray(replies)) return replies
+      } catch (e2) {
+        // 忽略修复尝试的错误
+      }
+
+      // Fallback 2: 正则提取
+      try {
+        // 匹配双引号中的内容 (支持包含转义引号)
+        // 注意：简单的 "([^"]+)" 无法处理内部有引号的情况，例如 "He said \"Hello\""
+        // 这里使用稍复杂的正则尝试匹配字符串字面量
+        const strRegex = /"((?:[^"\\]|\\.)*)"/g
         const extracted = []
         let m
-        while ((m = strRegex.exec(match[1])) !== null) {
-          extracted.push(m[1])
+        while ((m = strRegex.exec(content)) !== null) {
+          // Unescape output (e.g. \" -> ")
+          try {
+             extracted.push(JSON.parse(`"${m[1]}"`))
+          } catch (e) {
+             extracted.push(m[1])
+          }
         }
-        if (extracted.length > 0) return extracted
-      } catch (e2) {
-        console.warn('[MessageParser] Failed to fallback parse suggested replies:', e2)
+        
+        if (extracted.length > 0) {
+          console.log('[MessageParser] Fallback extracted replies:', extracted)
+          return extracted
+        }
+      } catch (e3) {
+        console.warn('[MessageParser] Failed to fallback parse suggested replies:', e3)
       }
     }
   }

@@ -279,7 +279,7 @@ export async function saveSocialData(id, name, data, keys = [], floor = 0) {
         content: content,
         enabled: true,
         strategy: {
-          type: 'selective', // 绿灯
+          type: 'constant', // 蓝灯
           keys: uniqueKeys,
           keys_secondary: { logic: 'not_all', keys: [] },
           scan_depth: 'same_as_global'
@@ -713,6 +713,12 @@ export async function restoreWorldbookFromStore() {
                   unreadCount: storeItem.unreadCount,
                   messages: validMessages
                 }
+
+                // 确保策略为 constant
+                const newStrategy = {
+                  ...entry.strategy,
+                  type: 'constant'
+                }
                 
                 // 更新成员列表（如果是群组）
                 let memberNames = null
@@ -730,7 +736,8 @@ export async function restoreWorldbookFromStore() {
                 return {
                   ...entry,
                   enabled: true, // 确保启用
-                  content: formatEntryContent(newData, storeItem.name, memberNames)
+                  content: formatEntryContent(newData, storeItem.name, memberNames),
+                  strategy: newStrategy
                 }
               }
             } else {
@@ -782,7 +789,7 @@ export async function restoreWorldbookFromStore() {
             content: content,
             enabled: true,
             strategy: {
-              type: 'selective',
+              type: 'constant',
               keys: uniqueKeys,
               keys_secondary: { logic: 'not_all', keys: [] },
               scan_depth: 'same_as_global'
@@ -823,7 +830,7 @@ export async function restoreWorldbookFromStore() {
             content: content,
             enabled: true,
             strategy: {
-              type: 'selective',
+              type: 'constant',
               keys: uniqueKeys,
               keys_secondary: { logic: 'not_all', keys: [] },
               scan_depth: 'same_as_global'

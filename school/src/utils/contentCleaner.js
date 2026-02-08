@@ -26,7 +26,7 @@ export const cleanSystemTags = (text) => {
     'button', 'span', 'div', 'p', 'br', 'b', 'i', 'strong', 'em', 'u', 's', 'strike', 
     'font', 'blockquote', 'code', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 
     'ul', 'ol', 'li', 'table', 'tr', 'td', 'th', 'thead', 'tbody', 'img', 'a', 'hr', 'small', 'big',
-    'ruby', 'rt', 'rp'
+    'ruby', 'rt', 'rp', 'htmlcontent'
   ]
   const keepTags = ['think', 'thought', 'thinking', 'generate_image', ...contentTags, ...htmlTags]
   const keepPattern = keepTags.join('|')
@@ -65,7 +65,7 @@ export const cleanSystemTags = (text) => {
   })
 
   // 1.5 处理 htmlcontent (保留内容)
-  cleaned = cleaned.replace(/<htmlcontent>([\s\S]*?)<\/htmlcontent>/gi, '$1')
+  cleaned = cleaned.replace(/<htmlcontent\b[^>]*>([\s\S]*?)<\/htmlcontent>/gi, '$1')
 
   // 2. 移除通用未知标签 <tag>content</tag>，但保留白名单
   const tagRegex = new RegExp(`<(?!${keepPattern}\\b)([a-zA-Z0-9_]+)[^>]*>[\\s\\S]*?<\\/\\1>`, 'gi')

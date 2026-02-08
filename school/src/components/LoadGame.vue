@@ -5,6 +5,13 @@ import { useGameStore } from '../stores/gameStore'
 const emit = defineEmits(['back', 'close'])
 const gameStore = useGameStore()
 
+// Debug 模式专用状态
+const debugImportText = ref('') // 用户粘贴的导入文本
+const showDebugImportPanel = ref(false) // 显示导入文本输入面板
+
+// 计算属性：是否为 Debug 模式
+const isDebugMode = computed(() => gameStore.settings.debugMode)
+
 const snapshots = computed(() => {
   // 按时间倒序排列
   return [...gameStore.saveSnapshots].sort((a, b) => b.timestamp - a.timestamp)
@@ -56,14 +63,80 @@ const handleDelete = (snapshot) => {
     gameStore.deleteSnapshot(snapshot.id)
   }
 }
+
+// 打开导入面板
+const openImportPanel = () => {
+  showDebugImportPanel.value = true
+}
+
+// Debug 模式：解析粘贴的 JSON 文本并导入
+const handleDebugImport = async () => {
+  if (!debugImportText.value.trim()) {
+    alert('请粘贴 JSON 数据')
+    return
+  }
+  
+  try {
+    const success = await gameStore.importSaveData(debugImportText.value)
+    if (success) {
+      alert('存档导入成功！')
+      closeDebugImportPanel()
+    } else {
+      alert('导入失败：数据格式错误或损坏')
+    }
+  } catch (e) {
+    console.error('Debug import failed:', e)
+    alert('导入失败：' + e.message)
+  }
+}
+
+// Debug 模式：关闭导入面板
+const closeDebugImportPanel = () => {
+  showDebugImportPanel.value = false
+  debugImportText.value = ''
+}
 </script>
 
 <template>
   <div class="load-panel">
+    <!-- Debug 导入面板 -->
+    <div v-if="showDebugImportPanel" class="debug-overlay">
+      <div class="debug-panel-header">
+        <span class="debug-icon">🔧</span>
+        <span>Debug 模式 - 导入存档</span>
+        <button class="debug-close-btn" @click="closeDebugImportPanel">×</button>
+      </div>
+      <div class="debug-panel-content">
+        <p class="debug-hint">粘贴之前导出的 JSON 数据：</p>
+        <textarea 
+          v-model="debugImportText"
+          class="debug-textarea" 
+          placeholder="在此粘贴 JSON 数据..."
+        ></textarea>
+        <div class="debug-actions">
+          <button 
+            class="debug-btn primary" 
+            @click="handleDebugImport"
+            :disabled="!debugImportText.trim()"
+          >
+            📥 确认导入
+          </button>
+          <button class="debug-btn" @click="closeDebugImportPanel">取消</button>
+        </div>
+      </div>
+    </div>
+
     <div class="panel-header">
       <button class="back-btn" @click="$emit('back')">‹</button>
       <span class="title">读取存档</span>
-      <div class="spacer"></div>
+      <div class="spacer">
+        <button 
+          v-if="isDebugMode" 
+          class="import-btn" 
+          @click="openImportPanel"
+          title="导入存档"
+        >📥</button>
+      </div>
     </div>
     
     <div class="save-list">
@@ -210,5 +283,118 @@ const handleDelete = (snapshot) => {
 .delete-btn:hover {
   opacity: 1;
   color: #ff3b30;
+}
+
+.import-btn {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+/* ==================== Debug 面板样式 ==================== */
+.debug-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: #f2f2f7;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+}
+
+.debug-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: #ff9500;
+  color: white;
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.debug-icon {
+  font-size: 1.2rem;
+}
+
+.debug-close-btn {
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.debug-panel-content {
+  flex: 1;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.debug-hint {
+  margin: 0 0 12px;
+  color: #8e8e93;
+  font-size: 13px;
+}
+
+.debug-textarea {
+  flex: 1;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #c7c7cc;
+  border-radius: 10px;
+  font-family: monospace;
+  font-size: 13px;
+  line-height: 1.4;
+  resize: none;
+  background: white;
+  box-sizing: border-box;
+}
+
+.debug-textarea:focus {
+  outline: none;
+  border-color: #ff9500;
+}
+
+.debug-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.debug-btn {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  border-radius: 10px;
+  background: #e5e5ea;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 500;
+  color: #000;
+}
+
+.debug-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.debug-btn.primary {
+  background: #ff9500;
+  color: white;
 }
 </style>

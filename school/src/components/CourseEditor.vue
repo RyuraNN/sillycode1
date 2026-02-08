@@ -1,32 +1,107 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
+import { useGameStore } from '../stores/gameStore'
 import { 
   UNIVERSAL_ELECTIVES, 
   GRADE_1_COURSES, 
   GRADE_2_COURSES, 
   GRADE_3_COURSES, 
   IDOL_COURSES,
+  CUSTOM_CLASS_COURSES,
   resetCourseData,
-  saveCoursePoolToWorldbook
+  saveCoursePoolToWorldbook,
+  initCustomClass,
+  removeCustomClass
 } from '../data/coursePoolData'
 
 const emit = defineEmits(['close'])
+const gameStore = useGameStore()
 
 const activeTab = ref('universal')
 const activeSubTab = ref('required') // for grades that have both
 const showMobileSidebar = ref(false)
+const showAddClassModal = ref(false)
+const selectedClassToAdd = ref('')
+const customClasses = ref(Object.keys(CUSTOM_CLASS_COURSES))
+const dataVersion = ref(0) // 用于强制更新UI
 
-const tabs = [
-  { id: 'universal', label: '通用选修', icon: '📚' },
-  { id: 'g1', label: '一年级', icon: '1️⃣' },
-  { id: 'g2', label: '二年级', icon: '2️⃣' },
-  { id: 'g3', label: '三年级', icon: '3️⃣' },
-  { id: 'idol1', label: '偶像科一年', icon: '⭐' },
-  { id: 'idol2', label: '偶像科二年', icon: '🌟' },
-  { id: 'idol3', label: '偶像科三年', icon: '✨' }
-]
+// 监听 CUSTOM_CLASS_COURSES 的变化（虽然它本身不是响应式的，但我们通过操作更新 customClasses）
+// 如果是从外部加载的，可能需要这一步？暂时先手动同步
+
+const availableClasses = computed(() => {
+  const allClasses = Object.keys(gameStore.allClassData || {}).sort()
+  return allClasses.filter(id => !customClasses.value.includes(id))
+})
+
+const tabs = computed(() => {
+  const baseTabs = [
+    { id: 'universal', label: '通用选修', icon: '📚' },
+    { id: 'g1', label: '一年级', icon: '1️⃣' },
+    { id: 'g2', label: '二年级', icon: '2️⃣' },
+    { id: 'g3', label: '三年级', icon: '3️⃣' },
+    { id: 'idol1', label: '偶像科一年', icon: '⭐' },
+    { id: 'idol2', label: '偶像科二年', icon: '🌟' },
+    { id: 'idol3', label: '偶像科三年', icon: '✨' }
+  ]
+  
+  const customTabs = customClasses.value.map(classId => ({
+    id: `custom_${classId}`,
+    label: `${classId}班`,
+    icon: '🏫',
+    isCustom: true,
+    realId: classId
+  }))
+  
+  return [...baseTabs, ...customTabs]
+})
 
 const currentList = computed(() => {
+  // 依赖 dataVersion 以确保更新
+  const _v = dataVersion.value
+  
+  // 注意：必须返回数组的副本 [...arr]，否则引用未变 Vue 可能不会触发更新
+  if (activeTab.value.startsWith('custom_')) {
+    const classId = activeTab.value.replace('custom_', '')
+    if (CUSTOM_CLASS_COURSES[classId]) {
+      return activeSubTab.value === 'required' 
+        ? [...CUSTOM_CLASS_COURSES[classId].required]
+        : [...CUSTOM_CLASS_COURSES[classId].electives]
+    }
+    return []
+  }
+
+  switch (activeTab.value) {
+    case 'universal':
+      return [...UNIVERSAL_ELECTIVES]
+    case 'g1':
+      return activeSubTab.value === 'required' ? [...GRADE_1_COURSES.required] : [...GRADE_1_COURSES.electives]
+    case 'g2':
+      return activeSubTab.value === 'required' ? [...GRADE_2_COURSES.required] : [...GRADE_2_COURSES.electives]
+    case 'g3':
+      return activeSubTab.value === 'required' ? [...GRADE_3_COURSES.required] : [...GRADE_3_COURSES.electives]
+    case 'idol1':
+      return activeSubTab.value === 'required' ? [...IDOL_COURSES.grade1.required] : [...IDOL_COURSES.grade1.electives]
+    case 'idol2':
+      return activeSubTab.value === 'required' ? [...IDOL_COURSES.grade2.required] : [...IDOL_COURSES.grade2.electives]
+    case 'idol3':
+      return activeSubTab.value === 'required' ? [...IDOL_COURSES.grade3.required] : [...IDOL_COURSES.grade3.electives]
+    default:
+      return []
+  }
+})
+
+// Helper to get current array for modification
+const getCurrentSourceArray = () => {
+  if (activeTab.value.startsWith('custom_')) {
+    const classId = activeTab.value.replace('custom_', '')
+    if (CUSTOM_CLASS_COURSES[classId]) {
+      return activeSubTab.value === 'required' 
+        ? CUSTOM_CLASS_COURSES[classId].required 
+        : CUSTOM_CLASS_COURSES[classId].electives
+    }
+    return null
+  }
+
   switch (activeTab.value) {
     case 'universal':
       return UNIVERSAL_ELECTIVES
@@ -43,12 +118,9 @@ const currentList = computed(() => {
     case 'idol3':
       return activeSubTab.value === 'required' ? IDOL_COURSES.grade3.required : IDOL_COURSES.grade3.electives
     default:
-      return []
+      return null
   }
-})
-
-// Current array to modify (for adding/removing)
-const currentArray = computed(() => currentList.value)
+}
 
 const editingCourse = ref(null)
 const isNew = ref(false)
@@ -59,6 +131,15 @@ const startEdit = (course) => {
 }
 
 const startAdd = () => {
+  let availableFor = []
+  
+  if (activeTab.value === 'universal') {
+    availableFor = ['通用']
+  } else if (activeTab.value.startsWith('custom_')) {
+    availableFor = [activeTab.value.replace('custom_', '')]
+  }
+  // 其他年级/偶像科的 availableFor 可以在保存时处理或这里简单处理
+
   editingCourse.value = {
     id: `custom_${Date.now()}`,
     name: '',
@@ -67,7 +148,7 @@ const startAdd = () => {
     origin: '自定义',
     location: 'classroom',
     type: activeTab.value === 'universal' ? 'elective' : activeSubTab.value,
-    availableFor: []
+    availableFor
   }
   isNew.value = true
 }
@@ -78,27 +159,38 @@ const saveEdit = () => {
     return
   }
   
+  const targetArray = getCurrentSourceArray()
+  if (!targetArray) {
+    alert('无法获取当前课程列表')
+    return
+  }
+
   if (isNew.value) {
-    currentArray.value.push(editingCourse.value)
+    targetArray.push(editingCourse.value)
   } else {
-    const index = currentArray.value.findIndex(c => c.id === editingCourse.value.id)
+    const index = targetArray.findIndex(c => c.id === editingCourse.value.id)
     if (index !== -1) {
-      currentArray.value[index] = editingCourse.value
+      targetArray[index] = editingCourse.value
     }
   }
   
   // 保存到世界书
   saveCoursePoolToWorldbook()
+  dataVersion.value++
   editingCourse.value = null
 }
 
 const deleteCourse = (course) => {
   if (confirm(`确定要删除课程"${course.name}"吗？`)) {
-    const index = currentArray.value.findIndex(c => c.id === course.id)
+    const targetArray = getCurrentSourceArray()
+    if (!targetArray) return
+
+    const index = targetArray.findIndex(c => c.id === course.id)
     if (index !== -1) {
-      currentArray.value.splice(index, 1)
+      targetArray.splice(index, 1)
       // 保存到世界书
       saveCoursePoolToWorldbook()
+      dataVersion.value++
     }
   }
 }
@@ -106,14 +198,46 @@ const deleteCourse = (course) => {
 const handleReset = () => {
   if (confirm('确定要重置所有课程数据吗？这将丢失所有未保存的修改。')) {
     resetCourseData()
+    customClasses.value = [] // 清空本地状态
     // 保存到世界书
     saveCoursePoolToWorldbook()
+    activeTab.value = 'universal'
+    dataVersion.value++
   }
 }
 
 const selectTab = (tabId) => {
   activeTab.value = tabId
   showMobileSidebar.value = false
+}
+
+const openAddClassModal = () => {
+  selectedClassToAdd.value = availableClasses.value[0] || ''
+  showAddClassModal.value = true
+}
+
+const confirmAddClass = () => {
+  if (!selectedClassToAdd.value) return
+  
+  initCustomClass(selectedClassToAdd.value)
+  customClasses.value = Object.keys(CUSTOM_CLASS_COURSES)
+  
+  // 切换到新班级
+  activeTab.value = `custom_${selectedClassToAdd.value}`
+  showAddClassModal.value = false
+  saveCoursePoolToWorldbook()
+}
+
+const handleDeleteCustomClass = (e, classId) => {
+  e.stopPropagation() // 防止触发 tab 选择
+  if (confirm(`确定要删除 ${classId} 班的自定义课程配置吗？`)) {
+    removeCustomClass(classId)
+    customClasses.value = Object.keys(CUSTOM_CLASS_COURSES)
+    if (activeTab.value === `custom_${classId}`) {
+      activeTab.value = 'universal'
+    }
+    saveCoursePoolToWorldbook()
+  }
 }
 
 // 辅助：获取可用的locations (简化列表)
@@ -140,7 +264,7 @@ const locationOptions = [
 ]
 
 const currentTabLabel = computed(() => {
-  const tab = tabs.find(t => t.id === activeTab.value)
+  const tab = tabs.value.find(t => t.id === activeTab.value)
   return tab ? `${tab.icon} ${tab.label}` : ''
 })
 </script>
@@ -182,6 +306,22 @@ const currentTabLabel = computed(() => {
             >
               <span class="tab-icon">{{ tab.icon }}</span>
               <span class="tab-label">{{ tab.label }}</span>
+              
+              <!-- 删除自定义班级按钮 -->
+              <button 
+                v-if="tab.isCustom" 
+                class="tab-del-btn" 
+                @click="handleDeleteCustomClass($event, tab.realId)"
+                title="删除班级配置"
+              >
+                ×
+              </button>
+            </div>
+            
+            <!-- 添加班级按钮 -->
+            <div class="sidebar-item add-class-btn" @click="openAddClassModal">
+              <span class="tab-icon">➕</span>
+              <span class="tab-label">添加班级</span>
             </div>
           </div>
           
@@ -274,6 +414,39 @@ const currentTabLabel = computed(() => {
         </div>
       </div>
       
+      <!-- Add Class Modal -->
+      <Transition name="modal-fade">
+        <div v-if="showAddClassModal" class="edit-modal-overlay" @click.self="showAddClassModal = false">
+          <div class="edit-modal small-modal">
+            <div class="edit-modal-header">
+              <h3>➕ 添加班级</h3>
+              <button class="modal-close" @click="showAddClassModal = false">×</button>
+            </div>
+            
+            <div class="edit-modal-body">
+              <div v-if="availableClasses.length > 0" class="form-row">
+                <label>选择班级</label>
+                <select v-model="selectedClassToAdd">
+                  <option v-for="cls in availableClasses" :key="cls" :value="cls">
+                    {{ cls }}
+                  </option>
+                </select>
+              </div>
+              <div v-else class="empty-message">
+                没有可添加的班级了。
+              </div>
+            </div>
+            
+            <div class="edit-modal-footer">
+              <button class="cancel-btn" @click="showAddClassModal = false">取消</button>
+              <button class="save-btn" @click="confirmAddClass" :disabled="!selectedClassToAdd">
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+
       <!-- Edit Modal (Nested) -->
       <Transition name="modal-fade">
         <div v-if="editingCourse" class="edit-modal-overlay" @click.self="editingCourse = null">
@@ -548,6 +721,38 @@ const currentTabLabel = computed(() => {
 
 .tab-label {
   font-size: 0.95rem;
+  flex: 1;
+}
+
+.tab-del-btn {
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.sidebar-item:hover .tab-del-btn {
+  opacity: 1;
+}
+
+.tab-del-btn:hover {
+  color: #f44336;
+}
+
+.add-class-btn {
+  color: #1976d2;
+  border-left-color: transparent;
+  margin-top: 8px;
+  border-top: 1px dashed #e0e0e0;
+}
+
+.add-class-btn:hover {
+  background: rgba(25, 118, 210, 0.08);
+  color: #1976d2;
 }
 
 .sidebar-footer {
@@ -814,6 +1019,17 @@ const currentTabLabel = computed(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.small-modal {
+  max-width: 350px;
+  height: auto;
+}
+
+.empty-message {
+  text-align: center;
+  color: #666;
+  padding: 20px;
 }
 
 .edit-modal-header {

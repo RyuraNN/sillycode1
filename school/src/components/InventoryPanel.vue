@@ -7,6 +7,8 @@ const currentFilter = ref('all')
 const expandedItem = ref(null)
 const showUseResult = ref(false)
 const useResultMessage = ref('')
+const showDiscardConfirm = ref(false)
+const itemToDiscard = ref(null)
 
 const filters = [
   { key: 'all', label: '全部' },
@@ -52,6 +54,25 @@ const formatDuration = (duration) => {
   if (duration === 0) return '即时生效'
   if (duration === -1 || duration === '永久') return '永久'
   return `持续${duration}回合`
+}
+
+const initiateDiscard = (item) => {
+  itemToDiscard.value = item
+  showDiscardConfirm.value = true
+}
+
+const confirmDiscard = () => {
+  if (itemToDiscard.value) {
+    gameStore.discardItem(itemToDiscard.value)
+    showResultToast(`已丢弃 1 个 ${itemToDiscard.value.name}`, 'info')
+    showDiscardConfirm.value = false
+    itemToDiscard.value = null
+  }
+}
+
+const cancelDiscard = () => {
+  showDiscardConfirm.value = false
+  itemToDiscard.value = null
 }
 
 const useItem = (item) => {
@@ -169,6 +190,12 @@ const showResultToast = (message, type = 'info') => {
             >
               装备
             </button>
+            <button 
+              class="discard-btn"
+              @click.stop="initiateDiscard(item)"
+            >
+              丢弃
+            </button>
           </div>
         </div>
       </div>
@@ -180,6 +207,20 @@ const showResultToast = (message, type = 'info') => {
         {{ useResultMessage }}
       </div>
     </transition>
+
+    <!-- 丢弃确认弹窗 -->
+    <Teleport to="body">
+      <div v-if="showDiscardConfirm" class="modal-overlay">
+        <div class="modal-content confirm-modal">
+          <h3>确认丢弃</h3>
+          <p class="confirm-text">确定要丢弃 1 个 <span class="highlight-name">{{ itemToDiscard?.name }}</span> 吗？</p>
+          <div class="modal-actions">
+            <button class="cancel-btn" @click="cancelDiscard">取消</button>
+            <button class="confirm-btn" @click="confirmDiscard">确定</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -365,6 +406,98 @@ const showResultToast = (message, type = 'info') => {
 
 .equip-btn:hover {
   background: #1565c0;
+}
+
+.discard-btn {
+  padding: 4px 12px;
+  background: #d32f2f;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.2s;
+}
+
+.discard-btn:hover {
+  background: #b71c1c;
+  transform: translateY(-1px);
+}
+
+/* 确认弹窗 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  backdrop-filter: blur(2px);
+}
+
+.modal-content.confirm-modal {
+  background: #fff;
+  padding: 20px;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 320px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  text-align: center;
+  border: 1px solid #e0e0e0;
+}
+
+.confirm-modal h3 {
+  margin: 0 0 15px 0;
+  color: #333;
+  font-size: 1.1rem;
+}
+
+.confirm-text {
+  color: #666;
+  margin-bottom: 20px;
+  font-size: 0.95rem;
+}
+
+.highlight-name {
+  color: #d32f2f;
+  font-weight: bold;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: center;
+  gap: 15px;
+}
+
+.modal-actions button {
+  padding: 6px 20px;
+  border-radius: 20px;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s;
+}
+
+.cancel-btn {
+  background: #f5f5f5;
+  color: #666;
+}
+
+.cancel-btn:hover {
+  background: #e0e0e0;
+}
+
+.confirm-btn {
+  background: #d32f2f;
+  color: white;
+}
+
+.confirm-btn:hover {
+  background: #b71c1c;
 }
 
 /* 使用结果提示 */

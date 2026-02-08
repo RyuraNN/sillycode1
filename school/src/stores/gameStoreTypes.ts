@@ -157,6 +157,7 @@ export interface SummarySystemSettings {
 /** 玩家属性 */
 export interface PlayerStats {
   name: string
+  gender: 'male' | 'female'
   characterFeature: string
   backgroundStory: string
   level: number
@@ -226,6 +227,7 @@ export interface PlayerStats {
   location: string
   pendingCommands: CommandEntry[]
   holdMessages: CommandEntry[]
+  systemNotifications: string[]
   social: {
     friends: Friend[]
     groups: Group[]
@@ -444,8 +446,8 @@ export interface ClubData {
   id: string
   name: string
   advisor?: string
-  president?: string
-  vicePresident?: string
+  president?: string | string[]
+  vicePresident?: string | string[]
   members: string[]
   coreSkill?: string
   activityDay?: string
