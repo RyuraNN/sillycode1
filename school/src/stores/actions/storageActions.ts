@@ -14,11 +14,200 @@ import {
   getFullCharacterPool,
   saveFullCharacterPool,
   getRosterPresets,
-  saveRosterPresets
+  saveRosterPresets,
+  clearAllData
 } from '../../utils/indexedDB'
 import { DEFAULT_RELATIONSHIPS, DEFAULT_PERSONALITIES, DEFAULT_GOALS, DEFAULT_PRIORITIES } from '../../data/relationshipData'
+import { createInitialState } from '../gameStoreState'
 
 let saveTimer: any = null
+
+/** 当前存档数据结构版本号 */
+const CURRENT_SCHEMA_VERSION = 3
+
+/**
+ * 带超时限制的 Promise 工具函数
+ * @param promise 原始 Promise
+ * @param ms 超时毫秒数
+ * @param label 操作描述（用于日志）
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string = 'operation'): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      console.warn(`[GameStore] ⏰ ${label} timed out after ${ms}ms, skipping...`)
+      reject(new Error(`Timeout: ${label} exceeded ${ms}ms`))
+    }, ms)
+    
+    promise.then(
+      (result) => { clearTimeout(timer); resolve(result) },
+      (error) => { clearTimeout(timer); reject(error) }
+    )
+  })
+}
+
+/**
+ * 安全执行异步操作，失败时不中断流程
+ * @param fn 要执行的异步函数
+ * @param label 操作描述
+ * @param timeoutMs 超时毫秒数（默认 15 秒）
+ */
+async function safeExec(fn: () => Promise<any>, label: string, timeoutMs: number = 15000): Promise<boolean> {
+  try {
+    await withTimeout(fn(), timeoutMs, label)
+    return true
+  } catch (e) {
+    console.warn(`[GameStore] ⚠️ ${label} failed:`, e)
+    return false
+  }
+}
+
+/**
+ * 验证并修复设置数据结构
+ * 确保所有嵌套对象和必要字段都存在，防止旧版存档缺少新字段导致运行时错误
+ */
+function validateAndRepairSettings(settings: any): any {
+  const defaults = createInitialState().settings
+  
+  if (!settings || typeof settings !== 'object') {
+    console.warn('[GameStore] Settings data is invalid, using defaults')
+    return { ...defaults, _schemaVersion: CURRENT_SCHEMA_VERSION }
+  }
+  
+  // 确保 assistantAI 对象完整
+  if (!settings.assistantAI || typeof settings.assistantAI !== 'object') {
+    settings.assistantAI = { ...defaults.assistantAI }
+  } else {
+    settings.assistantAI = { ...defaults.assistantAI, ...settings.assistantAI }
+  }
+  
+  // 确保 summarySystem 对象完整
+  if (!settings.summarySystem || typeof settings.summarySystem !== 'object') {
+    settings.summarySystem = { ...defaults.summarySystem }
+  } else {
+    settings.summarySystem = { ...defaults.summarySystem, ...settings.summarySystem }
+  }
+  
+  // 确保数值字段有效
+  if (typeof settings.snapshotLimit !== 'number' || settings.snapshotLimit <= 0) {
+    settings.snapshotLimit = defaults.snapshotLimit
+  }
+  if (!['full', 'delta'].includes(settings.snapshotMode)) {
+    settings.snapshotMode = defaults.snapshotMode
+  }
+  if (typeof settings.socialHistoryLimit !== 'number' || settings.socialHistoryLimit <= 0) {
+    settings.socialHistoryLimit = defaults.socialHistoryLimit
+  }
+  if (typeof settings.forumWorldbookLimit !== 'number' || settings.forumWorldbookLimit <= 0) {
+    settings.forumWorldbookLimit = defaults.forumWorldbookLimit
+  }
+  
+  // 确保布尔字段有效
+  const boolFields = ['darkMode', 'streamResponse', 'suggestedReplies', 'enterToSend', 
+                       'independentImageGeneration', 'debugMode', 'debugUnlocked']
+  for (const field of boolFields) {
+    if (typeof settings[field] !== 'boolean') {
+      settings[field] = (defaults as any)[field]
+    }
+  }
+  
+  // 确保 customRegexList 是数组
+  if (!Array.isArray(settings.customRegexList)) {
+    settings.customRegexList = [...defaults.customRegexList]
+  }
+  
+  // 确保 customContentTags 是数组
+  if (!Array.isArray(settings.customContentTags)) {
+    settings.customContentTags = [...defaults.customContentTags]
+  }
+  
+  // 清除任何可能导致问题的非法字段
+  // （删除已知已废弃的字段）
+  const knownFields = new Set(Object.keys(defaults))
+  knownFields.add('_schemaVersion')
+  
+  settings._schemaVersion = CURRENT_SCHEMA_VERSION
+  
+  return settings
+}
+
+/**
+ * 验证快照数据结构是否有效
+ */
+function validateSnapshot(snapshot: any): boolean {
+  if (!snapshot || typeof snapshot !== 'object') return false
+  if (!snapshot.id || typeof snapshot.id !== 'string') return false
+  if (typeof snapshot.timestamp !== 'number') return false
+  // 确保没有内联大数据（gameState/chatLog 应该已经被分离到 IndexedDB）
+  return true
+}
+
+/**
+ * 清理快照中的内联大数据（防止赋值给 Vue 响应式状态时卡死）
+ * 返回清理后的轻量级快照列表
+ */
+async function cleanAndMigrateSnapshots(snapshots: any[]): Promise<{ cleaned: any[], migrated: boolean }> {
+  if (!Array.isArray(snapshots)) {
+    console.warn('[GameStore] Snapshots data is not an array, resetting')
+    return { cleaned: [], migrated: false }
+  }
+  
+  let migrated = false
+  const cleaned: any[] = []
+  
+  for (let i = 0; i < snapshots.length; i++) {
+    const s = snapshots[i]
+    
+    // 验证基本结构
+    if (!validateSnapshot(s)) {
+      console.warn(`[GameStore] Skipping invalid snapshot at index ${i}`)
+      continue
+    }
+    
+    // 如果快照内联了大数据，需要迁移到分离存储
+    if (s.gameState || s.chatLog) {
+      console.log(`[GameStore] Migrating snapshot ${s.id} to split storage...`)
+      try {
+        if (s.gameState) {
+          s.gameTime = {
+            year: s.gameState.gameTime?.year,
+            month: s.gameState.gameTime?.month,
+            day: s.gameState.gameTime?.day,
+            hour: s.gameState.gameTime?.hour,
+            minute: s.gameState.gameTime?.minute
+          }
+          s.location = s.gameState.player?.location
+        }
+
+        await saveSnapshotData(s.id, {
+          gameState: s.gameState,
+          chatLog: s.chatLog
+        })
+        migrated = true
+      } catch (e) {
+        console.error(`[GameStore] Failed to migrate snapshot ${s.id}:`, e)
+      }
+    }
+    
+    // 创建轻量级副本（不包含 gameState 和 chatLog）
+    const lightSnapshot: any = {
+      id: s.id,
+      timestamp: s.timestamp,
+      label: s.label || `存档 ${i + 1}`,
+      messageIndex: s.messageIndex || 0
+    }
+    if (s.gameTime) lightSnapshot.gameTime = s.gameTime
+    if (s.location) lightSnapshot.location = s.location
+    
+    cleaned.push(lightSnapshot)
+    
+    // 每处理一个快照让出线程，防止长时间阻塞
+    if (i % 3 === 0) {
+      await new Promise(resolve => setTimeout(resolve, 0))
+    }
+  }
+  
+  return { cleaned, migrated }
+}
 
 export const storageActions = {
   /**
@@ -27,93 +216,128 @@ export const storageActions = {
   initializeNpcRelationships(this: any) {
     console.log('[GameStore] Initializing NPC relationships...')
     
+    // 使用批量构建再一次性赋值，避免逐个属性触发 Vue 响应式更新
+    const newRelationships: Record<string, any> = {}
+    
     for (const [charName, relations] of Object.entries(DEFAULT_RELATIONSHIPS as Record<string, any>)) {
       if (!this.npcRelationships[charName]) {
-        this.npcRelationships[charName] = {
+        newRelationships[charName] = {
           personality: (DEFAULT_PERSONALITIES as Record<string, any>)[charName] || { order: 0, altruism: 0, tradition: 0, peace: 0 },
           goals: (DEFAULT_GOALS as Record<string, any>)[charName] || { immediate: '', shortTerm: '', longTerm: '' },
           priorities: (DEFAULT_PRIORITIES as Record<string, any>)[charName] || { academics: 50, social: 50, hobbies: 50, survival: 50, club: 50 },
           relations: {}
         }
+      } else {
+        // 已存在的直接引用
+        newRelationships[charName] = this.npcRelationships[charName]
       }
       
       for (const [targetName, relData] of Object.entries(relations as Record<string, any>)) {
-        if (!this.npcRelationships[charName].relations[targetName]) {
-          this.npcRelationships[charName].relations[targetName] = JSON.parse(JSON.stringify(relData))
+        const targetRelations = newRelationships[charName]?.relations || this.npcRelationships[charName]?.relations
+        if (targetRelations && !targetRelations[targetName]) {
+          targetRelations[targetName] = JSON.parse(JSON.stringify(relData))
         }
       }
     }
+    
+    // 保留已有的、不在默认列表中的角色关系
+    for (const [charName, data] of Object.entries(this.npcRelationships)) {
+      if (!newRelationships[charName]) {
+        newRelationships[charName] = data
+      }
+    }
+    
+    // 一次性赋值，减少 Vue 响应式开销
+    this.npcRelationships = newRelationships
   },
 
   /**
    * 初始化：从存储加载 (支持 IndexedDB 迁移)
+   * 
+   * 【安全增强】
+   * - 每个加载步骤独立 try-catch，单步失败不影响整体
+   * - 大数据在赋值给响应式状态前先清理，防止 Vue Proxy 递归卡死
+   * - 设置数据经过结构验证和修复
+   * - rebuildWorldbookState 有超时保护
    */
   async initFromStorage(this: any) {
+    console.log('[GameStore] Starting initFromStorage...')
+    const startTime = Date.now()
+    
+    // Step 0: LocalStorage 迁移
     try {
-      await migrateFromLocalStorage([
-        'school_game_snapshots',
-        'school_game_settings',
-        'school_game_run_id'
-      ])
+      await withTimeout(
+        migrateFromLocalStorage([
+          'school_game_snapshots',
+          'school_game_settings',
+          'school_game_run_id'
+        ]),
+        10000,
+        'migrateFromLocalStorage'
+      )
+    } catch (e) {
+      console.warn('[GameStore] LocalStorage migration failed, continuing...', e)
+    }
 
-      const snapshots = await getItem('school_game_snapshots')
-      if (snapshots) {
-        let migrated = false
-        const loadedSnapshots = [...snapshots]
+    // Step 1: 加载快照列表
+    try {
+      const snapshots = await withTimeout(
+        getItem('school_game_snapshots'),
+        10000,
+        'load snapshots'
+      )
+      
+      if (snapshots && Array.isArray(snapshots)) {
+        // 在赋值前清理大数据，避免 Vue Proxy 卡死
+        const { cleaned, migrated } = await cleanAndMigrateSnapshots(snapshots)
         
-        for (let i = 0; i < loadedSnapshots.length; i++) {
-          const s = loadedSnapshots[i]
-          if (s.gameState || s.chatLog) {
-            console.log(`[GameStore] Migrating snapshot ${s.id} to split storage...`)
-            try {
-              if (s.gameState) {
-                s.gameTime = {
-                  year: s.gameState.gameTime.year,
-                  month: s.gameState.gameTime.month,
-                  day: s.gameState.gameTime.day,
-                  hour: s.gameState.gameTime.hour,
-                  minute: s.gameState.gameTime.minute
-                }
-                s.location = s.gameState.player.location
-              }
-
-              await saveSnapshotData(s.id, {
-                gameState: s.gameState,
-                chatLog: s.chatLog
-              })
-              delete s.gameState
-              delete s.chatLog
-              migrated = true
-            } catch (e) {
-              console.error(`[GameStore] Failed to migrate snapshot ${s.id}:`, e)
-            }
-          }
-          
-          if (i % 1 === 0) {
-            await new Promise(resolve => setTimeout(resolve, 10))
-          }
-        }
-
-        this.saveSnapshots = loadedSnapshots
+        // 用轻量级数据赋值
+        this.saveSnapshots = cleaned
         
         if (migrated) {
           console.log('[GameStore] Migration complete, saving lightweight snapshots list.')
-          this.saveToStorage(true)
+          // 异步保存，不阻塞初始化
+          this.saveToStorage(true).catch((e: any) => 
+            console.warn('[GameStore] Failed to save migrated snapshots:', e)
+          )
         }
+        
+        console.log(`[GameStore] Loaded ${cleaned.length} snapshots`)
       }
+    } catch (e) {
+      console.error('[GameStore] Failed to load snapshots:', e)
+      // 快照加载失败不影响其他功能
+    }
 
-      const settings = await getItem('school_game_settings')
+    // Step 2: 加载设置
+    try {
+      const settings = await withTimeout(
+        getItem('school_game_settings'),
+        5000,
+        'load settings'
+      )
+      
       if (settings) {
-        const defaultSummarySettings = { ...this.settings.summarySystem }
-        const loadedSummarySettings = settings.summarySystem || {}
+        // 验证并修复设置结构
+        const repairedSettings = validateAndRepairSettings(settings)
         
-        this.settings = { ...this.settings, ...settings }
+        // 使用默认设置作为基础，用修复后的设置覆盖
+        const defaults = createInitialState().settings
+        this.settings = { ...defaults, ...repairedSettings }
         
+        // 确保 summarySystem 完整合并
         this.settings.summarySystem = {
-          ...defaultSummarySettings,
-          ...loadedSummarySettings
+          ...defaults.summarySystem,
+          ...(repairedSettings.summarySystem || {})
+        }
+        
+        // 确保 assistantAI 完整合并
+        this.settings.assistantAI = {
+          ...defaults.assistantAI,
+          ...(repairedSettings.assistantAI || {})
         }
 
+        // 确保默认内容标签存在
         const defaultTags = ['content', '正文', 'gametxt', 'game']
         if (!this.settings.customContentTags) {
           this.settings.customContentTags = [...defaultTags]
@@ -124,23 +348,55 @@ export const storageActions = {
             }
           }
         }
+        
+        console.log('[GameStore] Settings loaded and validated (schema v' + (repairedSettings._schemaVersion || 'unknown') + ')')
       }
+    } catch (e) {
+      console.error('[GameStore] Failed to load settings:', e)
+      // 设置加载失败使用默认值，不影响其他功能
+    }
 
-      const lastRunId = await getItem('school_game_run_id')
+    // Step 3: 加载 RunId
+    try {
+      const lastRunId = await withTimeout(
+        getItem('school_game_run_id'),
+        3000,
+        'load runId'
+      )
       if (lastRunId) {
         this.currentRunId = lastRunId
       }
-      
-      await this.rebuildWorldbookState()
-      // 注意：initializeNpcRelationships 必须在 rebuildWorldbookState 之后调用，
-      // 因为 rebuildWorldbookState 会加载班级数据，而关系初始化需要用到班级数据中的角色列表
-      this.initializeNpcRelationships()
-      this.checkAndNotifyDeliveries()
-      
-      console.log('[GameStore] Initialized from storage (IndexedDB)')
     } catch (e) {
-      console.error('Failed to load from storage', e)
+      console.warn('[GameStore] Failed to load runId:', e)
     }
+    
+    // Step 4: 重建世界书状态（有整体超时保护）
+    const rebuildOk = await safeExec(
+      () => this.rebuildWorldbookState(),
+      'rebuildWorldbookState',
+      60000 // 世界书重建最多 60 秒
+    )
+    
+    if (!rebuildOk) {
+      console.error('[GameStore] ⚠️ rebuildWorldbookState failed or timed out, game may have incomplete world data')
+    }
+    
+    // Step 5: 初始化 NPC 关系（在 rebuildWorldbookState 之后）
+    try {
+      this.initializeNpcRelationships()
+    } catch (e) {
+      console.error('[GameStore] Failed to initialize NPC relationships:', e)
+    }
+    
+    // Step 6: 检查配送通知
+    try {
+      this.checkAndNotifyDeliveries()
+    } catch (e) {
+      console.warn('[GameStore] Failed to check deliveries:', e)
+    }
+    
+    const elapsed = Date.now() - startTime
+    console.log(`[GameStore] Initialized from storage (IndexedDB) in ${elapsed}ms`)
   },
 
   /**

@@ -795,6 +795,9 @@ function serializeCourse(category, course, typeLabel) {
 /**
  * 解析文本行到课程对象
  */
+// 用于生成唯一ID的自增计数器
+let _importIdCounter = 0
+
 function parseCourseLine(line) {
   const parts = line.split('|').map(s => s.trim())
   if (parts.length < 5) return null
@@ -813,10 +816,15 @@ function parseCourseLine(line) {
     if (match[3]) origin = match[3]
   }
   
+  // 【修复】使用 category + name + teacher + 自增计数器 生成确定性唯一ID
+  // 避免 Date.now() + Math.random() 在快速循环中产生重复ID
+  _importIdCounter++
+  const safeId = `${category}_${name}_${teacher}`.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_')
+  
   return {
     category,
     course: {
-      id: `imported_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      id: `imported_${safeId}_${_importIdCounter}`,
       name,
       teacher,
       teacherGender,

@@ -2,7 +2,7 @@
 import { ref, watch, onMounted } from 'vue'
 import HomeLayout from './components/HomeLayout.vue'
 import { useGameStore } from './stores/gameStore'
-import { requestPersistence } from './utils/indexedDB'
+import { requestPersistence, clearAllData } from './utils/indexedDB'
 import { loadCoursePoolFromWorldbook } from './data/coursePoolData'
 
 const gameStore = useGameStore()
@@ -11,6 +11,12 @@ const gameStore = useGameStore()
 const showWorldbookWaitModal = ref(false)
 const isInitializing = ref(true)
 const initError = ref('')
+
+// 初始化崩溃恢复状态
+const showCrashRecovery = ref(false)
+const crashError = ref('')
+const isClearing = ref(false)
+const initTimedOut = ref(false)
 
 /**
  * 检测世界书 API 是否已就绪（名称 + 内容都已加载）
@@ -68,27 +74,56 @@ async function checkWorldbookReady() {
 }
 
 /**
- * 执行初始化
+ * 执行初始化（带全局错误捕获和超时保护）
  */
 async function doInitialize() {
   try {
     isInitializing.value = true
     initError.value = ''
+    initTimedOut.value = false
+    
+    // 设置初始化总超时保护（90 秒）
+    // 如果初始化超过这个时间，说明有操作卡住了
+    const initTimeoutTimer = setTimeout(() => {
+      if (isInitializing.value) {
+        console.error('[App] ⏰ Initialization timed out after 90s!')
+        initTimedOut.value = true
+        isInitializing.value = false
+        crashError.value = '初始化超时（90秒），可能是旧存档数据不兼容导致。'
+        showCrashRecovery.value = true
+        showWorldbookWaitModal.value = false
+      }
+    }, 90000)
     
     // 尝试申请持久化存储
-    await requestPersistence()
+    try {
+      await requestPersistence()
+    } catch (e) {
+      console.warn('[App] requestPersistence failed:', e)
+    }
     
     // 加载自定义课程池
-    await loadCoursePoolFromWorldbook()
+    try {
+      await loadCoursePoolFromWorldbook()
+    } catch (e) {
+      console.warn('[App] loadCoursePoolFromWorldbook failed:', e)
+    }
     
     // 初始化时从本地存储加载存档
     await gameStore.initFromStorage()
     
-    console.log('[App] Initialization complete')
-    showWorldbookWaitModal.value = false
+    clearTimeout(initTimeoutTimer)
+    
+    if (!initTimedOut.value) {
+      console.log('[App] Initialization complete')
+      showWorldbookWaitModal.value = false
+      showCrashRecovery.value = false
+    }
   } catch (e) {
-    console.error('[App] Initialization error:', e)
-    initError.value = e.message || '初始化失败'
+    console.error('[App] ❌ Critical initialization error:', e)
+    crashError.value = `初始化失败: ${e.message || e}`
+    showCrashRecovery.value = true
+    showWorldbookWaitModal.value = false
   } finally {
     isInitializing.value = false
   }
@@ -103,6 +138,62 @@ async function onConfirmWorldbookReady() {
     await doInitialize()
   } else {
     initError.value = '世界书仍未加载完成，请稍后再试'
+  }
+}
+
+/**
+ * 清除所有缓存数据并重新加载页面
+ */
+async function onClearCacheAndReload() {
+  isClearing.value = true
+  try {
+    console.log('[App] Clearing all cached data...')
+    
+    // 清除 IndexedDB
+    await clearAllData()
+    
+    // 清除 localStorage 中的相关数据
+    const keysToRemove = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && key.startsWith('school_game_')) {
+        keysToRemove.push(key)
+      }
+    }
+    keysToRemove.forEach(key => localStorage.removeItem(key))
+    
+    console.log('[App] All cached data cleared, reloading...')
+    
+    // 重新加载页面
+    window.location.reload()
+  } catch (e) {
+    console.error('[App] Failed to clear cache:', e)
+    // 最后手段：尝试删除整个 IndexedDB 数据库
+    try {
+      indexedDB.deleteDatabase('SchoolSimulatorDB')
+    } catch (e2) {
+      console.error('[App] Failed to delete database:', e2)
+    }
+    window.location.reload()
+  }
+}
+
+/**
+ * 跳过缓存加载，使用默认数据启动
+ */
+async function onSkipCacheAndContinue() {
+  showCrashRecovery.value = false
+  console.log('[App] Skipping cache load, starting with defaults...')
+  // 不执行 initFromStorage，直接以默认状态启动
+  // 但仍然需要重建世界书状态
+  try {
+    isInitializing.value = true
+    await gameStore.rebuildWorldbookState()
+    gameStore.initializeNpcRelationships()
+  } catch (e) {
+    console.warn('[App] rebuildWorldbookState failed after skip:', e)
+  } finally {
+    isInitializing.value = false
   }
 }
 
@@ -169,6 +260,36 @@ watch(() => gameStore.settings.darkMode, (isDark) => {
         >
           {{ isInitializing ? '初始化中...' : '确认' }}
         </button>
+      </div>
+    </div>
+
+    <!-- 初始化崩溃恢复弹窗 -->
+    <div v-if="showCrashRecovery" class="worldbook-wait-modal-overlay">
+      <div class="worldbook-wait-modal crash-recovery-modal">
+        <div class="modal-icon">⚠️</div>
+        <h2 class="modal-title">初始化遇到问题</h2>
+        <p class="modal-text">
+          {{ crashError }}
+        </p>
+        <p class="modal-hint">
+          💡 这通常是因为浏览器缓存中的旧版存档数据与当前版本不兼容。<br>
+          建议先尝试"清除缓存重试"。如果您有导出的存档文件，可以在清除后重新导入。
+        </p>
+        <div class="crash-recovery-actions">
+          <button 
+            class="modal-confirm-btn crash-btn-clear"
+            :disabled="isClearing"
+            @click="onClearCacheAndReload"
+          >
+            {{ isClearing ? '清除中...' : '🗑️ 清除缓存并重试' }}
+          </button>
+          <button 
+            class="modal-confirm-btn crash-btn-skip"
+            @click="onSkipCacheAndContinue"
+          >
+            ⏭️ 跳过缓存，使用默认数据
+          </button>
+        </div>
       </div>
     </div>
 
@@ -2091,5 +2212,46 @@ body.dark-mode .event-editor-panel .cancel-btn:hover {
   color: #8a857d;
   cursor: not-allowed;
   box-shadow: none;
+}
+
+/* ========================================
+   初始化崩溃恢复弹窗样式
+   ======================================== */
+.crash-recovery-modal .modal-icon {
+  animation: none !important;
+}
+
+.crash-recovery-modal .modal-title {
+  color: #ef5350 !important;
+}
+
+.crash-recovery-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.crash-btn-clear {
+  background: linear-gradient(135deg, #ef5350 0%, #c62828 100%) !important;
+  color: #fff !important;
+  box-shadow: 0 4px 15px rgba(239, 83, 80, 0.3) !important;
+}
+
+.crash-btn-clear:hover:not(:disabled) {
+  box-shadow: 0 6px 20px rgba(239, 83, 80, 0.4) !important;
+}
+
+.crash-btn-skip {
+  background: #353230 !important;
+  color: #b5b0a8 !important;
+  box-shadow: none !important;
+  border: 1px solid #4a4641;
+}
+
+.crash-btn-skip:hover {
+  background: #3d3a36 !important;
+  color: #e8e4df !important;
+  box-shadow: none !important;
 }
 </style>

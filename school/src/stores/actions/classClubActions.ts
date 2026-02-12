@@ -658,9 +658,13 @@ export const classClubActions = {
 
   /**
    * 重建世界书状态（用于存档导入/恢复）
+   * 
+   * 【安全增强】每个子操作有独立的 try-catch 和超时保护，
+   * 单个操作失败不会阻塞整个初始化流程。
    */
   async rebuildWorldbookState(this: any) {
     console.log('[GameStore] Rebuilding worldbook state for run:', this.currentRunId)
+    const startTime = Date.now()
     
     // 【防护】验证世界书内容确实已加载，避免在内容未就绪时执行写操作导致数据缺失
     if (typeof window.getCharWorldbookNames === 'function' && typeof window.getWorldbook === 'function') {
@@ -680,106 +684,155 @@ export const classClubActions = {
         console.warn('[GameStore] Error verifying worldbook readiness, proceeding with caution:', e)
       }
     }
+
+    /**
+     * 安全执行子操作，带超时和错误处理
+     */
+    const safeRebuildStep = async (fn: () => Promise<any>, label: string, timeoutMs: number = 15000): Promise<boolean> => {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            console.warn(`[GameStore] ⏰ rebuildWorldbookState: "${label}" timed out after ${timeoutMs}ms, skipping...`)
+            resolve() // 超时不 reject，而是 resolve 继续后续步骤
+          }, timeoutMs)
+          
+          fn().then(
+            () => { clearTimeout(timer); resolve() },
+            (error) => { clearTimeout(timer); console.warn(`[GameStore] ⚠️ rebuildWorldbookState: "${label}" failed:`, error); resolve() }
+          )
+        })
+        return true
+      } catch (e) {
+        console.warn(`[GameStore] ⚠️ rebuildWorldbookState: "${label}" error:`, e)
+        return false
+      }
+    }
     
     // 【调试】记录当前玩家社团状态
     const playerClubsBefore = this.player?.joinedClubs ? [...this.player.joinedClubs] : []
     const allClubIdsBefore = this.allClubs ? Object.keys(this.allClubs) : []
     console.log('[GameStore] Before rebuild - joinedClubs:', playerClubsBefore, 'allClubs:', allClubIdsBefore)
 
+    // === Phase 1: 加载基础数据（班级和社团） ===
+
     // 【修复】如果 allClassData 已经从快照恢复（非空），不要用 loadClassData 覆盖
-    // loadClassData → fetchClassDataFromWorldbook 无法读取带 runId 的条目 [Class:2-A:abc123]，
-    // 会导致进级后的班级数据被回退为旧的原始条目数据
     const hasRestoredClassData = this.allClassData && Object.keys(this.allClassData).length > 0
     if (hasRestoredClassData) {
       console.log('[GameStore] allClassData already restored from snapshot, skipping loadClassData. Classes:', Object.keys(this.allClassData))
-      // 仅重新初始化 NPC 列表（确保所有班级的 NPC 都在全局列表中）
-      this.initializeAllClassNpcs()
+      try { this.initializeAllClassNpcs() } catch (e) { console.warn('[GameStore] initializeAllClassNpcs failed:', e) }
     } else {
-      // 首次加载或数据为空时，从世界书加载
-      await this.loadClassData()
+      await safeRebuildStep(() => this.loadClassData(), 'loadClassData', 15000)
     }
     
-    // 在重新加载前，确保内存中的玩家社团数据被保留（如果需要）
-    // loadClubData 会尝试保留 existingClubs，所以不会丢失内存中的社团数据
-    await this.loadClubData()
+    await safeRebuildStep(() => this.loadClubData(), 'loadClubData', 15000)
     
     // 【调试】检查加载后的社团状态
     const allClubIdsAfter = this.allClubs ? Object.keys(this.allClubs) : []
     console.log('[GameStore] After loadClubData - allClubs:', allClubIdsAfter)
     
-    // 同步班级世界书条目状态（处理进级后的 runId 隔离条目）
-    // 这确保了回溯到进级前/后时，正确的班级条目被启用/禁用
-    await syncClassWorldbookState(this.currentRunId, this.allClassData)
+    // === Phase 2: 同步世界书条目状态 ===
+    
+    await safeRebuildStep(
+      () => syncClassWorldbookState(this.currentRunId, this.allClassData),
+      'syncClassWorldbookState', 10000
+    )
     
     if (this.player.classId) {
-      await setPlayerClass(this.player.classId)
+      await safeRebuildStep(
+        () => setPlayerClass(this.player.classId),
+        'setPlayerClass', 5000
+      )
     }
 
-    const joinedClubsSet = new Set(this.player.joinedClubs)
-    
-    for (const [clubId, club] of Object.entries(this.allClubs)) {
-      // 检查并在必要时重建缺失的社团条目（特别是玩家创建的社团）
-      // 如果是在新环境中导入，世界书里可能根本没有这些条目
-      const clubData = club as ClubData
-      await ensureClubExistsInWorldbook(clubData, this.currentRunId)
+    // 同步社团世界书条目
+    await safeRebuildStep(async () => {
+      const joinedClubsSet = new Set(this.player.joinedClubs)
+      
+      for (const [clubId, club] of Object.entries(this.allClubs)) {
+        const clubData = club as ClubData
+        await ensureClubExistsInWorldbook(clubData, this.currentRunId)
 
-      if (joinedClubsSet.has(clubId)) {
-        await addPlayerToClubInWorldbook(clubId, this.player.name, clubData, this.currentRunId)
-      } else {
-        await removePlayerFromClubInWorldbook(clubId, this.player.name, clubData, this.currentRunId)
-      }
-    }
-
-    await syncClubWorldbookState(this.currentRunId)
-    
-    const { syncElectiveWorldbookState } = await import('../../utils/electiveWorldbook.js')
-    await syncElectiveWorldbookState(this.currentRunId)
-
-    if (this.player.selectedElectives && this.player.selectedElectives.length > 0) {
-      // 【修复】检查课表中是否已有选修课插槽
-      // 如果回溯/恢复后课表被重新生成，选修课插槽可能丢失
-      // 需要重新调用 generateElectiveSchedule 填充选修课
-      let hasElectiveSlots = false
-      if (this.player.schedule) {
-        for (const [day, slots] of Object.entries(this.player.schedule)) {
-          if (Array.isArray(slots)) {
-            for (const slot of (slots as any[])) {
-              if (slot.isElective && !slot.isEmpty && slot.courseId) {
-                hasElectiveSlots = true
-                break
-              }
-            }
-          }
-          if (hasElectiveSlots) break
+        if (joinedClubsSet.has(clubId)) {
+          await addPlayerToClubInWorldbook(clubId, this.player.name, clubData, this.currentRunId)
+        } else {
+          await removePlayerFromClubInWorldbook(clubId, this.player.name, clubData, this.currentRunId)
         }
       }
-      
-      if (!hasElectiveSlots) {
-        console.log('[GameStore] Elective slots missing from schedule, regenerating...')
-        await this.generateElectiveSchedule()
+
+      await syncClubWorldbookState(this.currentRunId)
+    }, 'syncClubWorldbook', 20000)
+    
+    // === Phase 3: 同步选修课 ===
+    
+    await safeRebuildStep(async () => {
+      const { syncElectiveWorldbookState } = await import('../../utils/electiveWorldbook.js')
+      await syncElectiveWorldbookState(this.currentRunId)
+
+      if (this.player.selectedElectives && this.player.selectedElectives.length > 0) {
+        let hasElectiveSlots = false
+        if (this.player.schedule) {
+          for (const [day, slots] of Object.entries(this.player.schedule)) {
+            if (Array.isArray(slots)) {
+              for (const slot of (slots as any[])) {
+                if (slot.isElective && !slot.isEmpty && slot.courseId) {
+                  hasElectiveSlots = true
+                  break
+                }
+              }
+            }
+            if (hasElectiveSlots) break
+          }
+        }
+        
+        if (!hasElectiveSlots) {
+          console.log('[GameStore] Elective slots missing from schedule, regenerating...')
+          await this.generateElectiveSchedule()
+        }
+        
+        await this.processNpcElectiveSelection()
+      } else {
+        const { clearElectiveEntries } = await import('../../utils/electiveWorldbook.js')
+        await clearElectiveEntries(this.currentRunId)
       }
-      
-      await this.processNpcElectiveSelection()
-    } else {
-      const { clearElectiveEntries } = await import('../../utils/electiveWorldbook.js')
-      await clearElectiveEntries(this.currentRunId)
-    }
+    }, 'syncElectives', 15000)
     
-    await restoreWorldbookFromStore()
-    await saveSocialRelationshipOverview()
-    await switchSaveSlot()
+    // === Phase 4: 同步社交、论坛、兼职、印象等 ===
     
-    await saveForumToWorldbook(this.player.forum.posts, this.currentRunId, this.settings.forumWorldbookLimit)
-    await switchForumSlot(this.currentRunId)
+    await safeRebuildStep(async () => {
+      await restoreWorldbookFromStore()
+      await saveSocialRelationshipOverview()
+      await switchSaveSlot()
+    }, 'syncSocial', 10000)
     
-    await restorePartTimeWorldbookFromStore()
-    await restoreImpressionWorldbookFromStore()
+    await safeRebuildStep(async () => {
+      await saveForumToWorldbook(this.player.forum.posts, this.currentRunId, this.settings.forumWorldbookLimit)
+      await switchForumSlot(this.currentRunId)
+    }, 'syncForum', 10000)
+    
+    await safeRebuildStep(
+      () => restorePartTimeWorldbookFromStore(),
+      'syncPartTime', 8000
+    )
+    
+    await safeRebuildStep(
+      () => restoreImpressionWorldbookFromStore(),
+      'syncImpression', 8000
+    )
 
-    await setVariableParsingWorldbookStatus(!this.settings.assistantAI.enabled)
+    // === Phase 5: 其他初始化 ===
     
-    await this.loadEventData()
+    await safeRebuildStep(
+      () => setVariableParsingWorldbookStatus(!this.settings.assistantAI?.enabled),
+      'setVariableParsingStatus', 5000
+    )
+    
+    await safeRebuildStep(
+      () => this.loadEventData(),
+      'loadEventData', 10000
+    )
 
-    console.log('[GameStore] Worldbook state rebuild complete')
+    const elapsed = Date.now() - startTime
+    console.log(`[GameStore] Worldbook state rebuild complete in ${elapsed}ms`)
   },
 
   /**

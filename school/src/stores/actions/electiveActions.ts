@@ -4,7 +4,7 @@
 
 import { getCourseById, autoSelectElectives } from '../../data/coursePoolData'
 import { updateElectiveWorldbookEntries } from '../../utils/electiveWorldbook'
-import { getRandomLocation } from '../../utils/scheduleGenerator'
+import { getRandomLocation, LOCATION_NAMES } from '../../utils/scheduleGenerator'
 import { seededRandom } from '../../utils/random'
 
 export const electiveActions = {
@@ -124,16 +124,30 @@ export const electiveActions = {
 
   /**
    * 填充选修课插槽
+   * 【修复】优先使用课程数据自带的 location 字段，避免家政等课程被分配到错误地点
    */
   _fillElectiveSlot(this: any, slotInfo: { day: string, index: number }, course: any) {
     const { day, index } = slotInfo
-    const location = getRandomLocation(course.name, this.player.classId) as any
+    
+    let locationId: string
+    let locationName: string
+    
+    // 优先使用课程数据中定义的 location（如 'home_economics_room'）
+    if (course.location) {
+      locationId = course.location
+      locationName = (LOCATION_NAMES as any)[locationId] || locationId
+    } else {
+      // 没有预定义 location 时，使用科目映射表随机分配
+      const location = getRandomLocation(course.name, this.player.classId) as any
+      locationId = location.locationId
+      locationName = location.locationName
+    }
     
     const slot = this.player.schedule[day][index]
     slot.subject = course.name
     slot.teacher = course.teacher
-    slot.location = location.locationName
-    slot.locationId = location.locationId
+    slot.location = locationName
+    slot.locationId = locationId
     slot.isEmpty = false
     slot.isElective = true
     slot.courseId = course.id

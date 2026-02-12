@@ -1298,6 +1298,15 @@ const handleRollbackToFloor = async (targetIndex) => {
   
   // 截断日志到目标位置
   gameLog.value.splice(targetIndex + 1)
+  
+  // 如果回溯后最后一条是玩家消息，将其内容移入输入框并从日志中移除
+  // 防止后续 sendMessage 拼接旧消息导致 AI 读取到错误内容
+  const lastAfterSplice = gameLog.value[gameLog.value.length - 1]
+  if (lastAfterSplice && lastAfterSplice.type === 'player') {
+    inputText.value = lastAfterSplice.content || ''
+    gameLog.value.pop()
+  }
+  
   gameStore.currentFloor = gameLog.value.length
   
   // 清理状态

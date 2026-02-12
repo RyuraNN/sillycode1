@@ -106,6 +106,7 @@ export const SUBJECT_LOCATION_MAP = {
   '超自然研究': ['classroom', 'club_building_B'],
   '文化学': ['classroom'],
   '社会心理学': ['classroom'],
+  '家政': ['home_economics_room'],
   '毕业论文指导': ['classroom', 'library'],
   '升学相谈': ['mb_counseling_room', 'classroom'],
   '升学指导': ['mb_counseling_room', 'classroom'],
@@ -117,14 +118,13 @@ export const SUBJECT_LOCATION_MAP = {
   '生物': ['sb_biology_lab', 'classroom'],
   '信息技术': ['computer_room', 'computer_room_2'],
   '编程实践': ['computer_room', 'computer_room_2'],
-  '媒体素养': ['computer_room_2', 'classroom'],
   
   // 体育类
   '体育': ['track_and_field', 'main_gymnasium', 'sub_gymnasium', 'tennis_court'],
   '运动生理学': ['main_gymnasium', 'classroom'],
   '教练学': ['main_gymnasium', 'track_and_field'],
   '体育保健': ['main_gymnasium', 'mb_clinic'],
-  '营养学': ['classroom'],
+  '营养学': ['sb_biology_lab', 'classroom'],
   
   // 艺术类
   '音乐': ['music_room_1', 'music_room_2', 'music_building'],

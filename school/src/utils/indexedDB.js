@@ -177,6 +177,51 @@ export async function removeSnapshotData(id) {
   return removeItem(id, SNAPSHOT_STORE_NAME)
 }
 
+// Clear all data from all stores (for emergency reset)
+export async function clearAllData() {
+  console.log('[IndexedDB] Clearing all data...')
+  try {
+    const db = await openDB()
+    const storeNames = [STORE_NAME, DATA_STORE_NAME, SNAPSHOT_STORE_NAME]
+    
+    for (const storeName of storeNames) {
+      if (db.objectStoreNames.contains(storeName)) {
+        await new Promise((resolve, reject) => {
+          const transaction = db.transaction([storeName], 'readwrite')
+          const store = transaction.objectStore(storeName)
+          const request = store.clear()
+          request.onsuccess = () => {
+            console.log(`[IndexedDB] Cleared store: ${storeName}`)
+            resolve()
+          }
+          request.onerror = (event) => reject(event.target.error)
+        })
+      }
+    }
+    
+    console.log('[IndexedDB] All data cleared successfully')
+    return true
+  } catch (e) {
+    console.error('[IndexedDB] Error clearing data:', e)
+    // 最后手段：删除整个数据库
+    try {
+      dbInstance = null
+      await new Promise((resolve, reject) => {
+        const request = indexedDB.deleteDatabase(DB_NAME)
+        request.onsuccess = () => {
+          console.log('[IndexedDB] Database deleted')
+          resolve()
+        }
+        request.onerror = (event) => reject(event.target.error)
+      })
+      return true
+    } catch (e2) {
+      console.error('[IndexedDB] Failed to delete database:', e2)
+      return false
+    }
+  }
+}
+
 // Storage Persistence Helper
 export async function requestPersistence() {
   if (navigator.storage && navigator.storage.persist) {
