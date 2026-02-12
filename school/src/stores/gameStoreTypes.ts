@@ -279,6 +279,14 @@ export interface PlayerStats {
       turnsRemaining: number
     } | null
   }
+  
+  // 教师系统
+  role: 'student' | 'teacher'
+  teachingClasses: string[]          // 教授的班级ID列表 (1~5个)
+  homeroomClassId: string | null     // 担任班主任的班级ID (最多1个)
+  teachingSubjects: string[]         // 教授的必修学科列表
+  teachingElectives: string[]        // 教授的选修课ID列表
+  advisorClubs: string[]             // 担任指导老师的社团ID列表
 }
 
 // ==================== 日历与事件相关 ====================

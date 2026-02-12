@@ -183,7 +183,13 @@ export async function fetchClubDataFromWorldbook(currentRunId) {
     const allClubs = {}
 
     for (const name of bookNames) {
-      const entries = await window.getWorldbook(name)
+      let entries
+      try {
+        entries = await window.getWorldbook(name)
+      } catch (e) {
+        console.warn(`[WorldbookParser] Worldbook "${name}" not accessible, skipping:`, e.message || e)
+        continue
+      }
       if (!entries || !Array.isArray(entries)) continue
 
       for (const entry of entries) {
@@ -758,6 +764,7 @@ export async function syncClubWorldbookState(currentRunId) {
     console.log(`[WorldbookParser] Syncing club state for run ${currentRunId}`)
 
     for (const name of bookNames) {
+      try {
       await window.updateWorldbookWith(name, (entries) => {
         // 第一步：收集本存档激活的社团ID
         const activeClubIds = new Set()
@@ -810,6 +817,9 @@ export async function syncClubWorldbookState(currentRunId) {
           return entry
         })
       })
+      } catch (e) {
+        console.warn(`[WorldbookParser] Worldbook "${name}" not accessible for club sync, skipping:`, e.message || e)
+      }
     }
   } catch (e) {
     console.error('[WorldbookParser] Error syncing club state:', e)
@@ -940,7 +950,13 @@ export async function fetchClassDataFromWorldbook() {
 
     // 2. 遍历世界书查找数据
     for (const name of bookNames) {
-      const entries = await window.getWorldbook(name)
+      let entries
+      try {
+        entries = await window.getWorldbook(name)
+      } catch (e) {
+        console.warn(`[WorldbookParser] Worldbook "${name}" not accessible, skipping:`, e.message || e)
+        continue
+      }
       if (!entries || !Array.isArray(entries)) continue
 
       for (const entry of entries) {
@@ -1312,7 +1328,13 @@ export async function fetchMapDataFromWorldbook() {
     let allMapData = []
 
     for (const name of bookNames) {
-      const entries = await window.getWorldbook(name)
+      let entries
+      try {
+        entries = await window.getWorldbook(name)
+      } catch (e) {
+        console.warn(`[WorldbookParser] Worldbook "${name}" not accessible, skipping:`, e.message || e)
+        continue
+      }
       if (!entries || !Array.isArray(entries)) continue
 
       for (const entry of entries) {
@@ -1881,6 +1903,106 @@ export async function optimizeWorldbook(socialData) {
  * @param {string} currentRunId 当前存档ID
  * @param {Object} allClassData 当前存档的班级数据 { '1-A': {...}, '2-A': {...}, ... }
  */
+/**
+ * 设置教师模式下的班级世界书条目（存档隔离）
+ * @param {string[]} teachingClasses 教授的班级ID列表
+ * @param {string|null} homeroomClassId 担任班主任的班级ID
+ * @param {string} playerName 玩家姓名
+ * @param {string} runId 当前存档ID
+ * @returns {Promise<boolean>} 是否成功
+ */
+export async function setupTeacherClassEntries(teachingClasses, homeroomClassId, playerName, runId) {
+  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
+    console.warn('[WorldbookParser] Worldbook API not available')
+    return false
+  }
+
+  try {
+    const books = window.getCharWorldbookNames('current')
+    const bookName = books?.primary || (books?.additional && books.additional[0])
+    if (!bookName) return false
+
+    console.log(`[WorldbookParser] Setting up teacher class entries for run ${runId}`)
+
+    await window.updateWorldbookWith(bookName, (entries) => {
+      const newEntries = [...entries]
+
+      // 遍历所有教学班级
+      for (const classId of teachingClasses) {
+        // 查找原始班级条目
+        // 格式: [Class:classId] (且不包含第二个冒号)
+        const originalEntry = newEntries.find(e => 
+          e.name && e.name.includes(`[Class:${classId}]`) && !e.name.match(/\[Class:[\w.-]+:[\w.-]+\]/)
+        )
+
+        if (!originalEntry) {
+          console.warn(`[WorldbookParser] Original entry for class ${classId} not found`)
+          continue
+        }
+
+        // 解析原始数据
+        const classData = parseClassData(originalEntry.content)[classId]
+        if (!classData) continue
+
+        // 如果是班主任班级，替换班主任名字
+        if (classId === homeroomClassId) {
+          classData.headTeacher = {
+            name: playerName,
+            gender: 'unknown', // 玩家性别在别处定义，这里暂且 unknown
+            origin: '玩家',
+            role: 'teacher',
+            classId: classId
+          }
+        }
+
+        // 创建带 RunID 的新条目
+        const newEntryName = `[Class:${classId}:${runId}] ${classData.name || classId}`
+        
+        // 提取关键词 (包含新班主任名字)
+        const names = extractNamesFromClassData(classData)
+        if (!names.includes(classId)) names.push(classId)
+        if (classData.name && !names.includes(classData.name)) names.push(classData.name)
+
+        // 教师教授的所有班级都设为常驻 (蓝灯)
+        const strategyType = 'constant'
+
+        const newEntry = {
+          ...originalEntry,
+          id: undefined, // 清除ID让系统生成
+          name: newEntryName,
+          content: formatClassData(classData),
+          key: names,
+          strategy: {
+            ...originalEntry.strategy,
+            type: strategyType,
+            keys: names,
+            scan_depth: 'same_as_global'
+          },
+          enabled: true
+        }
+
+        // 检查是否已存在该 RunID 的条目 (避免重复添加)
+        const existingRunIndex = newEntries.findIndex(e => e.name === newEntryName)
+        if (existingRunIndex !== -1) {
+          newEntries[existingRunIndex] = newEntry
+        } else {
+          newEntries.push(newEntry)
+        }
+
+        // 禁用原始条目 (将在 syncClassWorldbookState 中处理，但这里先禁用以防万一)
+        // 注意：syncClassWorldbookState 会再次处理启用/禁用逻辑
+      }
+
+      return newEntries
+    })
+
+    return true
+  } catch (e) {
+    console.error('[WorldbookParser] Error setting up teacher class entries:', e)
+    return false
+  }
+}
+
 export async function syncClassWorldbookState(currentRunId, allClassData) {
   if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
     return
@@ -1902,6 +2024,7 @@ export async function syncClassWorldbookState(currentRunId, allClassData) {
     console.log(`[WorldbookParser] Syncing class state for run ${currentRunId}, classes:`, Array.from(currentClassIds))
 
     for (const name of bookNames) {
+      try {
       await window.updateWorldbookWith(name, (entries) => {
         // 第一步：收集本存档激活的班级条目（带 runId 的）
         const activeRunClassIds = new Set()
@@ -1981,6 +2104,9 @@ export async function syncClassWorldbookState(currentRunId, allClassData) {
           return entry
         })
       })
+      } catch (e) {
+        console.warn(`[WorldbookParser] Worldbook "${name}" not accessible for class sync, skipping:`, e.message || e)
+      }
     }
 
     console.log(`[WorldbookParser] Class worldbook state synced for run ${currentRunId}`)
@@ -2115,7 +2241,13 @@ export async function setVariableParsingWorldbookStatus(enabled) {
 
     for (const bookName of bookNames) {
       // 先检查该世界书是否包含目标条目
-      const entries = await window.getWorldbook(bookName)
+      let entries
+      try {
+        entries = await window.getWorldbook(bookName)
+      } catch (e) {
+        console.warn(`[WorldbookParser] Worldbook "${bookName}" not accessible, skipping:`, e.message || e)
+        continue
+      }
       if (!entries || !Array.isArray(entries)) continue
 
       const hasTarget = entries.some(e => e.name === targetEntryName)
@@ -2290,7 +2422,13 @@ export async function saveMapDataToWorldbook(mapDataList) {
 
     for (const name of bookNames) {
       // 检查该世界书是否包含 [MapData] 条目
-      const entries = await window.getWorldbook(name)
+      let entries
+      try {
+        entries = await window.getWorldbook(name)
+      } catch (e) {
+        console.warn(`[WorldbookParser] Worldbook "${name}" not accessible, skipping:`, e.message || e)
+        continue
+      }
       if (!entries || !Array.isArray(entries)) continue
       
       const mapEntryIndex = entries.findIndex(e => e.name && e.name.includes('[MapData]'))

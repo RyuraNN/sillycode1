@@ -5,6 +5,8 @@ import {
   getWeekdayChinese,
   getTermInfo,
   checkDayStatus,
+  getWeekdayEnglish,
+  timeToMinutes,
   WEEKDAY_MAP,
   SPECIAL_EVENTS
 } from './scheduleGenerator'
@@ -214,6 +216,69 @@ AI可以使用以下标签来操作论坛（天华通APP）：
 `
 
   return prompt
+}
+
+/**
+ * 构建教师课表相关的提示词
+ * @param {Object} gameTime 游戏时间
+ * @param {Object} weeklySchedule 教师周课表
+ * @returns {string} 教师课表提示词
+ */
+export const buildTeacherSchedulePrompt = (gameTime, weeklySchedule) => {
+  if (!weeklySchedule || Object.keys(weeklySchedule).length === 0) {
+    return ''
+  }
+
+  const { weekday, hour, minute } = gameTime
+  const englishWeekday = getWeekdayEnglish(weekday)
+  const todaySchedule = weeklySchedule[englishWeekday]
+
+  if (!todaySchedule) return ''
+
+  // 1. 生成今日课表摘要
+  const classes = todaySchedule
+    .filter(c => !c.isEmpty)
+    .map(c => `${c.start} ${c.subject}(${c.className} | ${c.location})`)
+  
+  let prompt = `\n[今日教学安排]\n`
+  if (classes.length === 0) {
+    prompt += '今天没有教学任务。\n'
+  } else {
+    prompt += classes.join(' → ') + '\n'
+  }
+
+  // 2. 判断当前状态
+  const currentMinutes = hour * 60 + minute
+  let currentStatus = ''
+
+  for (let i = 0; i < todaySchedule.length; i++) {
+    const classInfo = todaySchedule[i]
+    if (classInfo.isEmpty) continue
+    
+    const start = timeToMinutes(classInfo.start)
+    const end = timeToMinutes(classInfo.end)
+    
+    if (currentMinutes >= start && currentMinutes < end) {
+      currentStatus = `[当前状态] 正在${classInfo.className}讲授${classInfo.subject}课。地点：${classInfo.location}。`
+      break
+    } else if (currentMinutes < start) {
+      // 找到下一节课
+      currentStatus = `[当前状态] 下一节课是${classInfo.start}在${classInfo.className}讲授${classInfo.subject}。地点：${classInfo.location}。`
+      break
+    }
+  }
+
+  if (!currentStatus) {
+    if (classes.length > 0 && currentMinutes > timeToMinutes(todaySchedule[todaySchedule.length-1].end)) {
+      currentStatus = '[当前状态] 今日教学任务已结束。'
+    } else if (classes.length > 0) {
+      currentStatus = '[当前状态] 课间休息/备课时间。'
+    } else {
+      currentStatus = '[当前状态] 今日无课，处理教务或自由活动。'
+    }
+  }
+
+  return prompt + currentStatus
 }
 
 /**
@@ -495,7 +560,15 @@ export const buildSystemPromptContent = (gameState) => {
 
   // 获取班级名称
   let className = player.classId
-  if (player.classRoster && player.classRoster.name) {
+  if (player.role === 'teacher') {
+    if (player.teachingClasses && player.teachingClasses.length > 0) {
+      // 显示教授的班级列表（取前3个避免过长）
+      const classes = player.teachingClasses.map(id => allClassData[id]?.name || id)
+      className = `Teacher (Teaching: ${classes.slice(0, 3).join(', ')}${classes.length > 3 ? '...' : ''})`
+    } else {
+      className = 'Teacher'
+    }
+  } else if (player.classRoster && player.classRoster.name) {
     className = player.classRoster.name
   }
 
@@ -659,9 +732,16 @@ export const buildSystemPromptContent = (gameState) => {
   }
 
   // 构建课表提示词（非假期时）
-  const schedulePrompt = (player.schedule && !termInfo.isVacation)
-    ? buildSchedulePrompt(gameTime, player.schedule)
-    : (termInfo.isVacation ? `\n[假期] 现在是${termInfo.vacationName}，无课程安排。` : '')
+  let schedulePrompt = ''
+  if (!termInfo.isVacation && player.schedule) {
+    if (player.role === 'teacher') {
+      schedulePrompt = buildTeacherSchedulePrompt(gameTime, player.schedule)
+    } else {
+      schedulePrompt = buildSchedulePrompt(gameTime, player.schedule)
+    }
+  } else if (termInfo.isVacation) {
+    schedulePrompt = `\n[假期] 现在是${termInfo.vacationName}，无课程安排。`
+  }
 
   // 构建特殊日期提示词
   const specialDatePrompt = buildSpecialDatePrompt(gameTime, player.customCalendarEvents)
@@ -737,9 +817,9 @@ ${player.name}邀请"${targetName}"加入"${clubName}"(社团ID: ${clubId})。
     }
   }
 
-  // 构建选修课提醒提示词
+  // 构建选修课提醒提示词 (仅学生)
   let electiveReminderPrompt = ''
-  if (player.schedule && !termInfo.isVacation && (!player.selectedElectives || player.selectedElectives.length === 0)) {
+  if (player.role !== 'teacher' && player.schedule && !termInfo.isVacation && (!player.selectedElectives || player.selectedElectives.length === 0)) {
     const classStatus = getCurrentClassStatus(gameTime, player.schedule)
     // 不包括假期(已检查)、放学后、周末、节假日
     if (classStatus.status !== 'after_classes' && classStatus.status !== 'weekend' && classStatus.status !== 'holiday' && classStatus.status !== 'exam') {
@@ -772,6 +852,31 @@ ${player.name}邀请"${targetName}"加入"${clubName}"(社团ID: ${clubId})。
     }
   }
 
+  // 教师专属状态提示
+  let teacherStatusPrompt = ''
+  if (player.role === 'teacher') {
+    teacherStatusPrompt = `
+Role: Teacher
+Teaching Classes: ${player.teachingClasses ? player.teachingClasses.join(', ') : 'None'}
+Homeroom: ${player.homeroomClassId || 'None'}
+Teaching Subjects: ${player.teachingSubjects ? player.teachingSubjects.join(', ') : 'None'}
+`
+  }
+
+  // 教师开场引导提示词
+  let teacherGuidePrompt = ''
+  if (player.role === 'teacher' && player.newGameGuideTurns > 0) {
+    const teachingClasses = player.teachingClasses || []
+    const subjects = player.teachingSubjects || []
+    const homeroom = player.homeroomClassId
+    
+    teacherGuidePrompt = `\n[新入职引导] 你是天华高级中学的新任教师。
+你负责教授的班级有：${teachingClasses.join('、')}。
+你的授课科目是：${subjects.join('、')}。
+${homeroom ? `你是 ${homeroom} 的班主任，请多关注该班级学生的情况。` : '你目前没有担任班主任。'}
+今天是开学第一天，请前往教务处报到，或者去你的班级看看。祝你教学工作顺利！\n`
+  }
+
   let prompt = `
 以下是当前的玩家状态和你需要注意的细节，你在生成回复时都需要参考以下内容。
 如果和其他的玩家人设有冲突，请忽略其他位置的玩家人设，以下方的为主：
@@ -782,13 +887,13 @@ Player: ${player.name} (Lv.${player.level})
 Grade: ${player.gradeYear || 1}年级
 Gender: ${player.gender || 'Unknown'}
 Class: ${className}
-Character Feature: ${player.characterFeature || '无'}
+Character Feature: ${player.characterFeature || '无'}${teacherStatusPrompt}
 ${backgroundPrompt}Location: ${locationName}
 Money: ${player.money}
 Inventory: ${inventoryStr}
 Stats: IQ=${player.attributes.iq}, EQ=${player.attributes.eq}, PHY=${player.attributes.physique}, FLEX=${player.attributes.flexibility}, CHARM=${player.attributes.charm}, MOOD=${player.attributes.mood}, HEALTH=${player.health}
 ${skillsStr}${knownNpcsStr}
-${npcRelationsStr}${weatherPrompt}${schedulePrompt}${specialDatePrompt}${clubApplicationPrompt}${clubInvitationPrompt}${socialPrompt}${forumPrompt}${eventPrompt}${relationshipPrompt}${partTimeJobPrompt}${newGameGuidePrompt}${electiveReminderPrompt}${pendingCommandsPrompt}
+${npcRelationsStr}${weatherPrompt}${schedulePrompt}${specialDatePrompt}${clubApplicationPrompt}${clubInvitationPrompt}${socialPrompt}${forumPrompt}${eventPrompt}${relationshipPrompt}${partTimeJobPrompt}${newGameGuidePrompt}${teacherGuidePrompt}${electiveReminderPrompt}${pendingCommandsPrompt}
 [Instructions]
 请根据玩家的行动推动剧情发展。
 - 剧情正文包裹在 <content> 标签中。
@@ -922,6 +1027,10 @@ ${npcRelationsStr}${weatherPrompt}${schedulePrompt}${specialDatePrompt}${clubApp
 
 同意玩家的入社申请 / 角色主动邀请玩家加入社团：
 <join_club id="club_id" />
+
+【教师担任社团顾问】
+如果玩家是教师，并同意担任某社团的指导老师（顾问）：
+<advise_club id="club_id" />
 
 【玩家邀请NPC加入社团】
 

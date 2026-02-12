@@ -614,7 +614,13 @@ export async function loadEventLibraryFromWorldbook() {
     console.log('[EventSystem] Scanning worldbooks for event data:', bookNames)
     
     for (const name of bookNames) {
-      const entries = await window.getWorldbook(name)
+      let entries
+      try {
+        entries = await window.getWorldbook(name)
+      } catch (e) {
+        console.warn(`[EventSystem] Worldbook "${name}" not accessible, skipping:`, e.message || e)
+        continue
+      }
       if (!entries || !Array.isArray(entries)) continue
       
       for (const entry of entries) {
@@ -653,7 +659,13 @@ export async function loadEventTriggersFromWorldbook() {
     }
     
     for (const name of bookNames) {
-      const entries = await window.getWorldbook(name)
+      let entries
+      try {
+        entries = await window.getWorldbook(name)
+      } catch (e) {
+        console.warn(`[EventSystem] Worldbook "${name}" not accessible, skipping:`, e.message || e)
+        continue
+      }
       if (!entries || !Array.isArray(entries)) continue
       
       for (const entry of entries) {

@@ -126,7 +126,7 @@ const loadModels = async () => {
   }
 }
 
-const apps = [
+const allApps = [
   { id: 'social', name: '社交', icon: '💬', color: 'linear-gradient(135deg, #07c160 0%, #1aad19 100%)' },
   { id: 'calendar', name: '日历', icon: '📅', color: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' },
   { id: 'weather', name: '天气', icon: '🌤️', color: 'linear-gradient(135deg, #56CCF2 0%, #2F80ED 100%)' },
@@ -143,6 +143,16 @@ const apps = [
   { id: 'settings', name: '设置', icon: '⚙️', color: 'linear-gradient(135deg, #8e8e93 0%, #636366 100%)' },
   { id: 'exit', name: '主菜单', icon: '🚪', color: 'linear-gradient(135deg, #ff3b30 0%, #ff453a 100%)' }
 ]
+
+const apps = computed(() => {
+  return allApps.filter(app => {
+    // 教师模式隐藏兼职APP
+    if (gameStore.player.role === 'teacher' && app.id === 'parttime') {
+      return false
+    }
+    return true
+  })
+})
 
 // 游戏内时间显示
 const currentTime = computed(() => {

@@ -13,6 +13,10 @@ const props = defineProps({
   remainingPoints: {
     type: Number,
     required: true
+  },
+  playerRole: {
+    type: String,
+    default: 'student' // 'student' | 'teacher'
   }
 })
 
@@ -154,6 +158,7 @@ const getTotal = (category, key) => {
       剩余可用点数：<span :class="{ 'no-points': remainingPoints <= 0 }">{{ remainingPoints }}</span>
     </div>
 
+    <!-- 基础属性 (学生/教师通用) -->
     <div class="attributes-grid">
       <div v-for="attr in attributesList" :key="attr.key" class="attr-row">
         <div class="attr-main">
@@ -180,7 +185,8 @@ const getTotal = (category, key) => {
           </div>
         </div>
         
-        <div class="attr-sub">
+        <!-- 潜力仅学生显示，教师潜力默认足够高 -->
+        <div v-if="playerRole === 'student'" class="attr-sub">
           <div class="sub-label">潜力</div>
           <div class="attr-controls small">
             <button 
@@ -208,32 +214,34 @@ const getTotal = (category, key) => {
 
     <div class="extra-options-section">
       <div class="extra-options-content">
-        <h4 class="sub-title">学科知识</h4>
-        <div class="attributes-grid simple">
-          <div v-for="subj in subjectsList" :key="subj.key" class="attr-item">
-            <div class="attr-label">{{ subj.label }}</div>
-            <div class="attr-controls">
-              <button 
-                class="control-btn" 
-                @click="updateValue('subjects', subj.key, -1)"
-                :disabled="!modelValue.subjects?.[subj.key] || (isBatchMode && modelValue.subjects?.[subj.key] < 5)"
-              >-</button>
-              <span class="attr-value">{{ getTotal('subjects', subj.key) }}</span>
-              <input 
-                type="number" 
-                class="attr-input" 
-                :value="modelValue.subjects?.[subj.key] || 0" 
-                @change="e => setAddedValue('subjects', subj.key, e)"
-                min="0"
-              />
-              <button 
-                class="control-btn" 
-                @click="updateValue('subjects', subj.key, 1)"
-                :disabled="remainingPoints < (isBatchMode ? 5 : 1)"
-              >+</button>
+        <template v-if="playerRole === 'student'">
+          <h4 class="sub-title">学科知识</h4>
+          <div class="attributes-grid simple">
+            <div v-for="subj in subjectsList" :key="subj.key" class="attr-item">
+              <div class="attr-label">{{ subj.label }}</div>
+              <div class="attr-controls">
+                <button 
+                  class="control-btn" 
+                  @click="updateValue('subjects', subj.key, -1)"
+                  :disabled="!modelValue.subjects?.[subj.key] || (isBatchMode && modelValue.subjects?.[subj.key] < 5)"
+                >-</button>
+                <span class="attr-value">{{ getTotal('subjects', subj.key) }}</span>
+                <input 
+                  type="number" 
+                  class="attr-input" 
+                  :value="modelValue.subjects?.[subj.key] || 0" 
+                  @change="e => setAddedValue('subjects', subj.key, e)"
+                  min="0"
+                />
+                <button 
+                  class="control-btn" 
+                  @click="updateValue('subjects', subj.key, 1)"
+                  :disabled="remainingPoints < (isBatchMode ? 5 : 1)"
+                >+</button>
+              </div>
             </div>
           </div>
-        </div>
+        </template>
 
         <h4 class="sub-title">生活技能</h4>
         <div class="attributes-grid simple">

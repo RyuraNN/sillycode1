@@ -1,8 +1,11 @@
 <script setup>
+import { computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 
 const emit = defineEmits(['close', 'save'])
 const gameStore = useGameStore()
+
+const isTeacher = computed(() => gameStore.player.role === 'teacher')
 
 const attributesList = [
   { key: 'iq', label: '智商' },
@@ -11,6 +14,19 @@ const attributesList = [
   { key: 'flexibility', label: '灵活' },
   { key: 'charm', label: '魅力' },
   { key: 'mood', label: '心境' }
+]
+
+const skillsList = [
+  { key: 'programming', label: '编程' },
+  { key: 'painting', label: '绘画' },
+  { key: 'guitar', label: '吉他演奏' },
+  { key: 'piano', label: '钢琴演奏' },
+  { key: 'urbanLegend', label: '都市传说' },
+  { key: 'cooking', label: '烹饪' },
+  { key: 'hacking', label: '黑客技术' },
+  { key: 'socialMedia', label: '社媒运营' },
+  { key: 'photography', label: '摄影' },
+  { key: 'videoEditing', label: '视频编辑' }
 ]
 
 const addPoint = (key) => {
@@ -34,6 +50,15 @@ const addPotential = (key) => {
   gameStore.addPotential(key)
   emit('save')
 }
+
+const addSkill = (key) => {
+  if (gameStore.player.freePoints < 1) {
+    alert('点数不足！')
+    return
+  }
+  gameStore.addSkillLevel(key)
+  emit('save')
+}
 </script>
 
 <template>
@@ -47,6 +72,8 @@ const addPotential = (key) => {
         <div class="points-info">
           剩余自由点数：<span class="points-value">{{ gameStore.player.freePoints }}</span>
         </div>
+        
+        <!-- 基础属性 (学生/教师通用) -->
         <div class="attributes-list">
           <div v-for="attr in attributesList" :key="attr.key" class="attr-group">
             <div class="attr-main">
@@ -62,7 +89,8 @@ const addPotential = (key) => {
                 title="消耗1点"
               >+</button>
             </div>
-            <div class="attr-sub">
+            <!-- 潜力仅学生可提升，教师潜力默认足够高 -->
+            <div v-if="!isTeacher" class="attr-sub">
               <span class="sub-label">提升潜力</span>
               <button 
                 class="potential-btn" 
@@ -70,6 +98,26 @@ const addPotential = (key) => {
                 :disabled="gameStore.player.freePoints < 5"
                 title="消耗5点"
               >+1</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- 生活技能 (教师优先显示，学生也显示) -->
+        <div class="attributes-list">
+          <div v-for="skill in skillsList" :key="skill.key" class="attr-group">
+            <div class="attr-main">
+              <span class="attr-label">{{ skill.label }}</span>
+              <div class="attr-values">
+                <span class="attr-current">Lv.{{ gameStore.player.skills[skill.key] }}</span>
+              </div>
+              <button 
+                class="add-btn" 
+                @click="addSkill(skill.key)"
+                :disabled="gameStore.player.freePoints <= 0"
+                title="消耗1点"
+              >+</button>
             </div>
           </div>
         </div>

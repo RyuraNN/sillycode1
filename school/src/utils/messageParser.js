@@ -594,6 +594,16 @@ export async function parseSocialTags(rawText) {
     }
   }
 
+  // 10.5 教师担任社团顾问 <advise_club id="club_id" />
+  const adviseClubRegex = /<advise_club\s+([^>]+?)\s*\/?>/g
+  let adviseClubMatch
+  while ((adviseClubMatch = adviseClubRegex.exec(text)) !== null) {
+    const attrs = parseAttributes(adviseClubMatch[1])
+    if (attrs.id) {
+      await gameStore.becomeClubAdvisor(attrs.id)
+    }
+  }
+
   const leaveClubRegex = /<leave_club\s+([^>]+?)\s*\/?>/g
   let leaveClubMatch
   while ((leaveClubMatch = leaveClubRegex.exec(text)) !== null) {
@@ -743,7 +753,7 @@ export async function parseSocialTags(rawText) {
       unreadCount: group.unreadCount || 0
     }, finalMemberNames, gameStore.currentFloor)
 
-    const welcomePrompt = `[系统提示] ${gameStore.player.name} 加入了 ${groupName}，群内成员有 ${memberNames.join('、')}，大家欢迎一下吧。`
+    const welcomePrompt = `[系统提示] ${gameStore.player.name} 加入了 ${groupName}，群内成员有 ${finalMemberNames.join('、')}，大家欢迎一下吧。`
     gameStore.addCommand({
       id: Date.now(),
       text: welcomePrompt,

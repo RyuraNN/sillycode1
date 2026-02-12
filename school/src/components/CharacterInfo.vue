@@ -23,6 +23,19 @@ const attributesList = [
   { key: 'mood', label: '心境' }
 ]
 
+const skillsList = [
+  { key: 'programming', label: '编程' },
+  { key: 'painting', label: '绘画' },
+  { key: 'guitar', label: '吉他' },
+  { key: 'piano', label: '钢琴' },
+  { key: 'urbanLegend', label: '怪谈' },
+  { key: 'cooking', label: '烹饪' },
+  { key: 'hacking', label: '黑客' },
+  { key: 'socialMedia', label: '社媒' },
+  { key: 'photography', label: '摄影' },
+  { key: 'videoEditing', label: '剪辑' }
+]
+
 const canLevelUp = computed(() => gameStore.player.freePoints > 0)
 </script>
 
@@ -55,10 +68,21 @@ const canLevelUp = computed(() => gameStore.player.freePoints > 0)
           <span class="value">{{ gameStore.player.money }}</span>
         </div>
 
+        <!-- 基础属性 (所有人显示，但教师不可加点) -->
         <div class="attributes-list">
           <div v-for="attr in attributesList" :key="attr.key" class="attr-item">
             <span class="attr-label">{{ attr.label }}</span>
             <span class="attr-value">{{ gameStore.player.attributes[attr.key] }}</span>
+          </div>
+        </div>
+        
+        <div v-if="gameStore.player.role === 'teacher'" class="divider"></div>
+
+        <!-- 教师额外显示生活技能 -->
+        <div v-if="gameStore.player.role === 'teacher'" class="attributes-list">
+          <div v-for="skill in skillsList" :key="skill.key" class="attr-item">
+            <span class="attr-label">{{ skill.label }}</span>
+            <span class="attr-value">Lv.{{ gameStore.player.skills[skill.key] }}</span>
           </div>
         </div>
 
@@ -163,6 +187,13 @@ const canLevelUp = computed(() => gameStore.player.freePoints > 0)
   display: flex;
   justify-content: space-between;
   font-size: 0.9rem;
+}
+
+.divider {
+  height: 1px;
+  background-color: #eee;
+  margin: 8px 0;
+  width: 100%;
 }
 
 .level-up-btn {

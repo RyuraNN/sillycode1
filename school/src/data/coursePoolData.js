@@ -789,7 +789,12 @@ function serializeCourse(category, course, typeLabel) {
     teacherStr += ` (${course.origin})`
   }
   
-  return `${category}|${course.name}|${teacherStr}|${course.location || 'classroom'}|${typeLabel}`
+  // 追加 runId (如果有)
+  let line = `${category}|${course.name}|${teacherStr}|${course.location || 'classroom'}|${typeLabel}`
+  if (course.runId) {
+    line += `|${course.runId}`
+  }
+  return line
 }
 
 /**
@@ -802,7 +807,7 @@ function parseCourseLine(line) {
   const parts = line.split('|').map(s => s.trim())
   if (parts.length < 5) return null
   
-  const [category, name, teacherInfo, location, typeLabel] = parts
+  const [category, name, teacherInfo, location, typeLabel, runId] = parts
   
   // 解析教师信息 "Name ♂ (Origin)"
   let teacher = teacherInfo
@@ -831,7 +836,8 @@ function parseCourseLine(line) {
       origin,
       location,
       type: typeLabel === '必修' ? 'required' : 'elective',
-      availableFor: [category] // 简单处理
+      availableFor: [category], // 简单处理
+      runId: runId || null // 保存 runId
     },
     isRequired: typeLabel === '必修'
   }
@@ -939,8 +945,9 @@ export async function saveCoursePoolToWorldbook() {
 
 /**
  * 从世界书加载课程池
+ * @param {string} currentRunId 当前游戏存档ID (用于过滤)
  */
-export async function loadCoursePoolFromWorldbook() {
+export async function loadCoursePoolFromWorldbook(currentRunId) {
   if (typeof window.getCharWorldbookNames !== 'function' || typeof window.getWorldbook !== 'function') {
     console.warn('[CoursePool] Worldbook API not available')
     return false
@@ -960,7 +967,13 @@ export async function loadCoursePoolFromWorldbook() {
     
     // 查找包含 [CoursePool] 的条目
     for (const name of bookNames) {
-      const entries = await window.getWorldbook(name)
+      let entries
+      try {
+        entries = await window.getWorldbook(name)
+      } catch (e) {
+        console.warn(`[CoursePool] Worldbook "${name}" not accessible, skipping:`, e.message || e)
+        continue
+      }
       if (!entries || !Array.isArray(entries)) continue
       
       const entry = entries.find(e => e.name === WB_ENTRY_NAME || (e.keys && e.keys.includes('CoursePool')))
@@ -999,6 +1012,13 @@ export async function loadCoursePoolFromWorldbook() {
       if (!parsed) continue
       
       const { category, course, isRequired } = parsed
+      
+      // 存档隔离检查：
+      // 1. 如果课程有 runId，必须与当前 runId 一致
+      // 2. 如果课程没有 runId，视为通用/默认课程，允许加载
+      if (course.runId && course.runId !== currentRunId) {
+        continue
+      }
       
       if (category === '通用') {
         UNIVERSAL_ELECTIVES.push(course)
@@ -1178,11 +1198,17 @@ export function filterCoursesByPreference(electives, preference) {
   }
   
   const keywords = PREFERENCE_COURSE_KEYWORDS[preference] || []
-  if (keywords.length === 0) {
-    return electives
-  }
   
   return electives.filter(course => {
+    // 优先检查显式指定的倾向
+    if (course.preference) {
+      return course.preference === preference
+    }
+
+    if (keywords.length === 0) {
+      return true
+    }
+    
     return keywords.some(keyword => 
       course.name.includes(keyword) || 
       (course.teacher && course.teacher.includes(keyword))
@@ -1303,4 +1329,46 @@ export function removeCustomClass(classId) {
   if (CUSTOM_CLASS_COURSES[classId]) {
     delete CUSTOM_CLASS_COURSES[classId]
   }
+}
+
+/**
+ * 注册自定义课程
+ * @param {Object} courseData { name, type, grade, preference, teacher, teacherGender, runId }
+ */
+export function registerCustomCourse(courseData) {
+  const newCourse = {
+    id: `custom_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+    name: courseData.name,
+    teacher: courseData.teacher,
+    teacherGender: courseData.teacherGender || 'female',
+    origin: '玩家自定义',
+    location: 'classroom',
+    type: courseData.type, // 'required' | 'elective'
+    availableFor: [], 
+    preference: courseData.preference,
+    runId: courseData.runId // 绑定存档ID
+  }
+  
+  const grade = courseData.grade // 'universal', '1', '2', '3'
+  
+  if (grade === 'universal') {
+    newCourse.availableFor = ['通用']
+    UNIVERSAL_ELECTIVES.push(newCourse)
+  } else {
+    let targetPool = null
+    if (grade === '1') targetPool = GRADE_1_COURSES
+    if (grade === '2') targetPool = GRADE_2_COURSES
+    if (grade === '3') targetPool = GRADE_3_COURSES
+    
+    if (targetPool) {
+      newCourse.availableFor = [`${grade}年级`]
+      if (courseData.type === 'required') {
+        targetPool.required.push(newCourse)
+      } else {
+        targetPool.electives.push(newCourse)
+      }
+    }
+  }
+  
+  return newCourse
 }

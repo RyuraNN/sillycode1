@@ -10,9 +10,10 @@ import SchoolRosterFilterPanel from './SchoolRosterFilterPanel.vue'
 import EventEditorPanel from './EventEditorPanel.vue'
 import NpcScheduleEditorPanel from './NpcScheduleEditorPanel.vue'
 import DataTransferPanel from './DataTransferPanel.vue'
-import { setPlayerClass } from '../utils/worldbookParser'
+import { setPlayerClass, setupTeacherClassEntries } from '../utils/worldbookParser'
 import { DEFAULT_FORUM_POSTS, saveForumToWorldbook } from '../utils/forumWorldbook'
-import { getCoursePoolState } from '../data/coursePoolData'
+import { getCoursePoolState, getElectiveCourses, getRequiredCourses, UNIVERSAL_ELECTIVES, GRADE_1_COURSES, GRADE_2_COURSES, GRADE_3_COURSES, registerCustomCourse, ELECTIVE_PREFERENCES } from '../data/coursePoolData'
+import { generateTeacherSchedule, getTermInfo } from '../utils/scheduleGenerator'
 
 const emit = defineEmits(['back', 'startGame'])
 const gameStore = useGameStore()
@@ -28,6 +29,9 @@ const showFilterPanel = ref(false)
 const showEventEditor = ref(false)
 const showScheduleEditor = ref(false)
 const showTransferPanel = ref(false)
+
+// 角色类型选择
+const playerRole = ref('student') // 'student' | 'teacher'
 
 const formData = ref({
   name: '',
@@ -46,6 +50,139 @@ const formData = ref({
     subjects: {},
     skills: {},
     potentials: {}
+  }
+})
+
+// 教师模式专用数据
+const teacherData = ref({
+  teachingClasses: [],      // 教授的班级ID列表 (1~5)
+  homeroomClassId: '',      // 担任班主任的班级ID
+  teachingSubjects: [],     // 教授的必修学科
+  teachingElectives: [],    // 教授的选修课ID
+  customCourses: []         // 自定义课程列表
+})
+
+// 自定义课程相关状态
+const showAddCourseModal = ref(false)
+const newCourseForm = ref({
+  name: '',
+  type: 'elective',
+  grade: 'universal',
+  preference: 'general'
+})
+
+const openAddCourseModal = () => {
+  newCourseForm.value = { name: '', type: 'elective', grade: 'universal', preference: 'general' }
+  showAddCourseModal.value = true
+}
+
+const addCustomCourse = () => {
+  if (!newCourseForm.value.name) return
+  
+  if (!teacherData.value.customCourses) teacherData.value.customCourses = []
+  
+  // 保存自定义课程配置
+  teacherData.value.customCourses.push({ ...newCourseForm.value })
+  
+  // 添加到教授学科列表
+  if (!teacherData.value.teachingSubjects.includes(newCourseForm.value.name)) {
+    teacherData.value.teachingSubjects.push(newCourseForm.value.name)
+  }
+  
+  showAddCourseModal.value = false
+}
+
+// 可选学科列表 (更新为更准确的名称)
+const subjectOptions = [
+  { key: 'literature', label: '国语' },
+  { key: 'math', label: '数学' },
+  { key: 'english', label: '英语' },
+  { key: 'history', label: '历史' },
+  { key: 'geography', label: '地理' },
+  { key: 'physics', label: '物理' },
+  { key: 'chemistry', label: '化学' },
+  { key: 'biology', label: '生物' },
+  { key: 'art', label: '美术' },
+  { key: 'music', label: '音乐' },
+  { key: 'sports', label: '体育' }
+]
+
+// 获取所有可选的选修课（不分年级）
+const allElectiveOptions = computed(() => {
+  const allElectives = [
+    ...UNIVERSAL_ELECTIVES,
+    ...(GRADE_2_COURSES.electives || []),
+    ...(GRADE_3_COURSES.electives || [])
+  ]
+  // 去重
+  const seen = new Set()
+  return allElectives.filter(c => {
+    if (seen.has(c.id)) return false
+    seen.add(c.id)
+    return true
+  })
+})
+
+// 切换教授班级
+const toggleTeachingClass = (classId) => {
+  const idx = teacherData.value.teachingClasses.indexOf(classId)
+  if (idx > -1) {
+    teacherData.value.teachingClasses.splice(idx, 1)
+    // 如果该班级是班主任班级，也取消
+    if (teacherData.value.homeroomClassId === classId) {
+      teacherData.value.homeroomClassId = ''
+    }
+  } else {
+    if (teacherData.value.teachingClasses.length >= 5) {
+      alert('最多只能选择5个班级！')
+      return
+    }
+    teacherData.value.teachingClasses.push(classId)
+  }
+}
+
+// 切换教授学科 (存储中文名称)
+const toggleTeachingSubject = (label) => {
+  const idx = teacherData.value.teachingSubjects.indexOf(label)
+  if (idx > -1) {
+    teacherData.value.teachingSubjects.splice(idx, 1)
+  } else {
+    teacherData.value.teachingSubjects.push(label)
+  }
+}
+
+// 切换教授选修课
+const toggleTeachingElective = (id) => {
+  const idx = teacherData.value.teachingElectives.indexOf(id)
+  if (idx > -1) {
+    teacherData.value.teachingElectives.splice(idx, 1)
+  } else {
+    teacherData.value.teachingElectives.push(id)
+  }
+}
+
+// 当角色类型切换时，重置不需要的数据
+watch(playerRole, (newRole) => {
+  // 重置属性分配，防止跨模式残留
+  formData.value.allocatedAttributes = {
+    attributes: {},
+    subjects: {},
+    skills: {},
+    potentials: {}
+  }
+
+  if (newRole === 'teacher') {
+    // 清空学生专属数据
+    formData.value.classId = ''
+    formData.value.childhood = ['', '', '']
+    formData.value.elementary = ['', '', '']
+    formData.value.middleSchool = ['', '', '']
+  } else {
+    // 清空教师专属数据
+    teacherData.value.teachingClasses = []
+    teacherData.value.homeroomClassId = ''
+    teacherData.value.teachingSubjects = []
+    teacherData.value.teachingElectives = []
   }
 })
 
@@ -420,7 +557,7 @@ const handleStart = async () => {
     return
   }
 
-  if (!formData.value.classId) {
+  if (playerRole.value === 'student' && !formData.value.classId) {
     alert('请选择班级！')
     const el = document.querySelector('select') // 假设班级选择框是页面上靠前的 select 之一，或者可以通过更精确的选择器
     // 由于有多个 select，我们需要更精确地定位。班级选择框绑定了 formData.classId
@@ -432,6 +569,11 @@ const handleStart = async () => {
       classSelect.classList.add('shake-animation')
       setTimeout(() => classSelect.classList.remove('shake-animation'), 500)
     }
+    return
+  }
+
+  if (playerRole.value === 'teacher' && teacherData.value.teachingClasses.length === 0) {
+    alert('请至少选择一个教授班级！')
     return
   }
 
@@ -449,9 +591,62 @@ const confirmSignature = async () => {
   gameStore.player.characterFeature = formData.value.characterFeature
   gameStore.player.backgroundStory = formData.value.backgroundStory
   gameStore.player.newGameGuideTurns = 3 // 初始化新游戏引导回合数
+  gameStore.player.role = playerRole.value // 保存角色类型
+
+  // 教师模式数据保存
+  if (playerRole.value === 'teacher') {
+    gameStore.player.teachingClasses = teacherData.value.teachingClasses
+    gameStore.player.homeroomClassId = teacherData.value.homeroomClassId || null
+    gameStore.player.teachingSubjects = teacherData.value.teachingSubjects
+    gameStore.player.teachingElectives = teacherData.value.teachingElectives
+    
+    // 如果是教师，不需要设置单一班级，但如果担任班主任，可以作为主要班级
+    if (teacherData.value.homeroomClassId) {
+      gameStore.player.classId = teacherData.value.homeroomClassId
+    }
+
+    // 注册自定义课程
+    if (teacherData.value.customCourses) {
+      teacherData.value.customCourses.forEach(course => {
+        registerCustomCourse({
+          ...course,
+          teacher: formData.value.name,
+          teacherGender: formData.value.gender,
+          runId: gameStore.currentRunId
+        })
+      })
+    }
+    
+    // 生成教师课表
+    const termInfo = getTermInfo(gameStore.gameTime.year, gameStore.gameTime.month, gameStore.gameTime.day)
+    gameStore.player.schedule = generateTeacherSchedule(
+      teacherData.value.teachingClasses,
+      teacherData.value.teachingSubjects,
+      teacherData.value.teachingElectives,
+      gameStore.allClassData,
+      termInfo.weekNumber
+    )
+    console.log('[GameStart] Generated teacher schedule:', gameStore.player.schedule)
+    
+    // 调用世界书更新函数
+    await setupTeacherClassEntries(
+      teacherData.value.teachingClasses,
+      teacherData.value.homeroomClassId,
+      formData.value.name,
+      gameStore.currentRunId
+    )
+
+    // 教师自动加入教授班级的群组
+    for (const classId of teacherData.value.teachingClasses) {
+      const classInfo = gameStore.allClassData[classId]
+      if (classInfo) {
+        await gameStore.joinClassGroup(classId, classInfo)
+      }
+    }
+  }
   
   // 设置世界书策略（选中班级蓝灯，其他绿灯）并创建班级群
-  if (formData.value.classId) {
+  if (formData.value.classId && playerRole.value === 'student') {
     await setPlayerClass(formData.value.classId)
     // 设置玩家班级并生成课表，这个函数会自动调用 joinClassGroup
     // 创建班级群并保存到世界书
@@ -659,6 +854,26 @@ const confirmSignature = async () => {
       <div class="content-section">
         <p class="intro-text">请填写您的个人信息以完成注册。</p>
         
+        <!-- 角色选择 -->
+        <div class="role-selector">
+          <div 
+            class="role-option" 
+            :class="{ active: playerRole === 'student' }"
+            @click="playerRole = 'student'"
+          >
+            <span class="role-icon">🎓</span>
+            <span class="role-name">学生</span>
+          </div>
+          <div 
+            class="role-option" 
+            :class="{ active: playerRole === 'teacher' }"
+            @click="playerRole = 'teacher'"
+          >
+            <span class="role-icon">👨‍🏫</span>
+            <span class="role-name">老师</span>
+          </div>
+        </div>
+
         <!-- 点数计数器 -->
         <div class="points-counter">
           <span class="points-label">可用点数：</span>
@@ -696,24 +911,27 @@ const confirmSignature = async () => {
             ></textarea>
           </div>
 
-          <div class="form-row">
-            <label>班级：</label>
-            <select v-model="formData.classId" class="input-field">
-              <option value="" disabled>请选择班级</option>
-              <option v-for="(data, id) in gameStore.allClassData" :key="id" :value="id">
-                {{ data.name }}
-              </option>
-            </select>
-          </div>
+          <!-- 仅学生模式显示班级选择 -->
+          <template v-if="playerRole === 'student'">
+            <div class="form-row">
+              <label>班级：</label>
+              <select v-model="formData.classId" class="input-field">
+                <option value="" disabled>请选择班级</option>
+                <option v-for="(data, id) in gameStore.allClassData" :key="id" :value="id">
+                  {{ data.name }}
+                </option>
+              </select>
+            </div>
 
-          <div class="class-info-box">
-            <pre>{{ classInfoText }}</pre>
-          </div>
+            <div class="class-info-box">
+              <pre>{{ classInfoText }}</pre>
+            </div>
 
-          <!-- 班级名册按钮 -->
-          <div v-if="formData.classId" class="roster-btn-container">
-            <button class="action-btn small" @click="showRoster = true">修改班级名册</button>
-          </div>
+            <!-- 班级名册按钮 -->
+            <div v-if="formData.classId" class="roster-btn-container">
+              <button class="action-btn small" @click="showRoster = true">修改班级名册</button>
+            </div>
+          </template>
         </div>
 
         <div class="form-section">
@@ -761,90 +979,173 @@ const confirmSignature = async () => {
           />
         </div>
 
-        <!-- 经历选择部分 -->
-        <div class="form-section">
-          <h3 class="section-title">三、幼年经历</h3>
-          <div v-for="(val, index) in formData.childhood" :key="'c'+index">
-            <div class="form-row">
-              <label>经历 {{ index + 1 }}：</label>
-              <select v-model="formData.childhood[index]" class="input-field">
-                <option value="">(无)</option>
-                <option v-for="opt in childhoodOptions" :key="opt.id" :value="opt.id" :disabled="formData.childhood.includes(opt.id) && formData.childhood[index] !== opt.id">
-                  {{ opt.name }}
-                </option>
-              </select>
+        <!-- 经历选择部分 (仅学生模式) -->
+        <template v-if="playerRole === 'student'">
+          <div class="form-section">
+            <h3 class="section-title">三、幼年经历</h3>
+            <div v-for="(val, index) in formData.childhood" :key="'c'+index">
+              <div class="form-row">
+                <label>经历 {{ index + 1 }}：</label>
+                <select v-model="formData.childhood[index]" class="input-field">
+                  <option value="">(无)</option>
+                  <option v-for="opt in childhoodOptions" :key="opt.id" :value="opt.id" :disabled="formData.childhood.includes(opt.id) && formData.childhood[index] !== opt.id">
+                    {{ opt.name }}
+                  </option>
+                </select>
+              </div>
+              <!-- 自定义面板 -->
+              <CustomOptionPanel 
+                v-if="formData.childhood[index] === 'custom'" 
+                v-model="customData.childhood[index]" 
+              />
             </div>
-            <!-- 自定义面板 -->
-            <CustomOptionPanel 
-              v-if="formData.childhood[index] === 'custom'" 
-              v-model="customData.childhood[index]" 
-            />
-          </div>
-          <!-- 预览 -->
-          <div v-if="getSelectedExperiences(formData.childhood, childhoodOptions).length > 0" class="family-preview">
-            <div v-for="exp in getSelectedExperiences(formData.childhood, childhoodOptions)" :key="exp.id" class="exp-preview-item">
-              <template v-if="exp.id !== 'custom'">
-                <strong>{{ exp.name }}:</strong> {{ exp.desc }}
-              </template>
+            <!-- 预览 -->
+            <div v-if="getSelectedExperiences(formData.childhood, childhoodOptions).length > 0" class="family-preview">
+              <div v-for="exp in getSelectedExperiences(formData.childhood, childhoodOptions)" :key="exp.id" class="exp-preview-item">
+                <template v-if="exp.id !== 'custom'">
+                  <strong>{{ exp.name }}:</strong> {{ exp.desc }}
+                </template>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="form-section">
-          <h3 class="section-title">四、小学经历</h3>
-          <div v-for="(val, index) in formData.elementary" :key="'e'+index">
-            <div class="form-row">
-              <label>经历 {{ index + 1 }}：</label>
-              <select v-model="formData.elementary[index]" class="input-field">
-                <option value="">(无)</option>
-                <option v-for="opt in elementaryOptions" :key="opt.id" :value="opt.id" :disabled="formData.elementary.includes(opt.id) && formData.elementary[index] !== opt.id">
-                  {{ opt.name }}
-                </option>
-              </select>
+          <div class="form-section">
+            <h3 class="section-title">四、小学经历</h3>
+            <div v-for="(val, index) in formData.elementary" :key="'e'+index">
+              <div class="form-row">
+                <label>经历 {{ index + 1 }}：</label>
+                <select v-model="formData.elementary[index]" class="input-field">
+                  <option value="">(无)</option>
+                  <option v-for="opt in elementaryOptions" :key="opt.id" :value="opt.id" :disabled="formData.elementary.includes(opt.id) && formData.elementary[index] !== opt.id">
+                    {{ opt.name }}
+                  </option>
+                </select>
+              </div>
+              <!-- 自定义面板 -->
+              <CustomOptionPanel 
+                v-if="formData.elementary[index] === 'custom'" 
+                v-model="customData.elementary[index]" 
+              />
             </div>
-            <!-- 自定义面板 -->
-            <CustomOptionPanel 
-              v-if="formData.elementary[index] === 'custom'" 
-              v-model="customData.elementary[index]" 
-            />
-          </div>
-          <!-- 预览 -->
-          <div v-if="getSelectedExperiences(formData.elementary, elementaryOptions).length > 0" class="family-preview">
-            <div v-for="exp in getSelectedExperiences(formData.elementary, elementaryOptions)" :key="exp.id" class="exp-preview-item">
-              <template v-if="exp.id !== 'custom'">
-                <strong>{{ exp.name }}:</strong> {{ exp.desc }}
-              </template>
+            <!-- 预览 -->
+            <div v-if="getSelectedExperiences(formData.elementary, elementaryOptions).length > 0" class="family-preview">
+              <div v-for="exp in getSelectedExperiences(formData.elementary, elementaryOptions)" :key="exp.id" class="exp-preview-item">
+                <template v-if="exp.id !== 'custom'">
+                  <strong>{{ exp.name }}:</strong> {{ exp.desc }}
+                </template>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="form-section">
-          <h3 class="section-title">五、初中经历</h3>
-          <div v-for="(val, index) in formData.middleSchool" :key="'m'+index">
-            <div class="form-row">
-              <label>经历 {{ index + 1 }}：</label>
-              <select v-model="formData.middleSchool[index]" class="input-field">
-                <option value="">(无)</option>
-                <option v-for="opt in middleSchoolOptions" :key="opt.id" :value="opt.id" :disabled="formData.middleSchool.includes(opt.id) && formData.middleSchool[index] !== opt.id">
-                  {{ opt.name }}
+          <div class="form-section">
+            <h3 class="section-title">五、初中经历</h3>
+            <div v-for="(val, index) in formData.middleSchool" :key="'m'+index">
+              <div class="form-row">
+                <label>经历 {{ index + 1 }}：</label>
+                <select v-model="formData.middleSchool[index]" class="input-field">
+                  <option value="">(无)</option>
+                  <option v-for="opt in middleSchoolOptions" :key="opt.id" :value="opt.id" :disabled="formData.middleSchool.includes(opt.id) && formData.middleSchool[index] !== opt.id">
+                    {{ opt.name }}
+                  </option>
+                </select>
+              </div>
+              <!-- 自定义面板 -->
+              <CustomOptionPanel 
+                v-if="formData.middleSchool[index] === 'custom'" 
+                v-model="customData.middleSchool[index]" 
+              />
+            </div>
+            <!-- 预览 -->
+            <div v-if="getSelectedExperiences(formData.middleSchool, middleSchoolOptions).length > 0" class="family-preview">
+              <div v-for="exp in getSelectedExperiences(formData.middleSchool, middleSchoolOptions)" :key="exp.id" class="exp-preview-item">
+                <template v-if="exp.id !== 'custom'">
+                  <strong>{{ exp.name }}:</strong> {{ exp.desc }}
+                </template>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- 教师专属设置 -->
+        <template v-if="playerRole === 'teacher'">
+          <div class="form-section">
+            <h3 class="section-title">三、教学设置</h3>
+            
+            <div class="form-row" style="align-items: flex-start;">
+              <label>教授班级：</label>
+              <div class="multi-select-container">
+                <div 
+                  v-for="(data, id) in gameStore.allClassData" 
+                  :key="id"
+                  class="select-chip"
+                  :class="{ active: teacherData.teachingClasses.includes(id) }"
+                  @click="toggleTeachingClass(id)"
+                >
+                  {{ data.name }}
+                </div>
+              </div>
+            </div>
+            <p class="hint-text">请选择1~5个教授的班级</p>
+
+            <div class="form-row" v-if="teacherData.teachingClasses.length > 0">
+              <label>担任班主任：</label>
+              <select v-model="teacherData.homeroomClassId" class="input-field">
+                <option value="">(不担任)</option>
+                <option v-for="id in teacherData.teachingClasses" :key="id" :value="id">
+                  {{ gameStore.allClassData[id]?.name }}
                 </option>
               </select>
             </div>
-            <!-- 自定义面板 -->
-            <CustomOptionPanel 
-              v-if="formData.middleSchool[index] === 'custom'" 
-              v-model="customData.middleSchool[index]" 
-            />
-          </div>
-          <!-- 预览 -->
-          <div v-if="getSelectedExperiences(formData.middleSchool, middleSchoolOptions).length > 0" class="family-preview">
-            <div v-for="exp in getSelectedExperiences(formData.middleSchool, middleSchoolOptions)" :key="exp.id" class="exp-preview-item">
-              <template v-if="exp.id !== 'custom'">
-                <strong>{{ exp.name }}:</strong> {{ exp.desc }}
-              </template>
+
+            <div class="form-row" style="align-items: flex-start;">
+              <label>教授学科：</label>
+              <div class="subject-selection-area" style="flex: 1;">
+                <!-- 已选学科展示 -->
+                <div class="multi-select-container selected-subjects">
+                  <div 
+                    v-for="subj in teacherData.teachingSubjects" 
+                    :key="subj"
+                    class="select-chip active"
+                    @click="toggleTeachingSubject(subj)"
+                  >
+                    {{ subj }} <span class="remove-x">×</span>
+                  </div>
+                  <span v-if="teacherData.teachingSubjects.length === 0" class="placeholder-text">请选择或添加学科...</span>
+                </div>
+
+                <!-- 快速选择 -->
+                <div class="quick-select-label">快速选择：</div>
+                <div class="multi-select-container">
+                  <div 
+                    v-for="subj in subjectOptions" 
+                    :key="subj.key"
+                    class="select-chip"
+                    :class="{ disabled: teacherData.teachingSubjects.includes(subj.label) }"
+                    @click="!teacherData.teachingSubjects.includes(subj.label) && toggleTeachingSubject(subj.label)"
+                  >
+                    {{ subj.label }}
+                  </div>
+                  <button class="add-custom-btn" @click="openAddCourseModal">+ 自定义课程</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-row" style="align-items: flex-start;">
+              <label>教授选修：</label>
+              <div class="multi-select-container scrollable">
+                <div 
+                  v-for="course in allElectiveOptions" 
+                  :key="course.id"
+                  class="select-chip"
+                  :class="{ active: teacherData.teachingElectives.includes(course.id) }"
+                  @click="toggleTeachingElective(course.id)"
+                >
+                  {{ course.name }}
+                </div>
+              </div>
             </div>
           </div>
-        </div>
+        </template>
 
         <div class="form-section">
           <h3 class="section-title">六、天赋选择</h3>
@@ -879,6 +1180,7 @@ const confirmSignature = async () => {
           v-model="formData.allocatedAttributes"
           :base-stats="baseStats"
           :remaining-points="currentPoints"
+          :player-role="playerRole"
         />
 
         <div class="button-group">
@@ -940,10 +1242,148 @@ const confirmSignature = async () => {
       v-if="showTransferPanel"
       @close="showTransferPanel = false"
     />
+
+    <!-- 添加自定义课程弹窗 -->
+    <div v-if="showAddCourseModal" class="modal-overlay" @click.self="showAddCourseModal = false">
+      <div class="modal-content custom-course-modal">
+        <h3>添加自定义课程</h3>
+        
+        <div class="form-row">
+          <label>课程名称：</label>
+          <input v-model="newCourseForm.name" placeholder="例如：黑魔法防御术" class="input-field" />
+        </div>
+
+        <div class="form-row">
+          <label>课程类型：</label>
+          <select v-model="newCourseForm.type" class="input-field">
+            <option value="elective">选修课</option>
+            <option value="required">必修课</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <label>适用年级：</label>
+          <select v-model="newCourseForm.grade" class="input-field">
+            <option value="universal">通用 (所有年级)</option>
+            <option value="1">1年级</option>
+            <option value="2">2年级</option>
+            <option value="3">3年级</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <label>选课倾向：</label>
+          <select v-model="newCourseForm.preference" class="input-field">
+            <option v-for="(pref, key) in ELECTIVE_PREFERENCES" :key="key" :value="key">
+              {{ pref.icon }} {{ pref.name }} ({{ pref.description }})
+            </option>
+          </select>
+        </div>
+
+        <div class="modal-actions">
+          <button class="action-btn secondary" @click="showAddCourseModal = false">取消</button>
+          <button class="action-btn" @click="addCustomCourse" :disabled="!newCourseForm.name">确认添加</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
+/* 自定义课程弹窗样式 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.custom-course-modal {
+  background: #fdfbf3;
+  padding: 20px;
+  border-radius: 8px;
+  width: 400px;
+  max-width: 90%;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+
+.custom-course-modal h3 {
+  margin-top: 0;
+  color: #d32f2f;
+  border-bottom: 1px solid #d32f2f;
+  padding-bottom: 10px;
+  margin-bottom: 20px;
+  font-family: 'Ma Shan Zheng', cursive;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+/* 学科选择区域样式优化 */
+.selected-subjects {
+  border: 1px dashed #aaa;
+  border-radius: 4px;
+  padding: 8px;
+  min-height: 40px;
+  background: rgba(255,255,255,0.3);
+  margin-bottom: 10px;
+}
+
+.placeholder-text {
+  color: #888;
+  font-size: 0.9rem;
+  font-style: italic;
+  padding: 4px;
+}
+
+.quick-select-label {
+  font-size: 0.85rem;
+  color: #666;
+  margin-bottom: 5px;
+}
+
+.select-chip.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #ddd;
+  border-color: #ccc;
+}
+
+.remove-x {
+  margin-left: 4px;
+  font-weight: bold;
+  opacity: 0.7;
+}
+
+.select-chip.active:hover .remove-x {
+  opacity: 1;
+}
+
+.add-custom-btn {
+  padding: 4px 12px;
+  background: #fff;
+  border: 1px dashed #d32f2f;
+  color: #d32f2f;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s;
+}
+
+.add-custom-btn:hover {
+  background: #fff0f0;
+}
+
 .game-start-wrapper {
   width: 100%;
   height: 100%;
@@ -1389,5 +1829,92 @@ const confirmSignature = async () => {
 
 .action-btn.small.highlight:hover {
   background-color: #ef6c00;
+}
+
+/* 角色选择器样式 */
+.role-selector {
+  display: flex;
+  justify-content: center;
+  gap: 30px;
+  margin-bottom: 30px;
+}
+
+.role-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 15px 30px;
+  background: rgba(255, 255, 255, 0.3);
+  border: 2px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.role-option:hover {
+  background: rgba(255, 255, 255, 0.5);
+  transform: translateY(-2px);
+}
+
+.role-option.active {
+  background: rgba(255, 255, 255, 0.8);
+  border-color: #d32f2f;
+  box-shadow: 0 4px 15px rgba(211, 47, 47, 0.2);
+}
+
+.role-icon {
+  font-size: 2.5rem;
+  margin-bottom: 8px;
+}
+
+.role-name {
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 1.4rem;
+  color: #333;
+}
+
+/* 多选容器样式 */
+.multi-select-container {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 5px 0;
+}
+
+.multi-select-container.scrollable {
+  max-height: 150px;
+  overflow-y: auto;
+  border: 1px solid rgba(0,0,0,0.1);
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.select-chip {
+  padding: 4px 12px;
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s;
+}
+
+.select-chip:hover {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.select-chip.active {
+  background: #d32f2f;
+  color: white;
+  border-color: #d32f2f;
+}
+
+.hint-text {
+  font-size: 0.85rem;
+  color: #666;
+  margin-top: -10px;
+  margin-bottom: 15px;
+  margin-left: 80px;
 }
 </style>

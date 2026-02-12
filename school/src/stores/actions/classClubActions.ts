@@ -3,7 +3,7 @@
  */
 
 import type { ClubData, Group, NpcStats } from '../gameStoreTypes'
-import { fetchClassDataFromWorldbook, fetchClubDataFromWorldbook, addPlayerToClubInWorldbook, removePlayerFromClubInWorldbook, syncClubWorldbookState, syncClassWorldbookState, setPlayerClass, setVariableParsingWorldbookStatus, addNpcToClubInWorldbook, createClubInWorldbook, ensureClubExistsInWorldbook } from '../../utils/worldbookParser'
+import { fetchClassDataFromWorldbook, fetchClubDataFromWorldbook, addPlayerToClubInWorldbook, removePlayerFromClubInWorldbook, syncClubWorldbookState, syncClassWorldbookState, setPlayerClass, setVariableParsingWorldbookStatus, addNpcToClubInWorldbook, createClubInWorldbook, ensureClubExistsInWorldbook, setupTeacherClassEntries } from '../../utils/worldbookParser'
 import { DEFAULT_FORUM_POSTS, saveForumToWorldbook, switchForumSlot } from '../../utils/forumWorldbook'
 import { saveSocialData, switchSaveSlot, saveSocialRelationshipOverview, restoreWorldbookFromStore } from '../../utils/socialWorldbook'
 import { switchPartTimeSaveSlot, restorePartTimeWorldbookFromStore } from '../../utils/partTimeWorldbook'
@@ -379,6 +379,48 @@ export const classClubActions = {
   },
 
   /**
+   * 教师成为社团顾问
+   */
+  async becomeClubAdvisor(this: any, clubId: string) {
+    const club = this.allClubs[clubId]
+    if (!club) {
+      return { success: false, message: '社团不存在' }
+    }
+    
+    if (club.advisor) {
+      return { success: false, message: '该社团已有顾问' }
+    }
+    
+    // 更新社团数据
+    club.advisor = this.player.name
+    
+    // 更新玩家数据
+    if (!this.player.joinedClubs.includes(clubId)) {
+      this.player.joinedClubs.push(clubId)
+    }
+    
+    // 更新 advisorClubs (如果使用)
+    if (!this.player.advisorClubs) this.player.advisorClubs = []
+    if (!this.player.advisorClubs.includes(clubId)) {
+      this.player.advisorClubs.push(clubId)
+    }
+    
+    // 同步到世界书 (如果是教师模式，可能需要特殊的更新逻辑，但目前 addPlayerToClubInWorldbook 主要是把玩家加到 members，
+    // 我们需要一个更新 advisor 的方法。如果没有，我们可以尝试用 updateClubInWorldbook)
+    
+    // 暂时先用 addCommand 模拟
+    this.addCommand(`[系统] 你已成为"${club.name}"的指导老师。`)
+    
+    // 强制保存
+    this.saveToStorage(true)
+    
+    // 尝试同步世界书 (复用 createClubInWorldbook 的更新逻辑或者 syncClubWorldbookState)
+    await syncClubWorldbookState(this.currentRunId)
+    
+    return { success: true, message: `已成为${club.name}的顾问` }
+  },
+
+  /**
    * 拒绝社团申请
    */
   rejectClubApplication(this: any, clubId: string, from: string, reason: string) {
@@ -732,16 +774,30 @@ export const classClubActions = {
     
     // === Phase 2: 同步世界书条目状态 ===
     
-    await safeRebuildStep(
-      () => syncClassWorldbookState(this.currentRunId, this.allClassData),
-      'syncClassWorldbookState', 10000
-    )
-    
-    if (this.player.classId) {
+    // 如果是教师模式，恢复教师班级条目
+    if (this.player.role === 'teacher' && this.player.teachingClasses && this.player.teachingClasses.length > 0) {
       await safeRebuildStep(
-        () => setPlayerClass(this.player.classId),
-        'setPlayerClass', 5000
+        () => setupTeacherClassEntries(
+          this.player.teachingClasses,
+          this.player.homeroomClassId,
+          this.player.name,
+          this.currentRunId
+        ),
+        'setupTeacherClassEntries', 15000
       )
+    } else {
+      // 学生模式或普通模式
+      await safeRebuildStep(
+        () => syncClassWorldbookState(this.currentRunId, this.allClassData),
+        'syncClassWorldbookState', 10000
+      )
+      
+      if (this.player.classId) {
+        await safeRebuildStep(
+          () => setPlayerClass(this.player.classId),
+          'setPlayerClass', 5000
+        )
+      }
     }
 
     // 同步社团世界书条目

@@ -105,6 +105,8 @@
                 <template v-else-if="!isEmptySlot(day.en, period.period)">
                   <div class="class-subject">{{ getClassInfo(day.en, period.period)?.subject }}</div>
                   <div class="class-location">{{ getClassInfo(day.en, period.period)?.location }}</div>
+                  <!-- 教师模式下显示班级 -->
+                  <div v-if="gameStore.player.role === 'teacher'" class="class-name-tag">{{ getClassInfo(day.en, period.period)?.className }}</div>
                 </template>
                 
                 <!-- 空课 -->
@@ -120,8 +122,8 @@
       <!-- 底部信息 -->
       <div class="schedule-footer">
         <div class="class-info">
-          <span class="label">班级：</span>
-          <span class="value">{{ playerClass || '未分配' }}</span>
+          <span class="label">{{ gameStore.player.role === 'teacher' ? '班主任：' : '班级：' }}</span>
+          <span class="value">{{ gameStore.player.role === 'teacher' ? (gameStore.player.homeroomClassId || '未担任') : (playerClass || '未分配') }}</span>
         </div>
         <div class="week-info" v-if="!isVacation">
           <span class="label">{{ termName }} </span>
@@ -132,14 +134,14 @@
         </div>
       </div>
 
-      <!-- 选修课选择器 -->
-      <ElectiveCourseSelector v-if="playerClass && !isVacation" />
+      <!-- 选修课选择器 (仅学生) -->
+      <ElectiveCourseSelector v-if="playerClass && !isVacation && gameStore.player.role !== 'teacher'" />
 
       <!-- 无课表提示（非假期时） -->
       <div v-if="!hasSchedule && !isVacation" class="no-schedule">
         <div class="no-schedule-icon">📚</div>
         <div class="no-schedule-text">暂无课表数据</div>
-        <div class="no-schedule-hint">请先在游戏中分配班级</div>
+        <div class="no-schedule-hint">{{ gameStore.player.role === 'teacher' ? '暂无教学安排' : '请先在游戏中分配班级' }}</div>
       </div>
     </div>
 
@@ -271,18 +273,34 @@
                 <div class="club-desc">{{ truncate(club.description, 40) }}</div>
               </div>
               <div class="club-action">
-                <button 
-                  v-if="canJoinClub(club.id)"
-                  class="join-btn"
-                  @click.stop="handleJoinClub(club.id)"
-                >
-                  <span class="btn-icon">✋</span>
-                  申请
-                </button>
-                <span v-else class="disabled-hint">
-                  <span class="lock-icon">🔒</span>
-                  需邀请
-                </span>
+                <template v-if="gameStore.player.role === 'teacher'">
+                  <button 
+                    v-if="!club.advisor"
+                    class="join-btn"
+                    @click.stop="handleJoinClub(club.id)"
+                  >
+                    <span class="btn-icon">👨‍🏫</span>
+                    指导
+                  </button>
+                  <span v-else class="disabled-hint">
+                    <span class="lock-icon">🔒</span>
+                    已有指导
+                  </span>
+                </template>
+                <template v-else>
+                  <button 
+                    v-if="canJoinClub(club.id)"
+                    class="join-btn"
+                    @click.stop="handleJoinClub(club.id)"
+                  >
+                    <span class="btn-icon">✋</span>
+                    申请
+                  </button>
+                  <span v-else class="disabled-hint">
+                    <span class="lock-icon">🔒</span>
+                    需邀请
+                  </span>
+                </template>
               </div>
             </div>
           </div>
@@ -625,12 +643,12 @@
 
     <!-- 档案标签页内容 -->
     <div v-if="activeTab === 'profile'" class="tab-content profile-content">
-      <!-- 学生证 -->
-      <div class="student-id-card">
+      <!-- 证件卡 -->
+      <div class="student-id-card" :class="{ 'teacher-card': gameStore.player.role === 'teacher' }">
         <div class="card-header">
           <div class="school-logo">🏫</div>
           <div class="school-name-text">天华高级中学</div>
-          <div class="card-title">学生证</div>
+          <div class="card-title">{{ gameStore.player.role === 'teacher' ? '教职员证' : '学生证' }}</div>
         </div>
         <div class="card-body">
           <div class="student-photo">
@@ -642,21 +660,41 @@
               <span class="info-value">{{ gameStore.player.name }}</span>
             </div>
             <div class="info-row">
-              <span class="info-label">年级</span>
-              <span class="info-value">{{ gameStore.player.gradeYear ? `${gameStore.player.gradeYear}年级` : '未知' }}</span>
+              <span class="info-label">{{ gameStore.player.role === 'teacher' ? '职务' : '年级' }}</span>
+              <span class="info-value">{{ gameStore.player.role === 'teacher' ? '教师' : (gameStore.player.gradeYear ? `${gameStore.player.gradeYear}年级` : '未知') }}</span>
             </div>
-            <div class="info-row">
-              <span class="info-label">班级</span>
-              <span class="info-value">{{ gameStore.player.classId || '未分配' }}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">学号</span>
-              <span class="info-value">{{ studentId }}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">入学年份</span>
-              <span class="info-value">{{ admissionYear }}</span>
-            </div>
+            
+            <!-- 教师显示教授班级 -->
+            <template v-if="gameStore.player.role === 'teacher'">
+              <div class="info-row">
+                <span class="info-label">班主任</span>
+                <span class="info-value">{{ gameStore.player.homeroomClassId || '无' }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">教工号</span>
+                <span class="info-value">{{ studentId.replace('TH', 'THT') }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">入职年份</span>
+                <span class="info-value">{{ admissionYear }}</span>
+              </div>
+            </template>
+            
+            <!-- 学生显示班级 -->
+            <template v-else>
+              <div class="info-row">
+                <span class="info-label">班级</span>
+                <span class="info-value">{{ gameStore.player.classId || '未分配' }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">学号</span>
+                <span class="info-value">{{ studentId }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">入学年份</span>
+                <span class="info-value">{{ admissionYear }}</span>
+              </div>
+            </template>
           </div>
         </div>
         <div class="card-footer">
@@ -977,6 +1015,19 @@ function isApplyingTo(clubId) {
 
 // 判断是否可以加入某社团
 function canJoinClub(clubId) {
+  // 教师逻辑
+  if (gameStore.player.role === 'teacher') {
+    // 如果已经是成员(顾问)，不能再加入
+    if (gameStore.player.joinedClubs.includes(clubId)) return false
+    
+    // 如果该社团已经有顾问，不能加入
+    const club = gameStore.allClubs[clubId]
+    if (club && club.advisor) return false
+    
+    // 教师可以担任多个社团的顾问，没有数量限制(或者可以限制)
+    return true
+  }
+
   // 学生会是特殊社团，不能主动加入
   if (clubId === 'student_council') return false
 
@@ -1031,10 +1082,25 @@ function truncate(text, length) {
   return text.length > length ? text.substring(0, length) + '...' : text
 }
 
-// 加入社团
+// 加入社团 (教师为担任顾问)
 async function handleJoinClub(clubId) {
   if (!canJoinClub(clubId)) return
   
+  // 教师直接担任顾问
+  if (gameStore.player.role === 'teacher') {
+    const result = await gameStore.becomeClubAdvisor(clubId)
+    actionMessage.value = {
+      type: result.success ? 'success' : 'error',
+      text: result.message
+    }
+    if (result.success) {
+      selectedClub.value = null
+    }
+    setTimeout(() => { actionMessage.value = null }, 3000)
+    return
+  }
+  
+  // 学生申请加入
   const result = await gameStore.applyToJoinClub(clubId)
   
   actionMessage.value = {

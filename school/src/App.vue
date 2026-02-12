@@ -102,15 +102,15 @@ async function doInitialize() {
       console.warn('[App] requestPersistence failed:', e)
     }
     
-    // 加载自定义课程池
+    // 初始化时从本地存储加载存档
+    await gameStore.initFromStorage()
+
+    // 加载自定义课程池 (需要 currentRunId)
     try {
-      await loadCoursePoolFromWorldbook()
+      await loadCoursePoolFromWorldbook(gameStore.currentRunId)
     } catch (e) {
       console.warn('[App] loadCoursePoolFromWorldbook failed:', e)
     }
-    
-    // 初始化时从本地存储加载存档
-    await gameStore.initFromStorage()
     
     clearTimeout(initTimeoutTimer)
     
@@ -188,6 +188,8 @@ async function onSkipCacheAndContinue() {
   // 但仍然需要重建世界书状态
   try {
     isInitializing.value = true
+    // 尝试加载课程池
+    await loadCoursePoolFromWorldbook(gameStore.currentRunId)
     await gameStore.rebuildWorldbookState()
     gameStore.initializeNpcRelationships()
   } catch (e) {

@@ -132,6 +132,16 @@ export const playerActions = {
   },
 
   /**
+   * 增加技能等级 (消耗自由点数)
+   */
+  addSkillLevel(this: any, skill: string) {
+    if (this.player.freePoints > 0 && this.player.skills[skill] !== undefined) {
+      this.player.skills[skill]++
+      this.player.freePoints--
+    }
+  },
+
+  /**
    * 增加属性
    */
   addAttribute(this: any, attrName: keyof PlayerStats['attributes']) {

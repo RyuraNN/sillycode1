@@ -140,7 +140,15 @@ export function createInitialState(): GameState {
         totalEarnings: 0,
         history: [],
         lastWorkInfo: null
-      }
+      },
+      
+      // 教师系统
+      role: 'student',
+      teachingClasses: [],
+      homeroomClassId: null,
+      teachingSubjects: [],
+      teachingElectives: [],
+      advisorClubs: []
     },
     npcs: [],
     gameTime: {

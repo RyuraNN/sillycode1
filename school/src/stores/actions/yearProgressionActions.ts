@@ -129,6 +129,75 @@ export const yearProgressionActions = {
     console.log('[YearProgression] ========== 开始学年进级 ==========')
 
     try {
+      // ===== 教师模式处理 =====
+      if (this.player.role === 'teacher') {
+        console.log('[YearProgression] Teacher mode: skipping student progression logic')
+        
+        // 教师不参与升年级，但需要处理全校的毕业和升级
+        // 1. 处理毕业
+        const graduationResult = this.processGraduation()
+        
+        // 2. 社团清理
+        this.processClubGraduationInMemory(graduationResult.graduatedNames)
+        
+        // 3. 升级处理 (不升级玩家)
+        this.processGradeUpgrade()
+        
+        // 4. 新生入学
+        await this.processNewStudentEnrollment()
+        
+        // 5. 教师重分配 (不重分配玩家)
+        // 过滤掉玩家自己，防止被自动分配
+        const freedTeachers = graduationResult.freedTeachers.filter((t: any) => t.name !== this.player.name)
+        this.processTeacherReassignment(freedTeachers)
+        
+        // 6. 重置课程
+        this.resetCoursesAndElectives()
+        
+        // 7. 重新生成课表 (包括教师课表)
+        // 对于教师，重新生成课表意味着根据 teachingClasses 重新生成
+        // 教师可能需要更新 teachingClasses (如果之前的班级毕业了)
+        // 简单的逻辑：教师继续教原来的年级（例如一直教1年级），或者随班升级
+        // 目前策略：随班升级。如果班级毕业了，教师就变成了"无课"状态，或者分配给新1年级
+        // 这里暂时保持现状，让玩家手动调整或维持空闲，或者自动分配给新班级
+        
+        // 尝试自动分配给新班级（如果之前的班级ID失效了）
+        const newTeachingClasses = []
+        for (const classId of this.player.teachingClasses) {
+           if (this.allClassData[classId]) {
+             newTeachingClasses.push(classId)
+           } else {
+             // 班级已毕业，尝试找对应的新班级（例如原1-A变成了2-A）
+             // 但 allClassData[oldId] 已经被删除了，无法直接追踪
+             // 实际上 processGradeUpgrade 中已经将 oldId 替换为 newId
+             // 但玩家的 teachingClasses 数组存的是 oldId
+             
+             // 在 processGradeUpgrade 中我们没有更新玩家的 teachingClasses
+             // 这需要修复。
+           }
+        }
+        
+        // 重新生成课表
+        await this.regenerateSchedules()
+        
+        // 8. 刷新NPC和群
+        await this.refreshNpcAndGroups()
+        
+        // 9. 同步世界书
+        await this.syncWorldbookAfterProgression()
+        
+        this.addCommand(`[系统] 🎓 新学年开始！全校学生已完成进级。`)
+        
+        if (graduationResult.graduatedCount > 0) {
+          this.addCommand(`[系统] 📢 本届共有 ${graduationResult.graduatedCount} 名学生毕业。`)
+        }
+        
+        this.saveToStorage(true)
+        console.log('[YearProgression] ========== Teacher progression complete ==========')
+        _yearProgressionInProgress = false
+        return
+      }
+
       // ===== 特殊情况：玩家3年级 → 全校留级 =====
       // 天华大学尚未完成，3年级玩家不毕业，全校维持现有年级
       if (this.player.gradeYear >= 3) {
@@ -138,7 +207,7 @@ export const yearProgressionActions = {
         this.resetCoursesAndElectives()
 
         // 重新生成课表（新学期）
-        this.regenerateSchedules()
+        await this.regenerateSchedules()
 
         // 更新学年
         this.player.academicYear = this.gameTime.year
@@ -174,7 +243,7 @@ export const yearProgressionActions = {
       this.resetCoursesAndElectives()
 
       // 第7步：重新生成课表
-      this.regenerateSchedules()
+      await this.regenerateSchedules()
 
       // 第8步：刷新NPC数据和班级群
       await this.refreshNpcAndGroups()
@@ -445,10 +514,25 @@ export const yearProgressionActions = {
       this.updateNpcClassIds(students, newClassId)
 
       // 如果玩家在这个班，升级玩家
-      if (this.player.classId === oldClassId) {
+      if (this.player.classId === oldClassId && this.player.role !== 'teacher') {
         this.player.classId = newClassId
         this.player.gradeYear = 3
         console.log(`[YearProgression] Player upgraded to ${newClassId}`)
+      }
+      
+      // 教师模式：更新 teachingClasses
+      if (this.player.role === 'teacher') {
+        const idx = this.player.teachingClasses.indexOf(oldClassId)
+        if (idx !== -1) {
+          this.player.teachingClasses[idx] = newClassId
+        }
+        if (this.player.homeroomClassId === oldClassId) {
+          this.player.homeroomClassId = newClassId
+          // 如果教师绑定了 classId，也更新
+          if (this.player.classId === oldClassId) {
+            this.player.classId = newClassId
+          }
+        }
       }
 
       // 移动到新班级键
@@ -470,10 +554,24 @@ export const yearProgressionActions = {
 
       this.updateNpcClassIds(students, newClassId)
 
-      if (this.player.classId === oldClassId) {
+      if (this.player.classId === oldClassId && this.player.role !== 'teacher') {
         this.player.classId = newClassId
         this.player.gradeYear = 2
         console.log(`[YearProgression] Player upgraded to ${newClassId}`)
+      }
+      
+      // 教师模式：更新 teachingClasses
+      if (this.player.role === 'teacher') {
+        const idx = this.player.teachingClasses.indexOf(oldClassId)
+        if (idx !== -1) {
+          this.player.teachingClasses[idx] = newClassId
+        }
+        if (this.player.homeroomClassId === oldClassId) {
+          this.player.homeroomClassId = newClassId
+          if (this.player.classId === oldClassId) {
+            this.player.classId = newClassId
+          }
+        }
       }
 
       allClassData[newClassId] = classInfo
@@ -839,15 +937,28 @@ export const yearProgressionActions = {
   /**
    * 为玩家和所有班级重新生成课表
    */
-  regenerateSchedules(this: any) {
+  async regenerateSchedules(this: any) {
     console.log('[YearProgression] Step 7: Regenerating schedules...')
 
+    const weekNumber = this.getWeekNumber()
+
     // 重新生成玩家课表
-    if (this.player.classId) {
+    if (this.player.role === 'teacher') {
+      // 教师课表
+      const { generateTeacherSchedule } = await import('../../utils/scheduleGenerator') // 动态引入以避免循环依赖
+      this.player.schedule = generateTeacherSchedule(
+        this.player.teachingClasses,
+        this.player.teachingSubjects,
+        this.player.teachingElectives,
+        this.allClassData,
+        weekNumber
+      )
+      console.log('[YearProgression] Regenerated teacher schedule')
+    } else if (this.player.classId) {
+      // 学生课表
       const classInfo = this.allClassData[this.player.classId]
       if (classInfo) {
         this.player.classRoster = classInfo
-        const weekNumber = this.getWeekNumber()
         this.player.schedule = generateWeeklySchedule(this.player.classId, classInfo, weekNumber)
         console.log('[YearProgression] Regenerated player schedule for', this.player.classId)
       }
@@ -877,7 +988,16 @@ export const yearProgressionActions = {
     )
 
     // 为玩家当前班级创建新群
-    if (this.player.classId) {
+    if (this.player.role === 'teacher') {
+      // 教师加入所有教授班级的群
+      for (const classId of this.player.teachingClasses) {
+        const classInfo = this.allClassData[classId]
+        if (classInfo) {
+          await this.joinClassGroup(classId, classInfo)
+        }
+      }
+    } else if (this.player.classId) {
+      // 学生加入自己班级的群
       const classInfo = this.allClassData[this.player.classId]
       if (classInfo) {
         await this.joinClassGroup(this.player.classId, classInfo)

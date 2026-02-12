@@ -2526,7 +2526,13 @@ export async function loadScheduleDataFromWorldbook() {
     let templatesLoaded = false
     let modifiersLoaded = false
     for (const name of bookNames) {
-      const entries = await window.getWorldbook(name)
+      let entries
+      try {
+        entries = await window.getWorldbook(name)
+      } catch (e) {
+        console.warn(`[NpcSchedule] Worldbook "${name}" not accessible, skipping:`, e.message || e)
+        continue
+      }
       if (!entries || !Array.isArray(entries)) continue
       for (const entry of entries) {
         if (entry.name && entry.name.includes('[TH_NPCSchedule]')) {

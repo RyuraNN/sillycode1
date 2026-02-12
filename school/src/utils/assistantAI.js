@@ -107,7 +107,13 @@ async function getVariableParsingEntryContent() {
     }
 
     for (const name of bookNames) {
-      const entries = await window.getWorldbook(name)
+      let entries
+      try {
+        entries = await window.getWorldbook(name)
+      } catch (e) {
+        console.warn(`[AssistantAI] Worldbook "${name}" not accessible, skipping:`, e.message || e)
+        continue
+      }
       if (!entries || !Array.isArray(entries)) continue
 
       const targetEntry = entries.find(e => e.name === '[变量解析]')
@@ -145,7 +151,14 @@ async function getActiveWorldbooksContent() {
     let content = ''
     for (const name of bookNames) {
       // 不需要跳过，因为 [变量解析] 是条目，不是世界书名
-      const bookContent = await getWorldbookContent(name)
+      let bookContent = ''
+      try {
+        bookContent = await getWorldbookContent(name)
+      } catch (e) {
+        console.warn(`[AssistantAI] Failed to get content for worldbook "${name}", skipping:`, e.message || e)
+        continue
+      }
+      
       if (bookContent) {
         content += `\n[Worldbook: ${name}]\n${bookContent}\n`
       }
