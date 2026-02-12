@@ -322,15 +322,12 @@ const submitAIImport = async () => {
     const prompt = buildAIImportPrompt()
     console.log('[AI Import] Sending query to AI...')
 
-    const result = await window.generate({
+    const result = await window.generateRaw({
       user_input: prompt,
-      injects: [{
-        role: 'system',
-        content: '你是角色数据库查询助手。只返回结构化XML数据，不要输出任何叙事内容、<content>标签或额外解释。',
-        position: 'in_chat',
-        depth: 0,
-        should_scan: false
-      }],
+      ordered_prompts: [
+        { role: 'system', content: '你是角色数据库查询助手。只返回结构化XML数据，不要输出任何叙事内容、<content>标签或额外解释。' },
+        'user_input',
+      ],
       should_stream: false
     })
 
