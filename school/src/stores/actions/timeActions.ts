@@ -37,6 +37,11 @@ export const timeActions = {
     
     this.checkEventTriggers()
     this.updateEvents()
+
+    // 检查学年进级
+    if (this.checkYearProgression) {
+      this.checkYearProgression()
+    }
     
     // 更新NPC位置（每小时更新一次，内部有缓存机制）
     this.updateNpcLocations()

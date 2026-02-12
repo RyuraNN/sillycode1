@@ -23,6 +23,7 @@ import { inventoryActions } from './actions/inventoryActions'
 import { timeActions } from './actions/timeActions'
 import { classClubActions } from './actions/classClubActions'
 import { electiveActions } from './actions/electiveActions'
+import { yearProgressionActions } from './actions/yearProgressionActions'
 
 // 重新导出类型，保持对外接口兼容
 export type { CommandEntry, ChatMessage }
@@ -62,6 +63,9 @@ export const useGameStore = defineStore('game', {
     ...eventWeatherActions,
     
     // ==================== 社交相关 ====================
-    ...socialActions
+    ...socialActions,
+
+    // ==================== 学年进级相关 ====================
+    ...yearProgressionActions
   }
 })

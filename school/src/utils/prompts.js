@@ -561,7 +561,6 @@ export const buildSystemPromptContent = (gameState) => {
         let details = `\n[NPC Status: ${npc.name}]\n`
         details += `Status: Alive\n`
         details += `Gender: ${npcData?.gender || npc.gender || 'Unknown'}\n`
-        details += `Gender: ${npcData?.gender || npc.gender || 'Unknown'}\n`
         
         // 四维属性
         if (npcData && npcData.personality) {
@@ -763,7 +762,9 @@ ${player.name}邀请"${targetName}"加入"${clubName}"(社团ID: ${clubId})。
 如果和其他的玩家人设有冲突，请忽略其他位置的玩家人设，以下方的为主：
 [Current Game State]
 Time: ${timeStr}
+Academic Year: ${player.academicYear || 2024}
 Player: ${player.name} (Lv.${player.level})
+Grade: ${player.gradeYear || 1}年级
 Gender: ${player.gender || 'Unknown'}
 Class: ${className}
 Character Feature: ${player.characterFeature || '无'}

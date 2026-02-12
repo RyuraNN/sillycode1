@@ -1876,6 +1876,221 @@ export async function optimizeWorldbook(socialData) {
 }
 
 /**
+ * 同步班级世界书条目状态（切换存档/回溯时调用）
+ * 根据当前 allClassData 中的班级ID，启用对应的 runId 条目或原始条目
+ * @param {string} currentRunId 当前存档ID
+ * @param {Object} allClassData 当前存档的班级数据 { '1-A': {...}, '2-A': {...}, ... }
+ */
+export async function syncClassWorldbookState(currentRunId, allClassData) {
+  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
+    return
+  }
+
+  try {
+    const books = window.getCharWorldbookNames('current')
+    const bookNames = []
+    if (books && typeof books === 'object') {
+      if (books.primary) bookNames.push(books.primary)
+      if (Array.isArray(books.additional)) bookNames.push(...books.additional)
+    } else if (Array.isArray(books)) {
+      bookNames.push(...books)
+    }
+
+    // 当前存档中实际存在的班级ID集合
+    const currentClassIds = new Set(Object.keys(allClassData || {}))
+
+    console.log(`[WorldbookParser] Syncing class state for run ${currentRunId}, classes:`, Array.from(currentClassIds))
+
+    for (const name of bookNames) {
+      await window.updateWorldbookWith(name, (entries) => {
+        // 第一步：收集本存档激活的班级条目（带 runId 的）
+        const activeRunClassIds = new Set()
+        entries.forEach(entry => {
+          const match = entry.name && entry.name.match(/\[Class:([\w.-]+):([\w.-]+)\]/)
+          if (match) {
+            const classId = match[1]
+            const runId = match[2]
+            if (runId === currentRunId) {
+              activeRunClassIds.add(classId)
+            }
+          }
+        })
+
+        // 第二步：更新所有班级条目状态
+        return entries.map(entry => {
+          // 处理带 RunID 的特定条目
+          // 格式: [Class:classId:runId]
+          const specificMatch = entry.name && entry.name.match(/\[Class:([\w.-]+):([\w.-]+)\]/)
+          if (specificMatch) {
+            const classId = specificMatch[1]
+            const runId = specificMatch[2]
+            
+            if (runId === currentRunId) {
+              // 当前存档的条目：
+              // 只有当该班级ID在当前 allClassData 中存在时才启用
+              const shouldEnable = currentClassIds.has(classId)
+              
+              // 如果是玩家班级，设为 constant（蓝灯），否则 selective（绿灯）
+              return {
+                ...entry,
+                enabled: shouldEnable,
+                strategy: {
+                  ...entry.strategy,
+                  type: shouldEnable ? entry.strategy?.type || 'selective' : 'selective'
+                }
+              }
+            } else {
+              // 其他存档的条目，一律禁用
+              return {
+                ...entry,
+                enabled: false
+              }
+            }
+          }
+
+          // 处理原始条目（不带 runId）
+          // 格式: [Class:classId] (且不包含第二个冒号)
+          const originalMatch = entry.name && entry.name.match(/\[Class:([\w.-]+)\]/)
+          if (originalMatch && !entry.name.match(/\[Class:[\w.-]+:[\w.-]+\]/)) {
+            const classId = originalMatch[1]
+            
+            // 如果该班级在当前存档有带 runId 的副本，则禁用原始条目
+            const hasActiveRunCopy = activeRunClassIds.has(classId)
+            
+            if (hasActiveRunCopy) {
+              // 有活跃的 runId 副本 → 禁用原始条目
+              return {
+                ...entry,
+                enabled: false
+              }
+            } else {
+              // 没有活跃的 runId 副本 → 
+              // 如果该班级ID在当前 allClassData 中存在，启用原始条目
+              const shouldEnable = currentClassIds.has(classId)
+              return {
+                ...entry,
+                enabled: shouldEnable,
+                strategy: {
+                  ...entry.strategy,
+                  type: shouldEnable ? entry.strategy?.type || 'selective' : 'selective'
+                }
+              }
+            }
+          }
+
+          return entry
+        })
+      })
+    }
+
+    console.log(`[WorldbookParser] Class worldbook state synced for run ${currentRunId}`)
+  } catch (e) {
+    console.error('[WorldbookParser] Error syncing class worldbook state:', e)
+  }
+}
+
+/**
+ * 为进级后的班级创建带 runId 的世界书条目副本
+ * 原始条目将被禁用，新条目包含更新后的班级数据
+ * @param {string} classId 新的班级ID（如 '2-A'，升级后的）
+ * @param {Object} classData 更新后的班级数据
+ * @param {string} runId 当前存档ID
+ * @param {string|null} playerClassId 玩家所在班级ID（用于设置蓝灯/绿灯）
+ * @returns {Promise<boolean>} 是否成功
+ */
+export async function createRunSpecificClassEntry(classId, classData, runId, playerClassId) {
+  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
+    console.warn('[WorldbookParser] Worldbook API not available')
+    return false
+  }
+
+  try {
+    const books = window.getCharWorldbookNames('current')
+    const bookName = books?.primary || (books?.additional && books.additional[0])
+    if (!bookName) return false
+
+    console.log(`[WorldbookParser] Creating run-specific class entry [Class:${classId}:${runId}]`)
+
+    await window.updateWorldbookWith(bookName, (entries) => {
+      const newEntries = [...entries]
+
+      // 检查是否已存在该 runId 的条目
+      const existingRunIndex = newEntries.findIndex(e => 
+        e.name && e.name.includes(`[Class:${classId}:${runId}]`)
+      )
+
+      // 提取关键词
+      const names = extractNamesFromClassData(classData)
+      if (!names.includes(classId)) names.push(classId)
+      if (classData.name && !names.includes(classData.name)) names.push(classData.name)
+
+      // 是否是玩家班级
+      const isPlayerClass = classId === playerClassId
+      const strategyType = isPlayerClass ? 'constant' : 'selective'
+
+      const content = formatClassData(classData)
+      const entryName = `[Class:${classId}:${runId}] ${classData.name || classId}`
+
+      if (existingRunIndex !== -1) {
+        // 更新已有的 runId 条目
+        newEntries[existingRunIndex] = {
+          ...newEntries[existingRunIndex],
+          name: entryName,
+          content: content,
+          key: names,
+          strategy: {
+            ...newEntries[existingRunIndex].strategy,
+            type: strategyType
+          },
+          enabled: true
+        }
+      } else {
+        // 创建新的 runId 条目
+        const newEntry = {
+          name: entryName,
+          content: content,
+          key: names,
+          strategy: {
+            type: strategyType,
+            keys: names,
+            keys_secondary: { logic: 'and_any', keys: [] },
+            scan_depth: 'same_as_global'
+          },
+          position: {
+            type: 'before_character_definition',
+            order: 10
+          },
+          probability: 100,
+          enabled: true,
+          recursion: {
+            prevent_outgoing: true
+          }
+        }
+        newEntries.push(newEntry)
+      }
+
+      // 禁用该班级ID的原始条目（不带 runId 的）
+      for (let i = 0; i < newEntries.length; i++) {
+        const match = newEntries[i].name && newEntries[i].name.match(/\[Class:([\w.-]+)\]/)
+        if (match && !newEntries[i].name.match(/\[Class:[\w.-]+:[\w.-]+\]/) && match[1] === classId) {
+          newEntries[i] = {
+            ...newEntries[i],
+            enabled: false
+          }
+        }
+      }
+
+      return newEntries
+    })
+
+    return true
+  } catch (e) {
+    console.error('[WorldbookParser] Error creating run-specific class entry:', e)
+    return false
+  }
+}
+
+/**
  * 设置 [变量解析] 条目的启用状态
  * 遍历所有绑定的世界书，查找名为 [变量解析] 的条目并更新其状态
  * @param {boolean} enabled 是否启用

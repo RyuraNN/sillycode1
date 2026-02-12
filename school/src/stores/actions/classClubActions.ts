@@ -3,7 +3,7 @@
  */
 
 import type { ClubData, Group, NpcStats } from '../gameStoreTypes'
-import { fetchClassDataFromWorldbook, fetchClubDataFromWorldbook, addPlayerToClubInWorldbook, removePlayerFromClubInWorldbook, syncClubWorldbookState, setPlayerClass, setVariableParsingWorldbookStatus, addNpcToClubInWorldbook, createClubInWorldbook, ensureClubExistsInWorldbook } from '../../utils/worldbookParser'
+import { fetchClassDataFromWorldbook, fetchClubDataFromWorldbook, addPlayerToClubInWorldbook, removePlayerFromClubInWorldbook, syncClubWorldbookState, syncClassWorldbookState, setPlayerClass, setVariableParsingWorldbookStatus, addNpcToClubInWorldbook, createClubInWorldbook, ensureClubExistsInWorldbook } from '../../utils/worldbookParser'
 import { DEFAULT_FORUM_POSTS, saveForumToWorldbook, switchForumSlot } from '../../utils/forumWorldbook'
 import { saveSocialData, switchSaveSlot, saveSocialRelationshipOverview, restoreWorldbookFromStore } from '../../utils/socialWorldbook'
 import { switchPartTimeSaveSlot, restorePartTimeWorldbookFromStore } from '../../utils/partTimeWorldbook'
@@ -600,7 +600,10 @@ export const classClubActions = {
     // 同步社团状态
     await syncClubWorldbookState(this.currentRunId)
     
-    // 同步班级状态
+    // 同步班级世界书条目状态（处理进级后的 runId 隔离条目）
+    await syncClassWorldbookState(this.currentRunId, this.allClassData)
+    
+    // 同步班级策略（玩家班级蓝灯）
     if (this.player.classId) {
       await setPlayerClass(this.player.classId)
     }
@@ -674,6 +677,10 @@ export const classClubActions = {
     // 【调试】检查加载后的社团状态
     const allClubIdsAfter = this.allClubs ? Object.keys(this.allClubs) : []
     console.log('[GameStore] After loadClubData - allClubs:', allClubIdsAfter)
+    
+    // 同步班级世界书条目状态（处理进级后的 runId 隔离条目）
+    // 这确保了回溯到进级前/后时，正确的班级条目被启用/禁用
+    await syncClassWorldbookState(this.currentRunId, this.allClassData)
     
     if (this.player.classId) {
       await setPlayerClass(this.player.classId)

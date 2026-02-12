@@ -38,6 +38,8 @@ export interface GameStateData {
   player: PlayerStats
   npcs: NpcStats[]
   npcRelationships: Record<string, NpcFullData>
+  graduatedNpcs?: GraduatedNpc[]
+  lastAcademicYear?: number
   gameTime: {
     year: number
     month: number
@@ -55,6 +57,9 @@ export interface GameStateData {
   }
   worldState: any
   allClassData: any
+  allClubs?: Record<string, ClubData>
+  currentRunId?: string
+  currentFloor?: number
 }
 
 // ==================== 物品与装备相关 ====================
@@ -248,6 +253,8 @@ export interface PlayerStats {
   }
   currentGoal: string
   newGameGuideTurns: number
+  gradeYear: number
+  academicYear: number
   pendingDeliveries: PendingDelivery[]
   equipment: EquipmentSlots
   activeEffects: ActiveEffect[]
@@ -503,10 +510,23 @@ export interface NpcFullData {
 // ==================== 全局游戏状态 ====================
 
 /** 全局游戏状态（包含存档快照） */
+/** 毕业生数据 */
+export interface GraduatedNpc {
+  id: string
+  name: string
+  gender?: 'male' | 'female'
+  origin?: string
+  classId: string // 毕业时的班级
+  graduationYear: number // 毕业年份
+  clubsAtGraduation: string[] // 毕业时所属社团
+}
+
 export interface GameState {
   player: PlayerStats
   npcs: NpcStats[]
   npcRelationships: Record<string, NpcFullData>
+  graduatedNpcs: GraduatedNpc[]
+  lastAcademicYear: number // 上次进级的学年（防止重复触发）
   gameTime: {
     year: number
     month: number

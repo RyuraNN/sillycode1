@@ -1020,6 +1020,79 @@ export const DEFAULT_TEMPLATES = {
       { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
       { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
     ]
+  },
+
+  // ============ 毕业生/大学生：在大学及周边活动 ============
+  student_graduated: {
+    id: 'student_graduated',
+    name: '毕业生',
+    slots: [
+      // 工作日日程 - 大学生活
+      { period: 'early_morning', weekdays: ['weekday'], locations: [
+        { id: 'home', weight: 80 },
+        { id: 'tianhua_university', weight: 20 }
+      ]},
+      { period: 'morning', weekdays: ['weekday'], locations: [
+        { id: 'tianhua_university', weight: 80 },
+        { id: 'home', weight: 20 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekday'], locations: [
+        { id: 'tianhua_university', weight: 90 },
+        { id: 'city_library', weight: 10 }
+      ]},
+      { period: 'lunch', weekdays: ['weekday'], locations: [
+        { id: 'tianhua_university', weight: 60 },
+        { id: 'shopping_street', weight: 20 },
+        { id: 'cafe_maisy', weight: 20 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekday'], locations: [
+        { id: 'tianhua_university', weight: 80 },
+        { id: 'city_library', weight: 20 }
+      ]},
+      { period: 'club_time', weekdays: ['weekday'], locations: [
+        { id: 'tianhua_university', weight: 50 },
+        { id: 'shopping_street', weight: 30 },
+        { id: 'cafe_maisy', weight: 20 }
+      ]},
+      // 周末日程 - 休闲
+      { period: 'early_morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 100 }
+      ]},
+      { period: 'morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 60 },
+        { id: 'shopping_street', weight: 40 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekend'], locations: [
+        { id: 'shopping_street', weight: 30 },
+        { id: 'cafe_maisy', weight: 30 },
+        { id: 'central_park', weight: 20 },
+        { id: 'home', weight: 20 }
+      ]},
+      { period: 'lunch', weekdays: ['weekend'], locations: [
+        { id: 'cafe_maisy', weight: 40 },
+        { id: 'shopping_street', weight: 40 },
+        { id: 'home', weight: 20 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekend'], locations: [
+        { id: 'shopping_street', weight: 30 },
+        { id: 'game_center', weight: 20 },
+        { id: 'karaoke_box', weight: 20 },
+        { id: 'home', weight: 30 }
+      ]},
+      { period: 'club_time', weekdays: ['weekend'], locations: [
+        { id: 'shopping_street', weight: 40 },
+        { id: 'live_house_starry', weight: 30 },
+        { id: 'home', weight: 30 }
+      ]},
+      // 通用时段
+      { period: 'evening', weekdays: ['all'], locations: [
+        { id: 'shopping_street', weight: 40 },
+        { id: 'live_house_starry', weight: 20 },
+        { id: 'home', weight: 40 }
+      ]},
+      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
+    ]
   }
 }
 

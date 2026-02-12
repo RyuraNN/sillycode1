@@ -642,6 +642,10 @@
               <span class="info-value">{{ gameStore.player.name }}</span>
             </div>
             <div class="info-row">
+              <span class="info-label">年级</span>
+              <span class="info-value">{{ gameStore.player.gradeYear ? `${gameStore.player.gradeYear}年级` : '未知' }}</span>
+            </div>
+            <div class="info-row">
               <span class="info-label">班级</span>
               <span class="info-value">{{ gameStore.player.classId || '未分配' }}</span>
             </div>
@@ -651,7 +655,7 @@
             </div>
             <div class="info-row">
               <span class="info-label">入学年份</span>
-              <span class="info-value">{{ gameStore.gameTime.year }}</span>
+              <span class="info-value">{{ admissionYear }}</span>
             </div>
           </div>
         </div>
@@ -859,11 +863,22 @@ const getHeaderSubtitle = computed(() => {
   }
 })
 
+// 入学年份（推算）
+const admissionYear = computed(() => {
+  // 如果有记录的学年数据则使用，否则根据当前年级倒推
+  if (gameStore.player.academicYear) {
+    // academicYear 是"当前"学年，入学年份 = 当前学年 - (年级 - 1)
+    return gameStore.player.academicYear - (gameStore.player.gradeYear - 1)
+  }
+  return gameStore.gameTime.year - (gameStore.player.gradeYear - 1)
+})
+
 // 学生证号（生成一个模拟的）
 const studentId = computed(() => {
   // 使用 runId 的一部分作为随机种子
   const base = gameStore.currentRunId.substring(0, 4).toUpperCase()
-  return `TH${gameStore.gameTime.year}${base}01`
+  // 使用入学年份而非当前年份，保证ID不变
+  return `TH${admissionYear.value}${base}01`
 })
 
 const subjectNames = {

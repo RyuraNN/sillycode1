@@ -22,6 +22,8 @@ export const snapshotActions = {
       player: this.player,
       npcs: this.npcs,
       npcRelationships: this.npcRelationships,
+      graduatedNpcs: this.graduatedNpcs || [],
+      lastAcademicYear: this.lastAcademicYear || 0,
       gameTime: this.gameTime,
       settings: this.settings,
       worldState: this.worldState,
@@ -69,6 +71,8 @@ export const snapshotActions = {
       player: this.player,
       npcs: this.npcs,
       npcRelationships: this.npcRelationships,
+      graduatedNpcs: this.graduatedNpcs || [],
+      lastAcademicYear: this.lastAcademicYear || 0,
       gameTime: this.gameTime,
       settings: this.settings,
       worldState: this.worldState,
@@ -172,6 +176,10 @@ export const snapshotActions = {
       this.allClubs = state.allClubs
     }
     
+    // 恢复学年进级相关数据
+    this.graduatedNpcs = state.graduatedNpcs || []
+    this.lastAcademicYear = state.lastAcademicYear || 0
+    
     this.currentRunId = state.currentRunId || Date.now().toString(36)
     this.currentFloor = state.currentFloor || 0
     
@@ -219,11 +227,15 @@ export const snapshotActions = {
       player: this.player,
       npcs: this.npcs,
       npcRelationships: this.npcRelationships,
+      graduatedNpcs: this.graduatedNpcs || [],
+      lastAcademicYear: this.lastAcademicYear || 0,
       gameTime: this.gameTime,
       settings: this.settings,
       worldState: this.worldState,
       allClassData: this.allClassData,
-      allClubs: this.allClubs
+      allClubs: this.allClubs,
+      currentRunId: this.currentRunId,
+      currentFloor: this.currentFloor
     }))
   },
 
@@ -431,6 +443,11 @@ export const snapshotActions = {
     if (data.worldState) this.worldState = data.worldState
     if (data.allClassData) this.allClassData = data.allClassData
     if (data.allClubs) this.allClubs = data.allClubs
+    
+    // 恢复学年进级相关数据
+    this.graduatedNpcs = data.graduatedNpcs || []
+    this.lastAcademicYear = data.lastAcademicYear || 0
+    
     // @ts-ignore
     if (data.currentRunId !== undefined && data.currentRunId !== null) this.currentRunId = data.currentRunId
     // @ts-ignore

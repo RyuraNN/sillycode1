@@ -86,7 +86,7 @@ const characterEditForm = ref({
   personality: { order: 0, altruism: 0, tradition: 0, peace: 50 }
 })
 const charEditorSearchQuery = ref('')
-const charEditorRoleFilter = ref('all') // 'all' | 'student' | 'teacher'
+const charEditorRoleFilter = ref('all') // 'all' | 'student' | 'teacher' | 'pending'
 
 // ==================== AI角色导入状态 ====================
 const showAIImportInput = ref(false) // 输入面板
@@ -1334,7 +1334,12 @@ const filteredAvailableCharacters = computed(() => {
   
   // 角色类型筛选
   if (composerRoleFilter.value !== 'all') {
-    result = result.filter(c => c.role === composerRoleFilter.value)
+    if (composerRoleFilter.value === 'pending') {
+      // 待入学：role=student 且 grade=0 (或无classId)
+      result = result.filter(c => c.role === 'student' && (c.grade === 0 || (!c.classId && !c.grade)))
+    } else {
+      result = result.filter(c => c.role === composerRoleFilter.value)
+    }
   }
   
   // 按作品筛选
@@ -2888,6 +2893,7 @@ watch(activeTab, async (newTab) => {
                 <option value="all">全部</option>
                 <option value="student">学生</option>
                 <option value="teacher">教师</option>
+                <option value="pending">待入学(新生)</option>
               </select>
               <button class="add-btn" @click="addNewCharacter">+ 新增角色</button>
               <button class="add-btn ai-import-btn" @click="openAIImport">🤖 AI导入</button>

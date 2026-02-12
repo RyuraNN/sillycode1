@@ -16,6 +16,8 @@ export function createInitialState(): GameState {
     mapSelectionCallback: null,
     allClassData: {},
     allClubs: {},
+    graduatedNpcs: [],
+    lastAcademicYear: 0,
     clubApplication: null,
     clubRejection: null,
     clubInvitation: null,
@@ -115,6 +117,8 @@ export function createInitialState(): GameState {
       },
       currentGoal: '',
       newGameGuideTurns: 0,
+      gradeYear: 1,
+      academicYear: 2024,
       pendingDeliveries: [],
       equipment: {
         hat: null,
