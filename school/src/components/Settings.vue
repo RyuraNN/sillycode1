@@ -219,6 +219,24 @@ const loadModels = async () => {
                 <span class="range-value">{{ gameStore.settings.snapshotLimit || 10 }}</span>
               </div>
             </div>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-label">快照模式</span>
+                <span class="setting-hint">增量模式只记录变化，大幅降低内存占用（推荐长期游戏使用）</span>
+              </div>
+              <div class="setting-control">
+                <select 
+                  v-model="gameStore.settings.snapshotMode" 
+                  class="model-select"
+                  style="width: 100px;"
+                  @change="gameStore.saveToStorage()"
+                >
+                  <option value="delta">增量模式</option>
+                  <option value="full">完整模式</option>
+                </select>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -556,7 +574,7 @@ const loadModels = async () => {
           <div class="card-body credits-body">
             <p>原作者：墨沈</p>
             <p @click="handleCreditsClick" style="cursor: pointer; user-select: none;">重置：Elyrene</p>
-            <p>版本号 V1.1</p>
+            <p>版本号 V1.5</p>
             <p>免费发布于DC类脑社区</p>
           </div>
         </div>

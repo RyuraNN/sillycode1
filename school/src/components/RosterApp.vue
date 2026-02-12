@@ -12,13 +12,40 @@ const selectedCharName = ref(null)
 const canvasRef = ref(null)
 const sphereContainerRef = ref(null)
 
-// 辅助函数：获取角色的完整关系数据 (合并 Store 和 Default)
+// 辅助函数：获取角色的完整关系数据 (合并 Store 和 Default，并过滤被排除的角色)
 const getCharRelations = (charName) => {
     const storeData = gameStore.npcRelationships[charName]?.relations || {}
     const defaultData = DEFAULT_RELATIONSHIPS[charName] || {}
     
     // 合并关系数据，Store 优先
-    return { ...defaultData, ...storeData }
+    const merged = { ...defaultData, ...storeData }
+    
+    // 关键修复：从 allClassData 构建实际名册白名单
+    // 确保只有当前名册中存在的角色才会出现在关系图中
+    // 这比使用 npcRelationships 的 keys 更可靠，因为 npcRelationships 可能包含残留数据
+    const rosterNames = new Set()
+    rosterNames.add(gameStore.player.name)
+    // 也添加 "Player" 和 "玩家" 作为玩家的别名
+    rosterNames.add('Player')
+    rosterNames.add('玩家')
+    
+    for (const classInfo of Object.values(gameStore.allClassData || {})) {
+        if (classInfo.headTeacher?.name) rosterNames.add(classInfo.headTeacher.name)
+        if (Array.isArray(classInfo.teachers)) {
+            classInfo.teachers.forEach(t => { if (t.name) rosterNames.add(t.name) })
+        }
+        if (Array.isArray(classInfo.students)) {
+            classInfo.students.forEach(s => { if (s.name) rosterNames.add(s.name) })
+        }
+    }
+    
+    const filtered = {}
+    for (const [targetName, relation] of Object.entries(merged)) {
+        if (rosterNames.has(targetName)) {
+            filtered[targetName] = relation
+        }
+    }
+    return filtered
 }
 
 // 辅助函数：检查是否与玩家有关系

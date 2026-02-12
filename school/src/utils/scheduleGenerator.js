@@ -489,11 +489,13 @@ export function extractSubjects(classInfo) {
  * 为科目选择一个随机地点
  * @param {string} subject 科目名
  * @param {string} classId 班级ID
+ * @param {string} [classroomId] 可选，班级数据中的自定义教室ID（优先于硬编码映射）
  * @returns {Object} { locationId, locationName }
  */
-export function getRandomLocation(subject, classId) {
+export function getRandomLocation(subject, classId, classroomId) {
   const possibleLocations = SUBJECT_LOCATION_MAP[subject] || ['classroom']
-  const classRoom = CLASS_ROOM_MAP[classId] || 'classroom_1a'
+  // 优先使用传入的 classroomId，其次查硬编码映射，最后用 classId 推导
+  const classRoom = classroomId || CLASS_ROOM_MAP[classId] || `classroom_${classId.toLowerCase().replace('-', '')}`
   
   // 将 'classroom' 替换为实际班级教室
   const actualLocations = possibleLocations.map(loc => 
@@ -563,6 +565,9 @@ export function generateWeeklySchedule(classId, classInfo, weekNumber = 1) {
   
   const allSlots = [...prioritySlots, ...secondarySlots]
   
+  // 从 classInfo 中获取自定义教室ID（优先于硬编码映射）
+  const classroomId = classInfo?.classroomId || null
+  
   // 填入必修课
   const scheduledTeachers = new Set() // 记录已排课的老师/科目，避免重复
   
@@ -574,7 +579,7 @@ export function generateWeeklySchedule(classId, classInfo, weekNumber = 1) {
       
       // 分配课程
       // @ts-ignore
-      const location = getRandomLocation(course.name, classId)
+      const location = getRandomLocation(course.name, classId, classroomId)
       
       slot.subject = course.name
       slot.teacher = course.teacher
@@ -607,7 +612,7 @@ export function generateWeeklySchedule(classId, classInfo, weekNumber = 1) {
     slot.subject = '班会'
     slot.teacher = classInfo.headTeacher.name
     // 班会通常在教室
-    const location = getRandomLocation('班会', classId)
+    const location = getRandomLocation('班会', classId, classroomId)
     slot.location = location.locationName
     slot.locationId = location.locationId
     slot.isEmpty = false
@@ -629,7 +634,7 @@ export function generateWeeklySchedule(classId, classInfo, weekNumber = 1) {
           // 稍微倾向于选择还没有排太多课的老师？目前简单随机
           const subjectInfo = regularSubjects[Math.floor(random() * regularSubjects.length)]
           
-          const location = getRandomLocation(subjectInfo.subject, classId)
+          const location = getRandomLocation(subjectInfo.subject, classId, classroomId)
           
           slot.subject = subjectInfo.subject
           slot.teacher = subjectInfo.teacher

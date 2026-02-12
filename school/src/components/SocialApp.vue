@@ -25,6 +25,21 @@ const newGroupName = ref('') // 新建群聊名称
 const chatContentRef = ref(null)
 const replyTarget = ref(null)
 
+// 获取当前聊天的已读/未读状态（仅私聊）
+const currentChatReadStatus = computed(() => {
+  if (!activeChat.value || activeChat.value.type !== 'friend') return null
+  if (!gameStore.player.socialReadStatus) return null
+  return gameStore.player.socialReadStatus[activeChat.value.id] || null
+})
+
+// 判断某条消息是否是最后一条玩家消息
+const isLastSelfMessage = (msg) => {
+  if (msg.type !== 'self') return false
+  const selfMessages = currentMessages.value.filter(m => m.type === 'self')
+  if (selfMessages.length === 0) return false
+  return selfMessages[selfMessages.length - 1].id === msg.id
+}
+
 // ==================== 游戏内时间辅助函数 ====================
 // 获取游戏内当前时间的格式化字符串 (HH:mm)
 const getGameTimeString = () => {
@@ -577,6 +592,11 @@ const sendContent = async (content, rollbackData = null) => {
     metadata: metadata,
     rollbackData: rollbackData
   })
+
+  // 清除旧的已读/未读状态（玩家发了新消息，旧状态不再有意义）
+  if (gameStore.player.socialReadStatus && gameStore.player.socialReadStatus[activeChat.value.id]) {
+    delete gameStore.player.socialReadStatus[activeChat.value.id]
+  }
 
   // 添加到待回复消息列表 (holdMessages) 以确保持续提示 AI
   if (!gameStore.player.holdMessages) {
@@ -1276,6 +1296,12 @@ const handleSendFriendRequest = (charName) => {
                      </div>
                      <div class="transfer-bottom">微信转账</div>
                  </div>
+              </div>
+              
+              <!-- 已读/未读状态标识（仅在私聊中最后一条玩家消息下显示） -->
+              <div v-if="msg.type === 'self' && isLastSelfMessage(msg) && currentChatReadStatus" class="read-status-indicator" :class="currentChatReadStatus">
+                <span v-if="currentChatReadStatus === 'pass'" class="read-label">已读</span>
+                <span v-else-if="currentChatReadStatus === 'hold'" class="read-label">未读</span>
               </div>
             </div>
             
@@ -3392,5 +3418,26 @@ const handleSendFriendRequest = (charName) => {
 .check-avatar.avatar-female {
   background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
   color: white;
+}
+
+/* ==================== 已读/未读状态标识 ==================== */
+.read-status-indicator {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 2px;
+  padding-right: 2px;
+}
+
+.read-status-indicator .read-label {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.read-status-indicator.pass .read-label {
+  color: #576b95;
+}
+
+.read-status-indicator.hold .read-label {
+  color: var(--text-tertiary);
 }
 </style>

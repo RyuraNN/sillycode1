@@ -8,7 +8,7 @@ import { processNpcRelationshipUpdate, processNpcMoodUpdate } from './messagePar
 import { calculateTotalHours } from './npcScheduleSystem'
 
 // 变量名中英文映射表
-const VARIABLE_NAME_MAP = {
+export const VARIABLE_NAME_MAP = {
   money: '金钱',
   energy: '精力',
   health: '健康',
@@ -288,4 +288,228 @@ function processNpcMoveUpdate(moveData, gameStore) {
       console.log(`[GameData] NPC ${name} forced to move to ${location} for ${duration} hours`)
     }
   })
+}
+
+/**
+ * 生成详细的变量变化列表
+ * @param {Object} oldState - 变化前的游戏状态快照
+ * @param {Object} newState - 变化后的游戏状态快照
+ * @returns {Array<{label: string, oldValue: any, newValue: any, diff?: number}>} 变化详情列表
+ */
+export const generateDetailedChanges = (oldState, newState) => {
+  const changes = []
+  
+  if (!oldState || !newState) return changes
+  
+  // 玩家基础属性对比
+  const playerPaths = [
+    { path: 'player.money', label: '金钱' },
+    { path: 'player.gold', label: '金币' },
+    { path: 'player.hp', label: '生命' },
+    { path: 'player.maxHp', label: '生命上限' },
+    { path: 'player.mp', label: '精力' },
+    { path: 'player.maxMp', label: '精力上限' },
+    { path: 'player.exp', label: '经验' },
+    { path: 'player.health', label: '健康' },
+    { path: 'player.level', label: '等级' },
+    { path: 'player.freePoints', label: '点数' },
+    { path: 'player.location', label: '位置' }
+  ]
+  
+  // 玩家六维属性
+  const attributePaths = [
+    { path: 'player.attributes.iq', label: '智力' },
+    { path: 'player.attributes.eq', label: '情商' },
+    { path: 'player.attributes.physique', label: '体质' },
+    { path: 'player.attributes.flexibility', label: '灵活' },
+    { path: 'player.attributes.charm', label: '魅力' },
+    { path: 'player.attributes.mood', label: '心情' }
+  ]
+  
+  // 学科
+  const subjectPaths = [
+    { path: 'player.subjects.literature', label: '语文' },
+    { path: 'player.subjects.math', label: '数学' },
+    { path: 'player.subjects.english', label: '英语' },
+    { path: 'player.subjects.humanities', label: '人文' },
+    { path: 'player.subjects.sciences', label: '理科' },
+    { path: 'player.subjects.art', label: '艺术' },
+    { path: 'player.subjects.sports', label: '体育' }
+  ]
+  
+  // 技能
+  const skillPaths = [
+    { path: 'player.skills.programming', label: '编程' },
+    { path: 'player.skills.painting', label: '绘画' },
+    { path: 'player.skills.guitar', label: '吉他' },
+    { path: 'player.skills.piano', label: '钢琴' },
+    { path: 'player.skills.urbanLegend', label: '都市传说' },
+    { path: 'player.skills.cooking', label: '烹饪' },
+    { path: 'player.skills.hacking', label: '黑客' },
+    { path: 'player.skills.socialMedia', label: '社交媒体' },
+    { path: 'player.skills.photography', label: '摄影' },
+    { path: 'player.skills.videoEditing', label: '视频剪辑' }
+  ]
+  
+  // 时间
+  const timePaths = [
+    { path: 'gameTime.year', label: '年' },
+    { path: 'gameTime.month', label: '月' },
+    { path: 'gameTime.day', label: '日' },
+    { path: 'gameTime.hour', label: '时' },
+    { path: 'gameTime.minute', label: '分' },
+    { path: 'gameTime.weekday', label: '星期' }
+  ]
+  
+  const allPaths = [...playerPaths, ...attributePaths, ...subjectPaths, ...skillPaths, ...timePaths]
+  
+  // 辅助函数：获取嵌套对象的值
+  const getNestedValue = (obj, path) => {
+    return path.split('.').reduce((acc, key) => acc?.[key], obj)
+  }
+  
+  // 遍历所有路径进行对比
+  for (const { path, label } of allPaths) {
+    const oldVal = getNestedValue(oldState, path)
+    const newVal = getNestedValue(newState, path)
+    
+    if (oldVal !== newVal && (oldVal !== undefined || newVal !== undefined)) {
+      const change = { label, oldValue: oldVal, newValue: newVal }
+      
+      // 如果是数字，计算差值
+      if (typeof oldVal === 'number' && typeof newVal === 'number') {
+        change.diff = newVal - oldVal
+      }
+      
+      changes.push(change)
+    }
+  }
+  
+  // 对比 NPC 列表 (基础状态：位置、心情)
+  if (oldState.npcs && newState.npcs) {
+    const oldNpcMap = new Map(oldState.npcs.map(n => [n.id, n]))
+    
+    newState.npcs.forEach(newNpc => {
+      const oldNpc = oldNpcMap.get(newNpc.id)
+      if (oldNpc) {
+        // 心情
+        if (oldNpc.mood !== newNpc.mood) {
+          changes.push({
+            label: `${newNpc.name}心情`,
+            oldValue: oldNpc.mood,
+            newValue: newNpc.mood
+          })
+        }
+        
+        // 位置
+        if (oldNpc.location !== newNpc.location) {
+           if (oldNpc.location !== 'unknown' || newNpc.location !== 'unknown') {
+             changes.push({
+               label: `${newNpc.name}位置`,
+               oldValue: oldNpc.location,
+               newValue: newNpc.location
+             })
+           }
+        }
+      }
+    })
+  }
+
+  // 对比 NPC 详细关系 (四维数值)
+  if (oldState.npcRelationships && newState.npcRelationships && newState.player?.name) {
+    const playerName = newState.player.name
+    
+    for (const charName in newState.npcRelationships) {
+      if (charName === playerName) continue // 跳过玩家自己
+
+      // 获取该角色对玩家的关系
+      const newRel = newState.npcRelationships[charName]?.relations?.[playerName]
+      const oldRel = oldState.npcRelationships?.[charName]?.relations?.[playerName]
+
+      if (newRel) {
+         // 亲密度/好感
+         const oldIntimacy = oldRel?.intimacy || 0
+         const newIntimacy = newRel.intimacy || 0
+         if (oldIntimacy !== newIntimacy) {
+            changes.push({ 
+              label: `${charName}好感`, 
+              oldValue: oldIntimacy, 
+              newValue: newIntimacy, 
+              diff: newIntimacy - oldIntimacy 
+            })
+         }
+
+         // 信任度
+         const oldTrust = oldRel?.trust || 0
+         const newTrust = newRel.trust || 0
+         if (oldTrust !== newTrust) {
+            changes.push({ 
+              label: `${charName}信任`, 
+              oldValue: oldTrust, 
+              newValue: newTrust, 
+              diff: newTrust - oldTrust 
+            })
+         }
+
+         // 激情度
+         const oldPassion = oldRel?.passion || 0
+         const newPassion = newRel.passion || 0
+         if (oldPassion !== newPassion) {
+            changes.push({ 
+              label: `${charName}激情`, 
+              oldValue: oldPassion, 
+              newValue: newPassion, 
+              diff: newPassion - oldPassion 
+            })
+         }
+
+         // 敌意度
+         const oldHostility = oldRel?.hostility || 0
+         const newHostility = newRel.hostility || 0
+         if (oldHostility !== newHostility) {
+            changes.push({ 
+              label: `${charName}敌意`, 
+              oldValue: oldHostility, 
+              newValue: newHostility, 
+              diff: newHostility - oldHostility 
+            })
+         }
+      }
+    }
+  }
+
+  // 检查好友列表变化 (数量)
+  if (oldState.player?.social?.friends && newState.player?.social?.friends) {
+    if (oldState.player.social.friends.length !== newState.player.social.friends.length) {
+      changes.push({
+        label: '好友数',
+        oldValue: oldState.player.social.friends.length,
+        newValue: newState.player.social.friends.length,
+        diff: newState.player.social.friends.length - oldState.player.social.friends.length
+      })
+    }
+  }
+
+  // 检查时间是否有变化，合并显示
+  const timeChanges = changes.filter(c => ['年', '月', '日', '时', '分', '星期'].includes(c.label))
+  if (timeChanges.length > 0) {
+    // 移除单独的时间项
+    const nonTimeChanges = changes.filter(c => !['年', '月', '日', '时', '分', '星期'].includes(c.label))
+    
+    // 构建时间显示
+    const oldTime = oldState.gameTime
+    const newTime = newState.gameTime
+    if (oldTime && newTime) {
+      const formatTime = (t) => `${t.month}/${t.day} ${String(t.hour).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}`
+      nonTimeChanges.unshift({
+        label: '时间',
+        oldValue: formatTime(oldTime),
+        newValue: formatTime(newTime)
+      })
+    }
+    
+    return nonTimeChanges
+  }
+  
+  return changes
 }

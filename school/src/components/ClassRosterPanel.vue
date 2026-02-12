@@ -19,6 +19,7 @@ import {
   getRelationship,
   setRelationship,
   removeCharacter,
+  removeRelationship,
   updatePersonality,
   updateGoals,
   updatePriorities,
@@ -316,12 +317,12 @@ const saveRelation = () => {
   resetRelationForm()
 }
 
-// 删除关系
+// 删除关系（双向删除并持久化到世界书）
 const deleteRelation = (targetName) => {
-  if (gameStore.npcRelationships[editingCharName.value]?.relations) {
-    delete gameStore.npcRelationships[editingCharName.value].relations[targetName]
-    characterRelations.value = getCharacterRelationsList(editingCharName.value)
-  }
+  // 使用 removeRelationship 进行双向删除并立即更新印象世界书
+  removeRelationship(editingCharName.value, targetName, true)
+  // 刷新UI中的关系列表
+  characterRelations.value = getCharacterRelationsList(editingCharName.value)
 }
 
 // 编辑现有关系

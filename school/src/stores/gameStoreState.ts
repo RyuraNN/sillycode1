@@ -91,6 +91,7 @@ export function createInitialState(): GameState {
       location: 'th_main_gate',
       pendingCommands: [],
       holdMessages: [],
+      socialReadStatus: {},
       systemNotifications: [],
       social: {
         friends: [],
@@ -181,7 +182,8 @@ export function createInitialState(): GameState {
       customImageAnalysisPrompt: '',
       debugMode: false,
       debugUnlocked: false,
-      snapshotLimit: 10
+      snapshotLimit: 10,
+      snapshotMode: 'delta'
     },
     saveSnapshots: [],
     currentChatLog: [],

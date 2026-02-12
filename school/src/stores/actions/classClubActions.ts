@@ -95,38 +95,68 @@ export const classClubActions = {
   /**
    * 加载社团数据
    * 注意：合并而非覆盖玩家创建的社团（以 player_club_ 前缀识别）
+   * 
+   * 【重要】玩家创建的社团数据（内存中的）优先级高于世界书中的数据，
+   * 因为内存中的数据包含完整的运行时属性（如 _bookName）和最新的成员信息。
    */
   async loadClubData(this: any) {
     console.log('[GameStore] Loading club data for run:', this.currentRunId)
     
-    // 保存玩家创建的社团（ID 以 player_club_ 开头）
-    const playerCreatedClubs: Record<string, ClubData> = {}
+    // 保存内存中已有的所有社团（包括运行时属性）
+    const existingClubs: Record<string, ClubData> = {}
     if (this.allClubs) {
       for (const [clubId, club] of Object.entries(this.allClubs)) {
-        if (clubId.startsWith('player_club_')) {
-          playerCreatedClubs[clubId] = club as ClubData
-        }
+        existingClubs[clubId] = club as ClubData
       }
     }
+    const existingClubCount = Object.keys(existingClubs).length
     
     // 传入 currentRunId 确保只加载当前存档的社团数据
     const clubData = await fetchClubDataFromWorldbook(this.currentRunId)
     if (clubData) {
       console.log('[GameStore] Loaded club data from Worldbook', clubData)
-      // 合并世界书数据与玩家创建的社团
-      // 注意：如果世界书中已包含玩家社团，它们将在 clubData 中
-      this.allClubs = {
-        ...playerCreatedClubs,
-        ...(clubData as Record<string, ClubData>)
+      
+      const worldbookClubs = clubData as Record<string, ClubData>
+      const worldbookClubCount = Object.keys(worldbookClubs).length
+      
+      // 【修复】智能合并策略：
+      // 如果世界书返回的社团数量明显少于内存中的（可能是API部分失败），
+      // 以内存数据为主，用世界书数据补充缺失的 _bookName 等属性
+      if (existingClubCount > 0 && worldbookClubCount === 0) {
+        console.warn('[GameStore] Worldbook returned 0 clubs but memory has', existingClubCount, '- keeping memory data')
+        this.allClubs = existingClubs
+      } else {
+        // 正常合并：世界书数据作为基础，内存中的社团覆盖（保留运行时属性）
+        this.allClubs = {
+          ...worldbookClubs,       // 世界书中的社团作为基础
+          ...existingClubs         // 内存中的社团覆盖（保留运行时属性）
+        }
+      }
+      
+      // 确保所有社团都有 _bookName
+      const books = typeof window.getCharWorldbookNames === 'function' 
+        ? window.getCharWorldbookNames('current') 
+        : null
+      const defaultBookName = books?.primary || (books?.additional?.[0]) || null
+      
+      if (defaultBookName) {
+        for (const [clubId, club] of Object.entries(this.allClubs)) {
+          if (!(club as any)._bookName) {
+            console.log(`[GameStore] Setting missing _bookName for ${clubId}`)
+            ;(club as any)._bookName = defaultBookName
+          }
+        }
       }
     } else {
       console.warn('[GameStore] Failed to load club data from Worldbook')
-      // 保留玩家创建的社团
-      this.allClubs = playerCreatedClubs
+      // 保留内存中已有的社团
+      this.allClubs = existingClubs
     }
 
     // 确保系统社团（学生会）存在
     await this.ensureSystemClubs()
+    
+    console.log('[GameStore] Final club count:', Object.keys(this.allClubs).length, 'clubs:', Object.keys(this.allClubs))
   },
 
   /**
@@ -416,18 +446,24 @@ export const classClubActions = {
 
   /**
    * 处理接受社团邀请 (NPC 或 玩家)
+   * 
+   * 【重要修复】确保内存中的成员列表更改立即保存到存档，
+   * 即使世界书更新失败，存档数据仍然是正确的。
    */
   async handleClubInviteAccepted(this: any, clubId: string, name: string) {
     const club = this.allClubs[clubId]
     if (!club) {
-      console.warn(`[GameStore] Club ${clubId} not found`)
+      console.warn(`[GameStore] Club ${clubId} not found in allClubs`)
       return
     }
 
-    // 更新社团成员列表
+    console.log(`[GameStore] Processing club invite acceptance: ${name} -> ${club.name}`)
+
+    // 更新社团成员列表（内存）
     if (!club.members) club.members = []
     if (!club.members.includes(name)) {
       club.members.push(name)
+      console.log(`[GameStore] Added ${name} to ${club.name} members list`)
     }
 
     // 区分玩家和 NPC
@@ -435,12 +471,16 @@ export const classClubActions = {
       // 如果是玩家被邀请
       if (!this.player.joinedClubs.includes(clubId)) {
         this.player.joinedClubs.push(clubId)
+        console.log(`[GameStore] Player joined club ${clubId}`)
       }
       await addPlayerToClubInWorldbook(clubId, name, club, this.currentRunId)
       this.addCommand(`[系统提示] 你接受了邀请，加入了${club.name}`)
     } else {
       // 如果是 NPC
-      await addNpcToClubInWorldbook(clubId, name, club, this.currentRunId)
+      const success = await addNpcToClubInWorldbook(clubId, name, club, this.currentRunId)
+      if (!success) {
+        console.warn(`[GameStore] Failed to update worldbook for NPC ${name} joining ${club.name}, but memory is updated`)
+      }
       this.addCommand(`[系统提示] ${name}接受了邀请，加入了${club.name}`)
     }
 
@@ -449,7 +489,11 @@ export const classClubActions = {
       this.clubInvitation = null
     }
 
-    console.log(`[GameStore] ${name} joined club ${club.name}`)
+    // 【关键修复】立即保存到存储，确保内存中的更改不会丢失
+    // 即使世界书更新失败，存档中仍然保存了正确的成员列表
+    this.saveToStorage(true)
+
+    console.log(`[GameStore] ${name} joined club ${club.name}, data saved`)
   },
 
   /**
@@ -468,12 +512,25 @@ export const classClubActions = {
 
   /**
    * 玩家创建新社团
+   * 
+   * 【重要修复】即使世界书 API 不可用，也要确保：
+   * 1. 社团数据保存到内存 (allClubs)
+   * 2. 玩家加入社团列表更新 (joinedClubs)
+   * 3. 数据能被正确导出
    */
   async createClub(this: any, clubInfo: { name: string; description: string; coreSkill?: string; activityDay?: string; location?: string; advisor?: string }) {
     // 生成社团 ID
     const clubId = `player_club_${Date.now().toString(36)}`
 
-    const fullClubInfo = {
+    console.log(`[GameStore] Creating club ${clubId}: ${clubInfo.name}`)
+
+    // 获取默认世界书名称（用于后续更新）
+    const books = typeof window.getCharWorldbookNames === 'function' 
+      ? window.getCharWorldbookNames('current') 
+      : null
+    const defaultBookName = books?.primary || (books?.additional?.[0]) || null
+
+    const fullClubInfo: ClubData = {
       id: clubId,
       name: clubInfo.name,
       description: clubInfo.description,
@@ -482,29 +539,56 @@ export const classClubActions = {
       location: clubInfo.location || '',
       advisor: clubInfo.advisor || '',
       president: this.player.name, // 玩家是部长
+      vicePresident: '',
       members: [this.player.name] // 确保玩家在成员列表中
     }
 
-    // 创建世界书条目
-    const club = await createClubInWorldbook(fullClubInfo, this.currentRunId)
+    // 尝试创建世界书条目
+    let club = await createClubInWorldbook(fullClubInfo, this.currentRunId)
+    let worldbookSuccess = !!club
 
+    // 【关键修复】即使世界书创建失败，也要在内存中保存社团数据
     if (!club) {
-      return { success: false, message: '创建社团失败' }
+      console.warn(`[GameStore] Worldbook API failed for club ${clubId}, saving to memory only`)
+      // 创建一个内存中的社团对象
+      club = {
+        ...fullClubInfo,
+        _bookName: defaultBookName // 设置默认 bookName，以便后续可以重试写入世界书
+      } as ClubData & { _bookName: string }
+    }
+
+    // 确保 allClubs 已初始化
+    if (!this.allClubs) {
+      this.allClubs = {}
     }
 
     // 添加到 allClubs
     this.allClubs[clubId] = club
+    console.log(`[GameStore] Club ${clubId} added to allClubs. Current clubs:`, Object.keys(this.allClubs))
 
     // 玩家加入社团
     if (!this.player.joinedClubs.includes(clubId)) {
       this.player.joinedClubs.push(clubId)
+      console.log(`[GameStore] Player joined club ${clubId}. joinedClubs:`, this.player.joinedClubs)
     }
 
     this.addCommand(`[系统提示] 你成功创建了社团"${clubInfo.name}"并成为部长`)
 
-    this.saveToStorage()
+    // 保存到存储
+    this.saveToStorage(true) // 强制立即保存
 
-    return { success: true, message: `社团"${clubInfo.name}"创建成功！`, clubId: clubId }
+    // 返回结果
+    if (worldbookSuccess) {
+      return { success: true, message: `社团"${clubInfo.name}"创建成功！`, clubId: clubId }
+    } else {
+      // 世界书失败但内存保存成功
+      return { 
+        success: true, 
+        message: `社团"${clubInfo.name}"创建成功！（世界书同步将在下次保存时进行）`, 
+        clubId: clubId,
+        warning: '世界书 API 暂时不可用，数据已保存到存档'
+      }
+    }
   },
 
   /**
@@ -521,10 +605,21 @@ export const classClubActions = {
       await setPlayerClass(this.player.classId)
     }
     
-    // 同步选修课状态
+    // 【修复】同步选修课状态：不仅切换开关，还要重新生成世界书条目
+    // 回溯可能恢复了有选修课数据的快照，需要确保世界书条目与之一致
     try {
       const { syncElectiveWorldbookState } = await import('../../utils/electiveWorldbook.js')
       await syncElectiveWorldbookState(this.currentRunId)
+      
+      // 如果当前状态有选修课数据，重新生成世界书条目
+      if (this.player.selectedElectives && this.player.selectedElectives.length > 0) {
+        console.log('[GameStore] Re-generating elective worldbook entries after rollback, electives:', this.player.selectedElectives)
+        await this.processNpcElectiveSelection()
+      } else {
+        // 回溯到选课之前的状态，清除选修课条目
+        const { clearElectiveEntries } = await import('../../utils/electiveWorldbook.js')
+        await clearElectiveEntries(this.currentRunId)
+      }
     } catch (e) {
       console.warn('[GameStore] Failed to sync elective worldbook:', e)
     }
@@ -563,13 +658,22 @@ export const classClubActions = {
    */
   async rebuildWorldbookState(this: any) {
     console.log('[GameStore] Rebuilding worldbook state for run:', this.currentRunId)
+    
+    // 【调试】记录当前玩家社团状态
+    const playerClubsBefore = this.player?.joinedClubs ? [...this.player.joinedClubs] : []
+    const allClubIdsBefore = this.allClubs ? Object.keys(this.allClubs) : []
+    console.log('[GameStore] Before rebuild - joinedClubs:', playerClubsBefore, 'allClubs:', allClubIdsBefore)
 
     // 确保班级数据已加载（因为 setPlayerClass 和关系系统都依赖它）
     await this.loadClassData()
     
     // 在重新加载前，确保内存中的玩家社团数据被保留（如果需要）
-    // loadClubData 会尝试保留 playerCreatedClubs，但这依赖于 allClubs 此时有数据
+    // loadClubData 会尝试保留 existingClubs，所以不会丢失内存中的社团数据
     await this.loadClubData()
+    
+    // 【调试】检查加载后的社团状态
+    const allClubIdsAfter = this.allClubs ? Object.keys(this.allClubs) : []
+    console.log('[GameStore] After loadClubData - allClubs:', allClubIdsAfter)
     
     if (this.player.classId) {
       await setPlayerClass(this.player.classId)
@@ -596,6 +700,29 @@ export const classClubActions = {
     await syncElectiveWorldbookState(this.currentRunId)
 
     if (this.player.selectedElectives && this.player.selectedElectives.length > 0) {
+      // 【修复】检查课表中是否已有选修课插槽
+      // 如果回溯/恢复后课表被重新生成，选修课插槽可能丢失
+      // 需要重新调用 generateElectiveSchedule 填充选修课
+      let hasElectiveSlots = false
+      if (this.player.schedule) {
+        for (const [day, slots] of Object.entries(this.player.schedule)) {
+          if (Array.isArray(slots)) {
+            for (const slot of (slots as any[])) {
+              if (slot.isElective && !slot.isEmpty && slot.courseId) {
+                hasElectiveSlots = true
+                break
+              }
+            }
+          }
+          if (hasElectiveSlots) break
+        }
+      }
+      
+      if (!hasElectiveSlots) {
+        console.log('[GameStore] Elective slots missing from schedule, regenerating...')
+        await this.generateElectiveSchedule()
+      }
+      
       await this.processNpcElectiveSelection()
     } else {
       const { clearElectiveEntries } = await import('../../utils/electiveWorldbook.js')

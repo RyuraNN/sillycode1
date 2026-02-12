@@ -373,17 +373,27 @@ export async function addNpcToClubInWorldbook(clubId, npcName, clubData, runId) 
  * @returns {Promise<Object|null>} 创建的社团数据，失败返回 null
  */
 export async function createClubInWorldbook(clubInfo, runId) {
-  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
-    console.warn('[WorldbookParser] Worldbook API not available')
+  console.log(`[WorldbookParser] createClubInWorldbook called for ${clubInfo.id}, runId: ${runId}`)
+  
+  // 检查 API 可用性
+  const hasGetNames = typeof window.getCharWorldbookNames === 'function'
+  const hasUpdate = typeof window.updateWorldbookWith === 'function'
+  
+  console.log(`[WorldbookParser] API availability: getCharWorldbookNames=${hasGetNames}, updateWorldbookWith=${hasUpdate}`)
+  
+  if (!hasGetNames || !hasUpdate) {
+    console.warn('[WorldbookParser] Worldbook API not available - API functions missing')
     return null
   }
 
   try {
     const books = window.getCharWorldbookNames('current')
-    const bookName = books.primary || (books.additional && books.additional[0])
+    console.log(`[WorldbookParser] Available worldbooks:`, books)
+    
+    const bookName = books?.primary || (books?.additional && books.additional[0])
     
     if (!bookName) {
-      console.warn('[WorldbookParser] No worldbook available')
+      console.warn('[WorldbookParser] No worldbook available - no primary or additional books found')
       return null
     }
 
@@ -394,8 +404,8 @@ export async function createClubInWorldbook(clubInfo, runId) {
       name: clubInfo.name,
       advisor: clubInfo.advisor || '',
       president: clubInfo.president || '',
-      vicePresident: '',
-      members: clubInfo.president ? [clubInfo.president] : [],
+      vicePresident: clubInfo.vicePresident || '',
+      members: clubInfo.members || (clubInfo.president ? [clubInfo.president] : []),
       coreSkill: clubInfo.coreSkill || '',
       activityDay: clubInfo.activityDay || '',
       location: clubInfo.location || '',
@@ -403,38 +413,62 @@ export async function createClubInWorldbook(clubInfo, runId) {
       _bookName: bookName
     }
 
+    let updateSuccess = false
+    
     await window.updateWorldbookWith(bookName, (entries) => {
       const newEntries = [...entries]
       
       const entryName = `[Club:${clubInfo.id}:${runId}] ${clubInfo.name}`
       
-      const newEntry = {
-        name: entryName,
-        content: formatClubData(club),
-        key: [clubInfo.name, clubInfo.president].filter(k => k),
-        strategy: {
-          type: 'constant'
-        },
-        position: {
-          type: 'before_character_definition',
-          order: 50
-        },
-        probability: 100,
-        enabled: true,
-        recursion: {
-          prevent_outgoing: true
+      // 检查是否已存在同名条目
+      const existingIndex = newEntries.findIndex(e => e.name && e.name.includes(`[Club:${clubInfo.id}`))
+      if (existingIndex !== -1) {
+        console.log(`[WorldbookParser] Club entry already exists, updating: ${newEntries[existingIndex].name}`)
+        newEntries[existingIndex] = {
+          ...newEntries[existingIndex],
+          name: entryName,
+          content: formatClubData(club),
+          key: [clubInfo.name, clubInfo.president].filter(k => k),
+          enabled: true
         }
+      } else {
+        const newEntry = {
+          name: entryName,
+          content: formatClubData(club),
+          key: [clubInfo.name, clubInfo.president].filter(k => k),
+          strategy: {
+            type: 'constant'
+          },
+          position: {
+            type: 'before_character_definition',
+            order: 50
+          },
+          probability: 100,
+          enabled: true,
+          recursion: {
+            prevent_outgoing: true
+          }
+        }
+        
+        newEntries.push(newEntry)
+        console.log(`[WorldbookParser] New club entry created: ${entryName}`)
       }
       
-      newEntries.push(newEntry)
+      updateSuccess = true
       return newEntries
     })
 
-    console.log(`[WorldbookParser] Club ${clubInfo.id} created successfully`)
-    return club
+    if (updateSuccess) {
+      console.log(`[WorldbookParser] Club ${clubInfo.id} created successfully in worldbook`)
+      return club
+    } else {
+      console.warn(`[WorldbookParser] updateWorldbookWith completed but updateSuccess is false`)
+      return null
+    }
 
   } catch (e) {
     console.error('[WorldbookParser] Error creating club:', e)
+    console.error('[WorldbookParser] Error stack:', e.stack)
     return null
   }
 }
@@ -571,13 +605,29 @@ export async function ensureClubExistsInWorldbook(clubData, runId) {
     
     if (!bookName) return false
 
+    // 【修复】无论是否创建新条目，都要确保 _bookName 被设置
+    // 这解决了存档导入后 _bookName 丢失导致无法加入自己创建的社团的问题
+    clubData._bookName = bookName
+
     console.log(`[WorldbookParser] Ensuring club ${clubData.id} exists in worldbook for run ${runId}`)
 
     await window.updateWorldbookWith(bookName, (entries) => {
       const newEntries = [...entries]
       
-      // 检查是否存在
-      const exists = newEntries.some(e => e.name && e.name.includes(`[Club:${clubData.id}`))
+      // 【修复】区分 runId 检查存在性
+      // 如果指定了 runId，需要检查特定 runId 的条目是否存在
+      // 如果未指定 runId，检查通用条目（不带 runId 的）
+      let exists
+      if (runId) {
+        // 检查特定 runId 的条目是否存在
+        exists = newEntries.some(e => e.name && e.name.includes(`[Club:${clubData.id}:${runId}]`))
+      } else {
+        // 检查通用条目（不带 runId 的）
+        exists = newEntries.some(e => 
+          e.name && e.name.includes(`[Club:${clubData.id}]`) && 
+          !e.name.match(/\[Club:[^\]]+:[^\]]+\]/)
+        )
+      }
       
       if (!exists) {
         console.log(`[WorldbookParser] Recreating missing club entry for ${clubData.name}`)
@@ -780,7 +830,7 @@ export function parseClassData(text) {
 
     // 1. 识别班级头： "1年A班:{" 或 "**1年A班(测试)**"
     // 提取 "1", "A" 和 后缀
-    const classMatch = line.match(/([0-3])年([A-Z])班(.*?)(?=:|{|$)/)
+    const classMatch = line.match(/(\d+)年([A-Za-z0-9]+)班(.*?)(?=:|{|$)/)
     if (classMatch) {
       const grade = classMatch[1]
       const classChar = classMatch[2]
@@ -800,7 +850,16 @@ export function parseClassData(text) {
 
     if (!currentClass) continue
 
-    // 2. 识别班主任
+    // 2. 识别教室ID
+    if (line.startsWith('教室:') || line.startsWith('教室ID:')) {
+      const classroomValue = line.replace(/^教室(?:ID)?:\s*/, '').trim()
+      if (classroomValue && currentClass) {
+        currentClass.classroomId = classroomValue
+      }
+      continue
+    }
+
+    // 2b. 识别班主任
     if (line.startsWith('班主任:')) {
       const infoText = line.substring(4).trim()
       const person = parsePersonInfo(infoText, 'teacher')
@@ -887,7 +946,7 @@ export async function fetchClassDataFromWorldbook() {
       for (const entry of entries) {
         // 检查标题格式： [Class:1-A] ...
         // 忽略 keys，只看标题
-        const match = entry.name && entry.name.match(/\[Class:([0-3]-[A-Z])\]/)
+        const match = entry.name && entry.name.match(/\[Class:([\w.-]+)\]/)
         
         if (match) {
           console.log('[WorldbookParser] Found class data in entry:', entry.name)
@@ -931,7 +990,7 @@ export async function setPlayerClass(classId) {
     await window.updateWorldbookWith(bookName, (entries) => {
       return entries.map(entry => {
         // 识别标题格式： [Class:1-A] ...
-        const match = entry.name.match(/\[Class:([0-3]-[A-Z])\]/)
+        const match = entry.name.match(/\[Class:([\w.-]+)\]/)
         if (match) {
           const entryClassId = match[1]
           if (entryClassId === classId) {
@@ -987,6 +1046,11 @@ function formatPerson(p) {
 function formatClassData(data) {
   let text = `${data.name}:{\n`
   
+  // 教室ID
+  if (data.classroomId) {
+    text += `  教室: ${data.classroomId}\n`
+  }
+  
   // 班主任
   if (data.headTeacher && data.headTeacher.name) {
     text += `  班主任: ${formatPerson(data.headTeacher)}\n`
@@ -1019,6 +1083,45 @@ function formatClassData(data) {
 }
 
 /**
+ * 删除世界书中的班级条目
+ * @param {string} classId 班级ID
+ * @returns {Promise<boolean>} 是否成功
+ */
+export async function deleteClassDataFromWorldbook(classId) {
+  if (typeof window.updateWorldbookWith !== 'function') {
+    console.warn('[WorldbookParser] updateWorldbookWith API not available')
+    return false
+  }
+
+  try {
+    const books = window.getCharWorldbookNames('current')
+    const bookName = books.primary || (books.additional && books.additional[0])
+    
+    if (!bookName) return false
+
+    console.log(`[WorldbookParser] Deleting class ${classId} from worldbook: ${bookName}`)
+
+    await window.updateWorldbookWith(bookName, (entries) => {
+      // 过滤掉匹配 [Class:classId] 的条目
+      return entries.filter(entry => {
+        const match = entry.name && entry.name.match(/\[Class:([\w.-]+)\]/)
+        if (match && match[1] === classId) {
+          console.log(`[WorldbookParser] Removing entry: ${entry.name}`)
+          return false // 移除该条目
+        }
+        return true // 保留其他条目
+      })
+    })
+    
+    return true
+
+  } catch (e) {
+    console.error('[WorldbookParser] Error deleting class data:', e)
+    return false
+  }
+}
+
+/**
  * 更新世界书中的班级数据
  * @param {string} classId 班级ID
  * @param {Object} classData 班级数据对象
@@ -1042,16 +1145,20 @@ export async function updateClassDataInWorldbook(classId, classData) {
       const newEntries = [...entries]
       // 查找现有条目
       const index = newEntries.findIndex(entry => {
-        const match = entry.name && entry.name.match(/\[Class:([0-3]-[A-Z])\]/)
+        const match = entry.name && entry.name.match(/\[Class:([\w.-]+)\]/)
         return match && match[1] === classId
       })
 
       if (index !== -1) {
-        // 更新现有条目
-        console.log(`[WorldbookParser] Updating content for entry ${newEntries[index].name}`)
+        // 更新现有条目 - 同时更新 key 确保角色名可触发
+        console.log(`[WorldbookParser] Updating content and keys for entry ${newEntries[index].name}`)
+        const names = extractNamesFromClassData(classData)
+        if (!names.includes(classId)) names.push(classId)
+        if (classData.name && !names.includes(classData.name)) names.push(classData.name)
         newEntries[index] = {
           ...newEntries[index],
-          content: formatClassData(classData)
+          content: formatClassData(classData),
+          key: names
         }
       } else {
         // 创建新条目
@@ -1337,7 +1444,7 @@ export async function injectSmartKeysToWorldbook() {
           let shouldUpdate = false
           
           // 1. 处理班级条目
-          const classMatch = entry.name && entry.name.match(/\[Class:([0-3]-[A-Z])\]/)
+          const classMatch = entry.name && entry.name.match(/\[Class:([\w.-]+)\]/)
           if (classMatch) {
             const classId = classMatch[1]
             const parsedData = parseClassData(entry.content)
@@ -1702,7 +1809,7 @@ export async function restoreFromBackupWorldbook() {
     
     for (const entry of entries) {
       // 匹配班级
-      const match = entry.name && entry.name.match(/\[BackupClass:([0-3]-[A-Z])\]/)
+      const match = entry.name && entry.name.match(/\[BackupClass:([\w.-]+)\]/)
       if (match) {
         const classId = match[1]
         const parsedData = parseClassData(entry.content)

@@ -1,5 +1,12 @@
 import { getSocialData, saveSocialData, saveMomentToWorldbook } from './socialWorldbook'
 import { useGameStore } from '../stores/gameStore'
+
+// 获取游戏内时间字符串 (HH:mm)
+function getGameTimeString() {
+  const gameStore = useGameStore()
+  const { hour, minute } = gameStore.gameTime
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+}
 import { saveForumToWorldbook, generatePostId } from './forumWorldbook'
 import { updateRelationshipDelta, addRelationshipEvent, getRelationship, setRelationship } from './relationshipManager'
 import { getItemType } from './deliveryWorldbook'
@@ -164,7 +171,7 @@ async function processMessage(match, type, gameStore) {
       }
   }
 
-  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const time = getGameTimeString()
   console.log(`[MessageParser] Received ${type} message in ${name} (${id}) from ${sender || 'unknown'}: ${content}`)
 
   // 获取现有数据
@@ -230,6 +237,10 @@ async function processMessage(match, type, gameStore) {
     gameStore.player.holdMessages = gameStore.player.holdMessages.filter(m => 
       !(m.metadata && m.metadata.chatId === id)
     )
+  }
+  // 清除已读/未读标识（AI 已实际回复消息，不再需要显示状态）
+  if (gameStore.player.socialReadStatus && gameStore.player.socialReadStatus[id]) {
+    delete gameStore.player.socialReadStatus[id]
   }
 }
 
@@ -359,6 +370,9 @@ export async function parseSocialTags(rawText) {
           !(m.metadata && m.metadata.chatId === id)
         )
       }
+      // 标记为已读（已读不回）
+      if (!gameStore.player.socialReadStatus) gameStore.player.socialReadStatus = {}
+      gameStore.player.socialReadStatus[id] = 'pass'
     } else if (status === 'hold') {
       const data = await getSocialData(id)
       if (data && data.messages.length > 0) {
@@ -373,6 +387,9 @@ export async function parseSocialTags(rawText) {
               metadata: { chatId: id, msgId: lastPlayerMsg.id, content: lastPlayerMsg.content }
             })
           }
+          // 标记为未读
+          if (!gameStore.player.socialReadStatus) gameStore.player.socialReadStatus = {}
+          gameStore.player.socialReadStatus[id] = 'hold'
         }
       }
     }
@@ -490,7 +507,7 @@ export async function parseSocialTags(rawText) {
     const avatar = friend ? friend.avatar : '👤'
     const timestamp = Date.now()
     const momentId = timestamp.toString()
-    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    const time = getGameTimeString()
 
     const moment = {
       id: momentId,
@@ -549,7 +566,7 @@ export async function parseSocialTags(rawText) {
       const moment = gameStore.getMoment(momentId)
       if (moment) {
         const commentId = Date.now().toString()
-        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        const time = getGameTimeString()
         gameStore.addMomentComment(momentId, {
           id: commentId,
           userId: charId,
@@ -621,7 +638,7 @@ export async function parseSocialTags(rawText) {
            type: 'friend_rejected',
            name: name,
            reason: reason,
-           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+           time: getGameTimeString()
        })
     }
   }

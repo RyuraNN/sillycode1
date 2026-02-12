@@ -13,12 +13,12 @@ const locationName = computed(() => {
 
 const formattedTime = computed(() => {
   const time = gameStore.gameTime || {}
-  const year = time.year || 2024
-  const month = time.month || 4
-  const day = time.day || 1
+  const year = time.year ?? 2024
+  const month = time.month ?? 4
+  const day = time.day ?? 1
   const weekday = time.weekday || '星期一'
-  const hour = time.hour || 8
-  const minute = time.minute || 0
+  const hour = time.hour ?? 8
+  const minute = time.minute ?? 0
 
   const minuteStr = minute.toString().padStart(2, '0')
   const hourStr = hour.toString().padStart(2, '0')

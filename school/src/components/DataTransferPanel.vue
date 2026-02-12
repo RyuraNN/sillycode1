@@ -270,21 +270,22 @@ const handleImport = async () => {
     // 导入班级名册
     if (importSelection.value.roster && data.roster) {
       // 更新 gameStore
-      for (const [classId, classInfo] of Object.entries(data.roster)) {
-        gameStore.allClassData[classId] = JSON.parse(JSON.stringify(classInfo))
+      const rosterClone = deepClone(data.roster)
+      for (const [classId, classInfo] of Object.entries(rosterClone)) {
+        gameStore.allClassData[classId] = classInfo
         // 如果开启同步，更新世界书
         if (syncToWorldbook.value) {
           await updateClassDataInWorldbook(classId, classInfo)
         }
       }
       // 同步到 IndexedDB
-      await saveRosterBackup(data.roster)
+      await saveRosterBackup(rosterClone)
       results.push('班级名册')
     }
 
     // 导入角色池
     if (importSelection.value.characterPool && data.characterPool) {
-      await saveFullCharacterPool(data.characterPool)
+      await saveFullCharacterPool(deepClone(data.characterPool))
       results.push('角色池')
     }
 

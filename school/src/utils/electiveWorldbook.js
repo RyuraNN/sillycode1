@@ -12,17 +12,31 @@ import { getWeekdayChinese } from './scheduleGenerator'
 const ENTRY_PREFIX = '选修课_'
 
 /**
+ * 检测世界书 API 是否可用
+ * @returns {boolean}
+ */
+function isWorldbookApiReady() {
+  return typeof window.getCharWorldbookNames === 'function' &&
+         typeof window.createWorldbookEntries === 'function' &&
+         typeof window.deleteWorldbookEntries === 'function'
+}
+
+/**
  * 获取目标世界书名称
  * @returns {string|null}
  */
 function getTargetWorldbookName() {
   if (typeof window.getCharWorldbookNames !== 'function') return null
   
-  const books = window.getCharWorldbookNames('current')
-  if (books && typeof books === 'object') {
-    return books.primary || (Array.isArray(books.additional) ? books.additional[0] : null)
-  } else if (Array.isArray(books) && books.length > 0) {
-    return books[0]
+  try {
+    const books = window.getCharWorldbookNames('current')
+    if (books && typeof books === 'object') {
+      return books.primary || (Array.isArray(books.additional) ? books.additional[0] : null)
+    } else if (Array.isArray(books) && books.length > 0) {
+      return books[0]
+    }
+  } catch (e) {
+    console.warn('[ElectiveWorldbook] Error getting worldbook names:', e)
   }
   return null
 }
@@ -35,16 +49,19 @@ function getTargetWorldbookName() {
  * @param {Object} playerSchedule 玩家课表 (用于精确匹配时间段)
  */
 export async function updateElectiveWorldbookEntries(runId, playerElectives, npcSelections, playerSchedule) {
-  if (typeof window.createWorldbookEntries !== 'function' || typeof window.deleteWorldbookEntries !== 'function') {
-    console.warn('[ElectiveWorldbook] Worldbook API not available')
+  // 检查世界书 API 是否可用
+  if (!isWorldbookApiReady()) {
+    console.warn('[ElectiveWorldbook] Worldbook API not available, skipping update')
     return
   }
 
   const targetBook = getTargetWorldbookName()
   if (!targetBook) {
-    console.warn('[ElectiveWorldbook] No target worldbook found')
+    console.warn('[ElectiveWorldbook] No target worldbook found, skipping update')
     return
   }
+  
+  try {
 
   console.log('[ElectiveWorldbook] Updating entries for run:', runId, 'in book:', targetBook)
   
@@ -135,9 +152,12 @@ export async function updateElectiveWorldbookEntries(runId, playerElectives, npc
     }
   }
   
-  if (newEntries.length > 0) {
-    await window.createWorldbookEntries(targetBook, newEntries)
-    console.log(`[ElectiveWorldbook] Created ${newEntries.length} entries`)
+    if (newEntries.length > 0) {
+      await window.createWorldbookEntries(targetBook, newEntries)
+      console.log(`[ElectiveWorldbook] Created ${newEntries.length} entries`)
+    }
+  } catch (e) {
+    console.error('[ElectiveWorldbook] Error updating entries:', e)
   }
 }
 
@@ -146,15 +166,22 @@ export async function updateElectiveWorldbookEntries(runId, playerElectives, npc
  * @param {string} runId 当前存档运行ID
  */
 export async function clearElectiveEntries(runId) {
-  if (typeof window.deleteWorldbookEntries !== 'function') return
+  if (!isWorldbookApiReady()) {
+    console.warn('[ElectiveWorldbook] Worldbook API not available, skipping clear')
+    return
+  }
 
   const targetBook = getTargetWorldbookName()
   if (!targetBook) return
 
-  await window.deleteWorldbookEntries(targetBook, entry => 
-    entry.name.startsWith(`${ENTRY_PREFIX}`) && entry.name.includes(`_${runId}`)
-  )
-console.log('[ElectiveWorldbook] Cleared all elective entries')
+  try {
+    await window.deleteWorldbookEntries(targetBook, entry => 
+      entry.name.startsWith(`${ENTRY_PREFIX}`) && entry.name.includes(`_${runId}`)
+    )
+    console.log('[ElectiveWorldbook] Cleared all elective entries')
+  } catch (e) {
+    console.error('[ElectiveWorldbook] Error clearing entries:', e)
+  }
 }
 
 /**
@@ -162,30 +189,41 @@ console.log('[ElectiveWorldbook] Cleared all elective entries')
  * @param {string} currentRunId 当前存档ID
  */
 export async function syncElectiveWorldbookState(currentRunId) {
-  if (typeof window.updateWorldbookWith !== 'function') return
+  // 检查 API 是否可用
+  if (typeof window.updateWorldbookWith !== 'function') {
+    console.warn('[ElectiveWorldbook] updateWorldbookWith not available, skipping sync')
+    return
+  }
 
   const targetBook = getTargetWorldbookName()
-  if (!targetBook) return
+  if (!targetBook) {
+    console.warn('[ElectiveWorldbook] No target worldbook, skipping sync')
+    return
+  }
 
   console.log(`[ElectiveWorldbook] Syncing state for run ${currentRunId}`)
 
-  await window.updateWorldbookWith(targetBook, (entries) => {
-    return entries.map(entry => {
-      // 检查是否是选修课条目
-      if (entry.name && entry.name.startsWith(ENTRY_PREFIX)) {
-        // 检查 RunID 后缀
-        // 格式: ..._runId
-        const parts = entry.name.split('_')
-        const entryRunId = parts[parts.length - 1]
-        
-        if (entryRunId === currentRunId) {
-          return { ...entry, enabled: true }
-        } else {
-          // 其他存档的条目，禁用
-          return { ...entry, enabled: false }
+  try {
+    await window.updateWorldbookWith(targetBook, (entries) => {
+      return entries.map(entry => {
+        // 检查是否是选修课条目
+        if (entry.name && entry.name.startsWith(ENTRY_PREFIX)) {
+          // 检查 RunID 后缀
+          // 格式: ..._runId
+          const parts = entry.name.split('_')
+          const entryRunId = parts[parts.length - 1]
+          
+          if (entryRunId === currentRunId) {
+            return { ...entry, enabled: true }
+          } else {
+            // 其他存档的条目，禁用
+            return { ...entry, enabled: false }
+          }
         }
-      }
-      return entry
+        return entry
+      })
     })
-  })
+  } catch (e) {
+    console.error('[ElectiveWorldbook] Error syncing state:', e)
+  }
 }

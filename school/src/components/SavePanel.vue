@@ -141,9 +141,9 @@ const restoreToChatIndex = async (index) => {
   // 2. 获取目标聊天记录
   const targetLog = snapshot.chatLog[index]
   
-  // 3. 如果目标记录有快照，恢复该快照的状态
+  // 3. 如果目标记录有快照，恢复该快照的状态（支持增量快照）
   if (targetLog && targetLog.snapshot) {
-    gameStore.restoreGameState(targetLog.snapshot)
+    gameStore.restoreFromMessageSnapshot(targetLog.snapshot, snapshot.chatLog)
   } else {
     // 如果没有快照（旧存档），保持 restoreSnapshot 恢复的最终状态
     // 可以选择提示用户
@@ -159,6 +159,10 @@ const restoreToChatIndex = async (index) => {
     ...snapshot,
     chatLog: snapshot.chatLog.slice(0, index + 1)
   }
+
+  // 5. 更新 currentFloor 为截断后的长度，并持久化
+  gameStore.currentFloor = index + 1
+  gameStore.saveToStorage(true)
 
   emit('restore', restoredSnapshot)
   

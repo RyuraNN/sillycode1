@@ -290,6 +290,7 @@
       </div>
 
       <!-- 社团详情弹窗 -->
+      <Teleport to="body">
       <div v-if="selectedClub" class="club-modal-overlay" @click.self="selectedClub = null">
         <div class="club-modal">
           <div class="modal-header-bg"></div>
@@ -415,8 +416,10 @@
           </div>
         </div>
       </div>
+      </Teleport>
 
       <!-- 创建社团弹窗 -->
+      <Teleport to="body">
       <div v-if="showCreateClubModal" class="club-modal-overlay" @click.self="showCreateClubModal = false">
         <div class="club-modal create-modal">
           <div class="modal-header-bg create-bg"></div>
@@ -522,8 +525,10 @@
           </div>
         </div>
       </div>
+      </Teleport>
 
       <!-- 邀请成员弹窗 -->
+      <Teleport to="body">
       <div v-if="showInviteModal" class="club-modal-overlay" @click.self="showInviteModal = false">
         <div class="club-modal invite-modal">
           <div class="modal-header-bg invite-bg"></div>
@@ -570,8 +575,10 @@
           </div>
         </div>
       </div>
+      </Teleport>
 
       <!-- 拒绝通知弹窗 -->
+      <Teleport to="body">
       <div v-if="gameStore.clubRejection" class="club-modal-overlay" @click.self="gameStore.confirmClubRejection()">
         <div class="rejection-modal">
           <div class="rejection-icon">❌</div>
@@ -588,6 +595,7 @@
           </button>
         </div>
       </div>
+      </Teleport>
 
       <!-- 操作提示 -->
       <transition name="toast">
@@ -1919,17 +1927,17 @@ onMounted(async () => {
 
 /* ==================== 社团弹窗样式 ==================== */
 .club-modal-overlay {
-  position: absolute;
+  position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(8px);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: 99999;
   padding: 20px;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -1955,22 +1963,15 @@ onMounted(async () => {
 }
 
 .modal-header-bg {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 120px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  pointer-events: none;
-  border-radius: 20px 20px 0 0;
+  display: none;
 }
 
 .modal-header-bg.create-bg {
-  background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+  display: none;
 }
 
 .modal-header-bg.invite-bg {
-  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  display: none;
 }
 
 .modal-header {
@@ -1981,6 +1982,16 @@ onMounted(async () => {
   padding: 20px;
   z-index: 1;
   flex-shrink: 0;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 20px 20px 0 0;
+}
+
+.create-modal .modal-header {
+  background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+}
+
+.invite-modal .modal-header {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
 }
 
 .modal-club-avatar {

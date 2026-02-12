@@ -55,6 +55,8 @@ export const electiveActions = {
 
   /**
    * 生成选修课课表
+   * 【修复】使用 seeded random 确保相同存档+选课组合始终生成相同课表
+   * 这样回溯/重载后课表不会变化
    */
   generateElectiveSchedule(this: any) {
     if (!this.player.schedule) return
@@ -65,6 +67,16 @@ export const electiveActions = {
       .filter((c: any) => c !== null)
 
     if (courseDetails.length === 0) return
+
+    // 使用确定性种子：runId + 选课ID排序后的组合
+    const sortedElectives = [...this.player.selectedElectives].sort().join('_')
+    const seedStr = `${this.currentRunId}_elective_schedule_${sortedElectives}`
+    let hash = 0
+    for (let i = 0; i < seedStr.length; i++) {
+      hash = ((hash << 5) - hash) + seedStr.charCodeAt(i)
+      hash |= 0
+    }
+    const rng = seededRandom(Math.abs(hash))
 
     const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
     const slotsToFill: { day: string, index: number }[] = []
@@ -79,7 +91,8 @@ export const electiveActions = {
       }
     })
 
-    const shuffledSlots = slotsToFill.sort(() => Math.random() - 0.5)
+    // 使用 seeded random 洗牌
+    const shuffledSlots = slotsToFill.sort(() => rng() - 0.5)
     
     const assignments: any[] = []
     
@@ -88,9 +101,9 @@ export const electiveActions = {
       assignments.push(course)
     })
     
-    // 2. 每门课随机增加第2次 (65%概率)
+    // 2. 每门课随机增加第2次 (65%概率)，使用确定性随机
     courseDetails.forEach((course: any) => {
-      if (assignments.length < shuffledSlots.length && Math.random() < 0.65) {
+      if (assignments.length < shuffledSlots.length && rng() < 0.65) {
         assignments.push(course)
       }
     })
@@ -105,7 +118,7 @@ export const electiveActions = {
       this._clearElectiveSlot(shuffledSlots[i])
     }
     
-    console.log('[GameStore] Elective schedule generated')
+    console.log('[GameStore] Elective schedule generated (deterministic)')
     this.saveToStorage()
   },
 

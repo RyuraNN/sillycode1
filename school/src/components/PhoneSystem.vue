@@ -13,8 +13,9 @@ import WeatherApp from './WeatherApp.vue'
 import DeliveryApp from './DeliveryApp.vue'
 import PartTimeJobApp from './PartTimeJobApp.vue'
 import RosterApp from './RosterApp.vue'
+import OriginApp from './OriginApp.vue'
 
-const emit = defineEmits(['close', 'open-app'])
+const emit = defineEmits(['close', 'open-app', 'variable-modified'])
 const gameStore = useGameStore()
 
 const currentApp = ref(null)
@@ -132,6 +133,7 @@ const apps = [
   { id: 'delivery', name: '外卖', icon: '🛵', color: 'linear-gradient(135deg, #ff6b35 0%, #f7931e 100%)' },
   { id: 'parttime', name: '兼职', icon: '💼', color: 'linear-gradient(135deg, #ff9500 0%, #ff7f00 100%)' },
   { id: 'roster', name: '天华名录', icon: '📇', color: 'linear-gradient(135deg, #1976D2 0%, #2196F3 100%)' },
+  { id: 'origin', name: '本源', icon: '🔮', color: 'linear-gradient(135deg, #6B46C1 0%, #9F7AEA 100%)' },
   { id: 'schedule', name: '天华通', icon: '🏫', color: 'linear-gradient(135deg, #1e3c72 0%, #2a5298 100%)' },
   { id: 'map', name: '地图', icon: '🗺️', color: 'linear-gradient(135deg, #34c759 0%, #30b94d 100%)' },
   { id: 'save', name: '存档', icon: '💾', color: 'linear-gradient(135deg, #5ac8fa 0%, #32ade6 100%)' },
@@ -171,6 +173,8 @@ const handleAppClick = (appId) => {
     currentApp.value = 'parttime'
   } else if (appId === 'roster') {
     currentApp.value = 'roster'
+  } else if (appId === 'origin') {
+    currentApp.value = 'origin'
   } else if (appId === 'schedule') {
     currentApp.value = 'schedule'
   } else if (appId === 'settings') {
@@ -318,6 +322,9 @@ const handleHomeClick = () => {
                 </div>
                 <div v-else-if="currentApp === 'roster'" class="app-container roster-app-container">
                   <RosterApp @close="currentApp = null" />
+                </div>
+                <div v-else-if="currentApp === 'origin'" class="app-container origin-app-container">
+                  <OriginApp @close="currentApp = null" @variable-modified="(changes) => $emit('variable-modified', changes)" />
                 </div>
                 <div v-else-if="currentApp === 'settings'" class="app-container settings-app">
                   <!-- 设置页面 -->
@@ -652,7 +659,7 @@ const handleHomeClick = () => {
                       <div class="credits-body">
                         <p>原作者：墨沈</p>
                         <p>重置：Elyrene</p>
-                        <p>版本号 V1.1</p>
+                        <p>版本号 V1.5</p>
                         <p>免费发布于DC类脑社区</p>
                       </div>
                     </div>

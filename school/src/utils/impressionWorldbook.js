@@ -109,9 +109,25 @@ async function performSaveImpressionData(runId) {
   const gameStore = useGameStore()
   const playerName = gameStore.player.name
   
-  // 1. 筛选出与玩家有关系的角色
+  // 0. 构建当前激活角色名单（来自 allClassData），用于过滤被屏蔽的角色
+  const activeCharacterNames = new Set()
+  if (gameStore.allClassData) {
+    for (const classData of Object.values(gameStore.allClassData)) {
+      if (classData.headTeacher?.name) activeCharacterNames.add(classData.headTeacher.name)
+      const teachers = Array.isArray(classData.teachers) ? classData.teachers : []
+      teachers.forEach(t => { if (t.name) activeCharacterNames.add(t.name) })
+      const students = Array.isArray(classData.students) ? classData.students : []
+      students.forEach(s => { if (s.name) activeCharacterNames.add(s.name) })
+    }
+  }
+  
+  // 1. 筛选出与玩家有关系的角色（仅包含当前激活的角色）
   const relevantChars = []
   for (const charName of Object.keys(gameStore.npcRelationships)) {
+    // 跳过不在激活名单中的角色（被筛选面板排除的角色）
+    if (activeCharacterNames.size > 0 && !activeCharacterNames.has(charName) && charName !== playerName) {
+      continue
+    }
     const relation = getValidPlayerRelation(gameStore.npcRelationships, charName, playerName)
     if (relation) {
       relevantChars.push({ name: charName, relation })
@@ -181,6 +197,19 @@ export async function saveImpressionData(runId = null) {
       saveTimer = null
     }, SAVE_DELAY)
   })
+}
+
+/**
+ * 立即保存印象列表世界书条目（不带防抖，用于关键操作后确保数据持久化）
+ * @param {string} runId 当前运行ID
+ */
+export async function saveImpressionDataImmediate(runId = null) {
+  // 取消任何待执行的防抖保存
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+  return await performSaveImpressionData(runId)
 }
 
 /**

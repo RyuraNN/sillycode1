@@ -18,7 +18,7 @@ import { setMapData } from '../data/mapData'
 import { processPostReply, buildSummarizedHistory, extractSummary, removeThinking } from '../utils/summaryManager'
 
 // 工具函数
-import { parseGameData, applyGameData, mergeGameData, deepMerge } from '../utils/gameDataParser'
+import { parseGameData, applyGameData, mergeGameData, deepMerge, generateDetailedChanges } from '../utils/gameDataParser'
 import { cleanSystemTags, parseInsertImageTags, insertImagesAtAnchors } from '../utils/contentCleaner'
 import { formatDebugContent, parseDebugData, parseDebugTag } from '../utils/debugFormatter'
 
@@ -48,6 +48,7 @@ import WarningModal from './game/WarningModal.vue'
 import MessageEditModal from './game/MessageEditModal.vue'
 import ImageInteractionPanel from './game/ImageInteractionPanel.vue'
 import DebugAssistantPanel from './game/DebugAssistantPanel.vue'
+import VariableChangesPanel from './game/VariableChangesPanel.vue'
 
 // 样式
 import '../styles/game-main.css'
@@ -96,6 +97,9 @@ const assistantLogs = ref([])
 const showVariableViewer = ref(false)
 const selectedVariableData = ref(null)
 
+// 变量变化追踪
+const lastRoundChanges = ref([])
+
 // 手动总结
 const showSummaryInput = ref(false)
 const pendingSummaryData = ref(null)
@@ -106,6 +110,11 @@ const editingMessageContent = ref('')
 const editingMessageIndex = ref(-1)
 let longPressTimer = null
 
+// 消息上下文菜单
+const showContextMenu = ref(false)
+const contextMenuPosition = ref({ x: 0, y: 0 })
+const contextMenuIndex = ref(-1)
+
 // 分页加载
 const visibleCount = ref(50)
 const displayLog = computed(() => {
@@ -113,6 +122,11 @@ const displayLog = computed(() => {
   if (total <= visibleCount.value) return gameLog.value
   return gameLog.value.slice(total - visibleCount.value)
 })
+
+// 消息内容渲染缓存 - 避免重复计算正则替换
+const contentRenderCache = new Map()
+// 滚动事件防抖计时器
+let scrollDebounceTimer = null
 
 // 生成ID和图片缓存
 const currentGenerationId = ref(0)
@@ -182,8 +196,35 @@ const loadMoreMessages = () => {
   })
 }
 
-// 获取显示内容（带图片渲染）
+// 获取显示内容（带图片渲染和缓存）
 const getDisplayContentWithIndex = (log, index) => {
+  // 流式消息和带占位符的消息不缓存
+  if (log.isStreaming || log.isPlaceholder) {
+    return processMessageContent(log, index)
+  }
+  
+  // 生成缓存键（使用内容哈希 + 索引 + 图片缓存大小）
+  const contentKey = (log.content || '').substring(0, 100)
+  const cacheKey = `${index}_${contentKey}_${imageCacheMap.size}`
+  
+  if (contentRenderCache.has(cacheKey)) {
+    return contentRenderCache.get(cacheKey)
+  }
+  
+  const result = processMessageContent(log, index)
+  
+  // 限制缓存大小，最多保留 100 条
+  if (contentRenderCache.size > 100) {
+    const firstKey = contentRenderCache.keys().next().value
+    contentRenderCache.delete(firstKey)
+  }
+  
+  contentRenderCache.set(cacheKey, result)
+  return result
+}
+
+// 实际处理消息内容
+const processMessageContent = (log, index) => {
   let content = log.content
   
   if (gameStore.settings.debugMode) {
@@ -386,6 +427,7 @@ const handleImageRestore = (historyId) => {
 const sendMessage = async () => {
   gameStore.cleanupSnapshots(gameLog.value)
   suggestedReplies.value = [] // 清空建议回复，等待下一轮生成
+  lastRoundChanges.value = [] // 清空上一轮的变量变化
 
   let messageContent = inputText.value.trim()
   let isRetry = false
@@ -409,7 +451,11 @@ const sendMessage = async () => {
   }
 
   if (!isRetry) {
-    const playerSnapshot = gameStore.getGameState()
+    // 使用新的快照创建方法（支持增量模式）
+    const previousLog = gameLog.value[gameLog.value.length - 1]
+    const previousSnapshot = previousLog?.snapshot
+    const playerSnapshot = gameStore.createMessageSnapshot(previousSnapshot, gameLog.value.length + 1, gameLog.value)
+    
     gameLog.value.push({ 
       type: 'player', 
       content: messageContent,
@@ -859,6 +905,10 @@ const processAIResponse = async (response) => {
   allChanges.push(...changes)
   showDanmaku(allChanges)
 
+  // 生成详细的变量变化列表
+  const currentState = gameStore.getGameState()
+  lastRoundChanges.value = generateDetailedChanges(preVariableSnapshot, currentState)
+
   let contentToShow = ''
   let matched = false
 
@@ -1107,12 +1157,74 @@ const handleReroll = async () => {
     snapshot = lastMsg.snapshot
   }
   
+  if (playerMsg && !snapshot) {
+    showDanmaku(['⚠️ 该消息的快照已被清理，无法回溯状态。将使用当前状态重新生成。'])
+    inputText.value = ''
+    await sendMessage()
+    return
+  }
+  
   if (playerMsg && snapshot) {
-    gameStore.restoreGameState(snapshot)
+    // 使用支持增量快照的方法
+    gameStore.restoreFromMessageSnapshot(snapshot, gameLog.value)
     await gameStore.syncWorldbook()
     inputText.value = ''
     await sendMessage()
   }
+}
+
+// 回溯到任意楼层
+const handleRollbackToFloor = async (targetIndex) => {
+  if (isGenerating.value || isAssistantProcessing.value) return
+  
+  const log = gameLog.value
+  if (targetIndex < 0 || targetIndex >= log.length) return
+  
+  const targetLog = log[targetIndex]
+  
+  // 查找该消息或之前最近的有快照的消息
+  let snapshotLog = null
+  let snapshotIndex = -1
+  
+  for (let i = targetIndex; i >= 0; i--) {
+    if (log[i].snapshot) {
+      snapshotLog = log[i]
+      snapshotIndex = i
+      break
+    }
+  }
+  
+  if (!snapshotLog || !snapshotLog.snapshot) {
+    showDanmaku(['⚠️ 该位置附近没有可用的快照，无法回溯'])
+    return
+  }
+  
+  // 确认回溯
+  const floorCount = log.length - targetIndex - 1
+  if (floorCount > 0 && !confirm(`确认回溯到第 ${targetIndex + 1} 层？将删除后续 ${floorCount} 条消息。`)) {
+    return
+  }
+  
+  // 恢复状态
+  gameStore.restoreFromMessageSnapshot(snapshotLog.snapshot, gameLog.value)
+  
+  // 截断日志到目标位置
+  gameLog.value.splice(targetIndex + 1)
+  gameStore.currentFloor = gameLog.value.length
+  
+  // 清理状态
+  suggestedReplies.value = []
+  lastRoundChanges.value = []
+  contentRenderCache.clear()
+  
+  await gameStore.syncWorldbook()
+  
+  showDanmaku([`✅ 已回溯到第 ${targetIndex + 1} 层`])
+  
+  // 自动保存
+  gameStore.createAutoSave(gameLog.value, gameStore.currentFloor)
+  
+  scrollToBottom(contentAreaRef.value)
 }
 
 // 变量思考重roll - 仅重新运行辅助AI处理
@@ -1126,6 +1238,12 @@ const handleAssistantReroll = async () => {
   
   const lastLog = log[log.length - 1]
   if (lastLog.type !== 'ai') return
+  
+  // 清空上一轮的变量变化
+  lastRoundChanges.value = []
+  
+  // 保存重roll前的状态用于对比
+  const preRerollSnapshot = lastLog.preVariableSnapshot || gameStore.getGameState()
   
   // 如果有 preVariableSnapshot，先恢复到辅助AI执行前的状态
   if (lastLog.preVariableSnapshot) {
@@ -1170,6 +1288,9 @@ const handleAssistantReroll = async () => {
     // 更新日志快照
     lastLog.snapshot = gameStore.getGameState()
     
+    // 生成详细的变量变化列表
+    lastRoundChanges.value = generateDetailedChanges(preRerollSnapshot, lastLog.snapshot)
+    
     // 自动保存
     gameStore.createAutoSave(gameLog.value, gameStore.currentFloor)
     
@@ -1207,13 +1328,42 @@ const handleSummaryCancel = () => {
 }
 
 const handleMessageContextMenu = (e, index) => {
-  openEditModal(index)
+  e.preventDefault()
+  contextMenuIndex.value = index
+  // 计算菜单位置
+  const x = Math.min(e.clientX, window.innerWidth - 180)
+  const y = Math.min(e.clientY, window.innerHeight - 120)
+  contextMenuPosition.value = { x, y }
+  showContextMenu.value = true
 }
 
-const handleMessageTouchStart = (index) => {
+const handleMessageTouchStart = (e, index) => {
+  const touch = e.touches?.[0]
   longPressTimer = setTimeout(() => {
-    openEditModal(index)
+    contextMenuIndex.value = index
+    if (touch) {
+      const x = Math.min(touch.clientX, window.innerWidth - 180)
+      const y = Math.min(touch.clientY, window.innerHeight - 120)
+      contextMenuPosition.value = { x, y }
+    } else {
+      contextMenuPosition.value = { x: window.innerWidth / 2 - 80, y: window.innerHeight / 2 }
+    }
+    showContextMenu.value = true
   }, 800)
+}
+
+const handleContextMenuEdit = () => {
+  showContextMenu.value = false
+  openEditModal(contextMenuIndex.value)
+}
+
+const handleContextMenuRollback = () => {
+  showContextMenu.value = false
+  handleRollbackToFloor(contextMenuIndex.value)
+}
+
+const closeContextMenu = () => {
+  showContextMenu.value = false
 }
 
 const handleMessageTouchEnd = () => {
@@ -1238,7 +1388,37 @@ const handleEditSubmit = (content) => {
   const log = gameLog.value[editingMessageIndex.value]
   if (log) {
     log.rawContent = content
-    log.content = content
+    
+    // 对编辑后的内容应用正则处理（与 processAIResponse 相同的逻辑）
+    let contentToShow = content
+    let matched = false
+    
+    if (gameStore.settings.customRegexList?.length > 0) {
+      for (const rule of gameStore.settings.customRegexList) {
+        if (!rule.enabled) continue
+        try {
+          const regex = new RegExp(rule.pattern)
+          const match = regex.exec(content)
+          if (match && match[1]) {
+            contentToShow = match[1].trim()
+            matched = true
+            break
+          }
+        } catch (e) {
+          console.error('正则匹配出错:', e)
+        }
+      }
+    }
+    
+    if (!matched) {
+      contentToShow = content.replace(/\[GAME_DATA\][\s\S]*?\[\/GAME_DATA\]/g, '').trim()
+    }
+    
+    // 清理系统标签
+    let cleanedContent = cleanSystemTags(contentToShow)
+    cleanedContent = cleanedContent.replace(/<suggested_replies>[\s\S]*?<\/suggested_replies>/gi, '')
+    
+    log.content = cleanedContent
   }
   
   showEditModal.value = false
@@ -1358,14 +1538,28 @@ const handleAttributeSave = () => {
   gameStore.createAutoSave(gameLog.value, gameStore.currentFloor)
 }
 
+// 处理手机子应用中的变量修改（如本源APP），修改后触发自动保存和弹幕通知
+const handleVariableModified = (changes) => {
+  if (changes && changes.length > 0) {
+    showDanmaku(changes)
+  }
+  gameStore.createAutoSave(gameLog.value, gameStore.currentFloor)
+}
+
 const closeMenu = (e) => {
   if (showMenu.value && !e.target.closest('.plus-btn-wrapper')) {
     showMenu.value = false
   }
 }
 
+// 带防抖的滚动事件处理
 const handleScrollEvent = () => {
-  handleUserScroll(contentAreaRef.value, isGenerating.value)
+  if (scrollDebounceTimer) {
+    clearTimeout(scrollDebounceTimer)
+  }
+  scrollDebounceTimer = setTimeout(() => {
+    handleUserScroll(contentAreaRef.value, isGenerating.value)
+  }, 50) // 50ms 防抖
 }
 
 // ==================== 生命周期 ====================
@@ -1396,6 +1590,11 @@ onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)
   document.removeEventListener('click', closeMenu)
   cleanupImageCache()
+  // 清理内容缓存
+  contentRenderCache.clear()
+  if (scrollDebounceTimer) {
+    clearTimeout(scrollDebounceTimer)
+  }
 })
 
 // ==================== Watchers ====================
@@ -1406,9 +1605,11 @@ watch(() => gameStore.mapSelectionMode, (newVal) => {
   }
 })
 
-watch(gameLog, (newVal) => {
-  gameStore.syncCurrentChatLog(newVal)
-}, { deep: true })
+// 使用浅监听 + 手动触发来避免深度监听的性能问题
+// 只监听数组长度变化，内容变化通过显式调用 syncCurrentChatLog 处理
+watch(() => gameLog.value.length, () => {
+  gameStore.syncCurrentChatLog(gameLog.value)
+})
 
 // 监听系统通知（如天赋触发、加入社团等），直接显示为弹幕
 watch(() => gameStore.player.systemNotifications, (newVal) => {
@@ -1457,6 +1658,12 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
         </button>
         <div class="title-container">
           <h2 class="page-title">校园中心</h2>
+
+          <!-- 变量变化面板 -->
+          <VariableChangesPanel 
+            :changes="lastRoundChanges"
+            :isMenuOpen="isLeftSidebarOpen && isMobile"
+          />
           
           <!-- 异常警示图标 -->
           <div v-if="hasContentWarning" class="warning-icon-wrapper" @click="showWarningDetail = true" title="内容解析异常">
@@ -1519,7 +1726,7 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
               v-html="getDisplayContentWithIndex(log, gameLog.length - displayLog.length + index)"
               @click="handleLogClick($event)"
               @contextmenu.prevent="handleMessageContextMenu($event, gameLog.length - displayLog.length + index)"
-              @touchstart="handleMessageTouchStart(gameLog.length - displayLog.length + index)"
+              @touchstart="handleMessageTouchStart($event, gameLog.length - displayLog.length + index)"
               @touchend="handleMessageTouchEnd"
               @touchmove="handleMessageTouchEnd"
             ></div>
@@ -1655,6 +1862,7 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
         v-if="showPhone" 
         @close="showPhone = false"
         @open-app="handlePhoneApp"
+        @variable-modified="handleVariableModified"
       />
     </Teleport>
 
@@ -1691,6 +1899,24 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
       @restore="handleImageRestore"
       @close="showImagePanel = false"
     />
+
+    <!-- 消息上下文菜单 -->
+    <Teleport to="body">
+      <div v-if="showContextMenu" class="context-menu-overlay" @click="closeContextMenu">
+        <div 
+          class="context-menu" 
+          :style="{ left: contextMenuPosition.x + 'px', top: contextMenuPosition.y + 'px' }"
+          @click.stop
+        >
+          <div class="context-menu-item" @click="handleContextMenuEdit">
+            ✏️ 编辑消息
+          </div>
+          <div class="context-menu-item" @click="handleContextMenuRollback">
+            ⏪ 回溯到此处
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- 变量监视窗口 -->
     <Teleport to="body">
@@ -2218,5 +2444,67 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
 
 .dark-mode .tucao-title {
   color: #ff9a9e;
+}
+
+/* 上下文菜单样式 */
+.context-menu-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1100;
+  background: transparent;
+}
+
+.context-menu {
+  position: fixed;
+  background: linear-gradient(180deg, #fffdf8 0%, #fff9e6 100%);
+  border: 1px solid rgba(139, 69, 19, 0.2);
+  border-radius: 12px;
+  box-shadow: 0 8px 25px rgba(139, 69, 19, 0.2);
+  overflow: hidden;
+  min-width: 160px;
+  animation: pop-in 0.15s ease-out;
+}
+
+.context-menu-item {
+  padding: 12px 18px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.9rem;
+  color: #5d4037;
+  white-space: nowrap;
+  border-bottom: 1px solid rgba(139, 69, 19, 0.08);
+  font-weight: 500;
+  user-select: none;
+}
+
+.context-menu-item:last-child {
+  border-bottom: none;
+}
+
+.context-menu-item:hover {
+  background: linear-gradient(90deg, rgba(218, 165, 32, 0.15) 0%, rgba(218, 165, 32, 0.05) 100%);
+  color: #8b4513;
+}
+
+.context-menu-item:active {
+  background: rgba(218, 165, 32, 0.25);
+}
+
+.dark-mode .context-menu {
+  background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+  border-color: rgba(99, 102, 241, 0.25);
+}
+
+.dark-mode .context-menu-item {
+  color: #e0e7ff;
+  border-bottom-color: rgba(99, 102, 241, 0.1);
+}
+
+.dark-mode .context-menu-item:hover {
+  background: rgba(99, 102, 241, 0.15);
+  color: #a5b4fc;
 }
 </style>

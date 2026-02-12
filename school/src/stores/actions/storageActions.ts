@@ -286,6 +286,13 @@ export const storageActions = {
               }
             }
             
+            // 预加载班级数据，确保选修课世界书条目中的同学列表能正确恢复
+            // 这是因为 processNpcElectiveSelection 依赖 allClassData 来获取 NPC 列表
+            if (details.gameState.allClassData) {
+              console.log('[GameStore] Pre-loading class data from snapshot')
+              this.allClassData = details.gameState.allClassData
+            }
+            
             // 同时恢复 currentRunId 和 player，因为 rebuildWorldbookState 需要用到
             if (details.gameState.currentRunId) {
               this.currentRunId = details.gameState.currentRunId

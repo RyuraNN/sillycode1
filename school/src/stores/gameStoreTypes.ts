@@ -227,6 +227,7 @@ export interface PlayerStats {
   location: string
   pendingCommands: CommandEntry[]
   holdMessages: CommandEntry[]
+  socialReadStatus: Record<string, 'hold' | 'pass'>
   systemNotifications: string[]
   social: {
     friends: Friend[]
@@ -542,6 +543,7 @@ export interface GameState {
     debugMode: boolean
     debugUnlocked: boolean
     snapshotLimit: number
+    snapshotMode: 'full' | 'delta'
   }
   saveSnapshots: SaveSnapshot[]
   currentChatLog: ChatLogEntry[]

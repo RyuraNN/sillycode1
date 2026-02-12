@@ -1364,13 +1364,20 @@ export function resolveLocationPlaceholder(locationId, npcData, gameStore) {
 
   // 获取 NPC 的班级教室 ID
   const getClassroom = () => {
-    if (npcData.classId) return `classroom_${npcData.classId.toLowerCase().replace('-', '')}`
+    // 优先从班级数据中读取自定义教室 (classroomId)
     if (gameStore?.allClassData) {
       for (const [classId, classData] of Object.entries(gameStore.allClassData)) {
         if (classData.students?.some(s => s.name === npcData.name)) {
+          if (classData.classroomId) return classData.classroomId
           return `classroom_${classId.toLowerCase().replace('-', '')}`
         }
       }
+    }
+    if (npcData.classId) {
+      // 检查该班级是否有自定义教室
+      const classInfo = gameStore?.allClassData?.[npcData.classId]
+      if (classInfo?.classroomId) return classInfo.classroomId
+      return `classroom_${npcData.classId.toLowerCase().replace('-', '')}`
     }
     return 'classroom_1a'
   }

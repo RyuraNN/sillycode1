@@ -17,6 +17,21 @@ const props = defineProps({
   occupiedLocations: {
     type: Array,
     default: () => []
+  },
+  // 初始导航到的父地点ID（默认天华学园）
+  initialParentId: {
+    type: String,
+    default: 'tianhua_high_school'
+  },
+  // 预填充创建表单的ID
+  prefillId: {
+    type: String,
+    default: ''
+  },
+  // 预填充创建表单的名称
+  prefillName: {
+    type: String,
+    default: ''
   }
 })
 
@@ -24,7 +39,7 @@ const emit = defineEmits(['close', 'open-event-editor', 'location-selected'])
 const gameStore = useGameStore()
 
 // 编辑状态
-const currentParentId = ref('tianhua_high_school') // 默认显示天华学园
+const currentParentId = ref(props.initialParentId || 'tianhua_high_school') // 使用 prop 或默认显示天华学园
 const path = ref([]) // 导航路径
 const mapViewport = ref(null)
 
@@ -127,8 +142,13 @@ onMounted(async () => {
   
   // 尝试定位到合理的初始位置
   if (currentParentId.value && !getItem(currentParentId.value)) {
-    // 如果找不到默认地点，回退到根节点（显示所有顶层地点，如国家）
-    currentParentId.value = null
+    // 如果找不到指定地点，尝试回退到天华学园
+    if (getItem('tianhua_high_school')) {
+      currentParentId.value = 'tianhua_high_school'
+    } else {
+      // 回退到根节点
+      currentParentId.value = null
+    }
   }
 
   // 构建面包屑
@@ -530,8 +550,8 @@ const handleViewportClick = (e) => {
   
   createPos.value = gridPos
   editingItem.value = {
-    id: '',
-    name: '新地点',
+    id: props.prefillId || '',
+    name: props.prefillName || '新地点',
     type: '地点',
     parentId: currentParentId.value,
     grid: { x: gridPos.x, y: gridPos.y, w: 2, h: 2 },
@@ -1048,7 +1068,7 @@ const itemFromPoint = (x, y) => {
   height: 100%;
   background: rgba(0, 0, 0, 0.85);
   backdrop-filter: blur(8px);
-  z-index: 4000 !important;
+  z-index: 100000 !important; /* 必须高于社团创建弹窗 (99999) */
   display: flex;
   justify-content: center;
   align-items: center;

@@ -14,7 +14,7 @@ import {
   shouldBeSocialFriend,
   generateCharId
 } from '../data/relationshipData'
-import { saveImpressionData } from './impressionWorldbook'
+import { saveImpressionData, saveImpressionDataImmediate } from './impressionWorldbook'
 
 /**
  * 初始化所有角色的关系数据
@@ -419,8 +419,9 @@ export function addRelationshipEvent(sourceName, targetName, event) {
 /**
  * 删除角色及其所有关系
  * @param {string} charName - 角色名
+ * @param {boolean} immediate - 是否立即持久化到世界书（默认false，批量操作时应设为false，最后统一保存）
  */
-export function removeCharacter(charName) {
+export function removeCharacter(charName, immediate = false) {
   const gameStore = useGameStore()
   
   // 删除该角色的关系数据
@@ -430,7 +431,7 @@ export function removeCharacter(charName) {
   
   // 删除其他角色对该角色的关系
   for (const otherName in gameStore.npcRelationships) {
-    if (gameStore.npcRelationships[otherName].relations[charName]) {
+    if (gameStore.npcRelationships[otherName].relations?.[charName]) {
       delete gameStore.npcRelationships[otherName].relations[charName]
     }
   }
@@ -446,7 +447,40 @@ export function removeCharacter(charName) {
   console.log(`[RelationshipManager] Removed character: ${charName}`)
   
   // 更新印象列表
-  saveImpressionData()
+  if (immediate) {
+    saveImpressionDataImmediate()
+  } else {
+    saveImpressionData()
+  }
+}
+
+/**
+ * 删除两个角色之间的关系（双向删除）
+ * @param {string} sourceName - 源角色名
+ * @param {string} targetName - 目标角色名
+ * @param {boolean} immediate - 是否立即持久化到世界书
+ */
+export function removeRelationship(sourceName, targetName, immediate = true) {
+  const gameStore = useGameStore()
+  
+  // 删除 source -> target 的关系
+  if (gameStore.npcRelationships[sourceName]?.relations?.[targetName]) {
+    delete gameStore.npcRelationships[sourceName].relations[targetName]
+    console.log(`[RelationshipManager] Removed relation: ${sourceName} -> ${targetName}`)
+  }
+  
+  // 删除 target -> source 的反向关系
+  if (gameStore.npcRelationships[targetName]?.relations?.[sourceName]) {
+    delete gameStore.npcRelationships[targetName].relations[sourceName]
+    console.log(`[RelationshipManager] Removed reverse relation: ${targetName} -> ${sourceName}`)
+  }
+  
+  // 更新印象列表
+  if (immediate) {
+    saveImpressionDataImmediate()
+  } else {
+    saveImpressionData()
+  }
 }
 
 /**

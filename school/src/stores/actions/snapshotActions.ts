@@ -4,6 +4,14 @@
 
 import type { ChatLogEntry, SaveSnapshot, GameStateData } from '../gameStoreTypes'
 import { saveSnapshotData, getSnapshotData, removeSnapshotData } from '../../utils/indexedDB'
+import { 
+  computeDelta, 
+  applyDelta, 
+  isDeltaSnapshot, 
+  shouldCreateBaseSnapshot,
+  createLightSnapshot,
+  type DeltaSnapshot 
+} from '../../utils/snapshotUtils'
 
 export const snapshotActions = {
   /**
@@ -220,6 +228,192 @@ export const snapshotActions = {
   },
 
   /**
+   * 获取轻量级快照（用于增量模式下的消息内联）
+   */
+  getLightSnapshot(this: any): object {
+    return createLightSnapshot(this.getGameState())
+  },
+
+  /**
+   * 创建消息内联快照（根据模式选择完整或增量）
+   * @param previousSnapshot 上一条消息的快照（用于计算增量）
+   * @param floor 当前楼层
+   * @param chatLog 聊天日志（用于查找基准快照计算更精确的增量）
+   */
+  createMessageSnapshot(this: any, previousSnapshot: any, floor: number, chatLog?: any[]): any {
+    const mode = this.settings.snapshotMode || 'delta'
+    
+    if (mode === 'full') {
+      // 完整模式：返回完整游戏状态
+      return this.getGameState()
+    }
+    
+    // 增量模式
+    const currentState = this.getGameState()
+    
+    // 如果没有上一个快照，必须创建基准快照
+    if (!previousSnapshot) {
+      this._lastBaseFloor = floor
+      return {
+        ...currentState,
+        _isBase: true,
+        _floor: floor
+      }
+    }
+    
+    // 如果上一个快照是基准快照
+    if (previousSnapshot._isBase) {
+      // 检查是否应该创建新的基准快照
+      const lastBaseFloor = this._lastBaseFloor || 0
+      if (shouldCreateBaseSnapshot(floor, lastBaseFloor)) {
+        this._lastBaseFloor = floor
+        return {
+          ...currentState,
+          _isBase: true,
+          _floor: floor
+        }
+      }
+      // 从基准快照开始计算增量
+      return computeDelta(previousSnapshot, currentState, previousSnapshot._floor)
+    }
+    
+    // 如果上一个快照是增量快照，尝试找到基准快照进行更精确的增量计算
+    if (isDeltaSnapshot(previousSnapshot)) {
+      const baseFloor = previousSnapshot._baseFloor
+      let baseSnapshot = null
+      
+      // 在聊天日志中查找基准快照
+      if (chatLog) {
+        for (let i = 0; i < chatLog.length; i++) {
+          const log = chatLog[i]
+          if (log.snapshot && (log.snapshot as any)._isBase && (log.snapshot as any)._floor === baseFloor) {
+            baseSnapshot = log.snapshot
+            break
+          }
+        }
+      }
+      
+      // 检查是否应该创建新的基准快照
+      const lastBaseFloor = this._lastBaseFloor || 0
+      if (shouldCreateBaseSnapshot(floor, lastBaseFloor)) {
+        this._lastBaseFloor = floor
+        return {
+          ...currentState,
+          _isBase: true,
+          _floor: floor
+        }
+      }
+      
+      // 使用找到的基准快照计算增量，如果找不到则传 null（会记录所有字段的当前值）
+      return computeDelta(baseSnapshot, currentState, baseFloor)
+    }
+    
+    // 默认：创建增量快照（以楼层 0 为基准）
+    return computeDelta(previousSnapshot, currentState, 0)
+  },
+
+  /**
+   * 从快照还原游戏状态（支持增量快照）
+   * @param snapshot 快照（可能是完整或增量）
+   * @param chatLog 聊天日志（用于查找基准快照）
+   */
+  restoreFromMessageSnapshot(this: any, snapshot: any, chatLog: ChatLogEntry[]): void {
+    if (!snapshot) return
+    
+    // 如果是完整快照（包含 _isBase 或普通完整快照）
+    if (snapshot._isBase || !isDeltaSnapshot(snapshot)) {
+      this.restoreGameState(snapshot)
+      return
+    }
+    
+    // 如果是增量快照，需要找到基准快照并应用增量
+    const baseFloor = snapshot._baseFloor
+    let baseSnapshot: GameStateData | null = null
+    
+    // 在聊天日志中查找基准快照
+    for (let i = 0; i < chatLog.length; i++) {
+      const log = chatLog[i]
+      if (log.snapshot && (log.snapshot as any)._isBase && (log.snapshot as any)._floor === baseFloor) {
+        baseSnapshot = log.snapshot as GameStateData
+        break
+      }
+    }
+    
+    if (!baseSnapshot) {
+      console.warn('[snapshotActions] Base snapshot not found for delta, trying fallback...')
+      
+      // 尝试在日志中寻找最近的完整快照或基准快照
+      for (let i = chatLog.length - 1; i >= 0; i--) {
+        const log = chatLog[i]
+        // 找到任何一个基准快照或者非增量的完整快照
+        if (log.snapshot && ((log.snapshot as any)._isBase || !isDeltaSnapshot(log.snapshot))) {
+          console.log(`[snapshotActions] Found fallback snapshot at floor ${(log.snapshot as any)._floor || i}`)
+          baseSnapshot = log.snapshot as GameStateData
+          break
+        }
+      }
+      
+      if (!baseSnapshot) {
+        console.error('[snapshotActions] Critical: No valid base snapshot found!')
+        // 只有在实在找不到任何快照时才回退到当前状态，但这是危险的
+        baseSnapshot = this.getGameState()
+      }
+    }
+    
+    // 应用增量（此时 baseSnapshot 一定不为 null）
+    const restoredState = applyDelta(baseSnapshot!, snapshot as DeltaSnapshot)
+    this.restoreGameState(restoredState)
+  },
+
+  /**
+   * 清理超出限制的旧快照（保留 snapshotLimit 层以内的快照）
+   * @param chatLog 聊天日志
+   */
+  cleanupSnapshots(this: any, chatLog: ChatLogEntry[]): void {
+    const limit = this.settings.snapshotLimit || 10
+    const totalLogs = chatLog.length
+    
+    if (totalLogs <= limit) return
+    
+    // 清理超出范围的快照（只清理内联快照，不清理存档快照）
+    const cutoffIndex = totalLogs - limit
+    
+    for (let i = 0; i < cutoffIndex; i++) {
+      const log = chatLog[i]
+      if (log.snapshot) {
+        // 如果是基准快照，检查是否还有增量快照依赖它
+        if ((log.snapshot as any)._isBase) {
+          const baseFloor = (log.snapshot as any)._floor
+          let hasDependent = false
+          
+          // 检查后续是否有增量快照依赖这个基准
+          for (let j = i + 1; j < totalLogs; j++) {
+            const laterLog = chatLog[j]
+            if (laterLog.snapshot && isDeltaSnapshot(laterLog.snapshot) && 
+                (laterLog.snapshot as DeltaSnapshot)._baseFloor === baseFloor) {
+              hasDependent = true
+              break
+            }
+          }
+          
+          // 如果没有依赖，可以清理
+          if (!hasDependent) {
+            delete log.snapshot
+          }
+        } else {
+          // 非基准快照可以直接清理
+          delete log.snapshot
+        }
+      }
+      
+      // 同样清理 preVariableSnapshot
+      if (log.preVariableSnapshot) {
+        delete log.preVariableSnapshot
+      }
+    }
+  },
+
+  /**
    * 恢复指定的游戏状态
    */
   restoreGameState(this: any, state: GameStateData) {
@@ -238,8 +432,8 @@ export const snapshotActions = {
     if (data.allClassData) this.allClassData = data.allClassData
     if (data.allClubs) this.allClubs = data.allClubs
     // @ts-ignore
-    if (data.currentRunId) this.currentRunId = data.currentRunId
+    if (data.currentRunId !== undefined && data.currentRunId !== null) this.currentRunId = data.currentRunId
     // @ts-ignore
-    if (data.currentFloor) this.currentFloor = data.currentFloor
+    if (data.currentFloor !== undefined && data.currentFloor !== null) this.currentFloor = data.currentFloor
   }
 }

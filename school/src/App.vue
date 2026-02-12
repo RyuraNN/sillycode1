@@ -1,5 +1,5 @@
 <script setup>
-import { watch, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import HomeLayout from './components/HomeLayout.vue'
 import { useGameStore } from './stores/gameStore'
 import { requestPersistence } from './utils/indexedDB'
@@ -7,15 +7,101 @@ import { loadCoursePoolFromWorldbook } from './data/coursePoolData'
 
 const gameStore = useGameStore()
 
+// 世界书加载等待弹窗状态
+const showWorldbookWaitModal = ref(false)
+const isInitializing = ref(true)
+const initError = ref('')
+
+/**
+ * 检测世界书 API 是否已就绪
+ * @returns {Promise<boolean>}
+ */
+async function checkWorldbookReady() {
+  try {
+    // 检查 API 函数是否存在
+    if (typeof window.getCharWorldbookNames !== 'function') {
+      console.log('[App] getCharWorldbookNames not available')
+      return false
+    }
+    
+    // 尝试获取世界书列表
+    const books = window.getCharWorldbookNames('current')
+    
+    // 检查是否能获取到有效的世界书
+    if (!books) {
+      console.log('[App] No worldbooks returned')
+      return false
+    }
+    
+    // 检查是否有 primary 或 additional 世界书
+    const hasPrimary = books.primary && books.primary.length > 0
+    const hasAdditional = books.additional && books.additional.length > 0
+    
+    if (!hasPrimary && !hasAdditional) {
+      console.log('[App] No bound worldbooks found')
+      return false
+    }
+    
+    console.log('[App] Worldbook ready:', books)
+    return true
+  } catch (e) {
+    console.log('[App] Error checking worldbook:', e)
+    return false
+  }
+}
+
+/**
+ * 执行初始化
+ */
+async function doInitialize() {
+  try {
+    isInitializing.value = true
+    initError.value = ''
+    
+    // 尝试申请持久化存储
+    await requestPersistence()
+    
+    // 加载自定义课程池
+    await loadCoursePoolFromWorldbook()
+    
+    // 初始化时从本地存储加载存档
+    await gameStore.initFromStorage()
+    
+    console.log('[App] Initialization complete')
+    showWorldbookWaitModal.value = false
+  } catch (e) {
+    console.error('[App] Initialization error:', e)
+    initError.value = e.message || '初始化失败'
+  } finally {
+    isInitializing.value = false
+  }
+}
+
+/**
+ * 用户点击确认按钮
+ */
+async function onConfirmWorldbookReady() {
+  const ready = await checkWorldbookReady()
+  if (ready) {
+    await doInitialize()
+  } else {
+    initError.value = '世界书仍未加载完成，请稍后再试'
+  }
+}
+
 onMounted(async () => {
-  // 尝试申请持久化存储
-  await requestPersistence()
+  // 首先检测世界书是否就绪
+  const worldbookReady = await checkWorldbookReady()
   
-  // 加载自定义课程池
-  await loadCoursePoolFromWorldbook()
-  
-  // 初始化时从本地存储加载存档
-  gameStore.initFromStorage()
+  if (worldbookReady) {
+    // 世界书已就绪，直接初始化
+    await doInitialize()
+  } else {
+    // 世界书未就绪，显示等待弹窗
+    console.log('[App] Worldbook not ready, showing wait modal')
+    showWorldbookWaitModal.value = true
+    isInitializing.value = false
+  }
 })
 
 // 监听夜间模式变化
@@ -30,6 +116,30 @@ watch(() => gameStore.settings.darkMode, (isDark) => {
 
 <template>
   <div class="app-container">
+    <!-- 世界书加载等待弹窗 -->
+    <div v-if="showWorldbookWaitModal" class="worldbook-wait-modal-overlay">
+      <div class="worldbook-wait-modal">
+        <div class="modal-icon">⏳</div>
+        <h2 class="modal-title">正在初始化...</h2>
+        <p class="modal-text">
+          请等待 SillyTavern 加载完世界书后，点击下方按钮继续。
+        </p>
+        <p class="modal-hint">
+          💡 提示：如果您看到左侧世界书列表已加载完成，即可点击确认。
+        </p>
+        <div v-if="initError" class="modal-error">
+          ⚠️ {{ initError }}
+        </div>
+        <button 
+          class="modal-confirm-btn"
+          :disabled="isInitializing"
+          @click="onConfirmWorldbookReady"
+        >
+          {{ isInitializing ? '初始化中...' : '确认' }}
+        </button>
+      </div>
+    </div>
+
     <HomeLayout />
   </div>
 </template>
@@ -1839,5 +1949,115 @@ body.dark-mode .event-editor-panel .cancel-btn {
 body.dark-mode .event-editor-panel .cancel-btn:hover {
   background: #3d3a36 !important;
   border-color: #5a5651 !important;
+}
+
+/* ========================================
+   世界书加载等待弹窗样式
+   ======================================== */
+.worldbook-wait-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  backdrop-filter: blur(8px);
+}
+
+.worldbook-wait-modal {
+  background: linear-gradient(135deg, #2d2a26 0%, #1a1814 100%);
+  border-radius: 16px;
+  padding: 40px 50px;
+  max-width: 450px;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(212, 165, 116, 0.3);
+  animation: modal-appear 0.3s ease-out;
+}
+
+@keyframes modal-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.worldbook-wait-modal .modal-icon {
+  font-size: 64px;
+  margin-bottom: 20px;
+  animation: icon-pulse 2s ease-in-out infinite;
+}
+
+@keyframes icon-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+.worldbook-wait-modal .modal-title {
+  color: #e8e4df;
+  font-size: 1.6rem;
+  margin: 0 0 16px 0;
+  font-weight: 500;
+}
+
+.worldbook-wait-modal .modal-text {
+  color: #b5b0a8;
+  font-size: 1rem;
+  line-height: 1.6;
+  margin: 0 0 16px 0;
+}
+
+.worldbook-wait-modal .modal-hint {
+  color: #d4a574;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin: 0 0 24px 0;
+  padding: 12px;
+  background: rgba(212, 165, 116, 0.1);
+  border-radius: 8px;
+  border: 1px solid rgba(212, 165, 116, 0.2);
+}
+
+.worldbook-wait-modal .modal-error {
+  color: #ef5350;
+  font-size: 0.9rem;
+  margin: 0 0 16px 0;
+  padding: 10px;
+  background: rgba(239, 83, 80, 0.1);
+  border-radius: 6px;
+  border: 1px solid rgba(239, 83, 80, 0.3);
+}
+
+.worldbook-wait-modal .modal-confirm-btn {
+  background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
+  color: #1a1814;
+  border: none;
+  padding: 14px 40px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(74, 222, 128, 0.3);
+}
+
+.worldbook-wait-modal .modal-confirm-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(74, 222, 128, 0.4);
+}
+
+.worldbook-wait-modal .modal-confirm-btn:disabled {
+  background: #4a4641;
+  color: #8a857d;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 </style>
