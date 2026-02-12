@@ -5,6 +5,10 @@
  */
 
 import { ref, computed } from 'vue'
+import { useGameStore } from '../../stores/gameStore'
+
+const gameStore = useGameStore()
+const isDark = computed(() => gameStore.settings.darkMode)
 
 const props = defineProps({
   changes: {
@@ -64,32 +68,47 @@ const formatValue = (val) => {
       <span class="count-text">{{ changes.length }}</span>
     </button>
 
-    <!-- 展开的面板 -->
-    <div v-else class="changes-panel">
-      <div class="panel-header">
-        <span class="panel-title">📊 变量变化</span>
-        <button class="close-btn" @click="closePanel">×</button>
-      </div>
-      <div class="panel-content">
-        <div 
-          v-for="(change, index) in changes" 
-          :key="index" 
-          class="change-item"
-          :class="{ 'positive': change.diff > 0, 'negative': change.diff < 0 }"
-        >
-          <span class="change-label">{{ change.label }}</span>
-          <span class="change-values">
-            <span class="old-value">{{ formatValue(change.oldValue) }}</span>
-            <span class="arrow">→</span>
-            <span class="new-value">{{ formatValue(change.newValue) }}</span>
-            <span v-if="change.diff !== undefined" class="diff-value">{{ formatDiff(change) }}</span>
-          </span>
+    <!-- 展开时显示一个占位，保持按钮区域 -->
+    <button 
+      v-else
+      class="changes-btn active"
+      @click="closePanel"
+      title="收起变量变化"
+    >
+      <span class="btn-icon">Δ</span>
+      <span class="count-text">{{ changes.length }}</span>
+    </button>
+
+    <!-- 展开的面板通过 Teleport 挂载到 body，避免被 top-bar 的 stacking context 遮挡 -->
+    <Teleport to="body">
+      <div v-if="isExpanded && hasChanges" class="changes-panel-overlay" :class="{ 'dark-mode': isDark }" @click="closePanel">
+        <div class="changes-panel" @click.stop>
+          <div class="panel-header">
+            <span class="panel-title">📊 变量变化</span>
+            <button class="close-btn" @click="closePanel">×</button>
+          </div>
+          <div class="panel-content">
+            <div 
+              v-for="(change, index) in changes" 
+              :key="index" 
+              class="change-item"
+              :class="{ 'positive': change.diff > 0, 'negative': change.diff < 0 }"
+            >
+              <span class="change-label">{{ change.label }}</span>
+              <span class="change-values">
+                <span class="old-value">{{ formatValue(change.oldValue) }}</span>
+                <span class="arrow">→</span>
+                <span class="new-value">{{ formatValue(change.newValue) }}</span>
+                <span v-if="change.diff !== undefined" class="diff-value">{{ formatDiff(change) }}</span>
+              </span>
+            </div>
+            <div v-if="changes.length === 0" class="no-changes">
+              暂无变化
+            </div>
+          </div>
         </div>
-        <div v-if="changes.length === 0" class="no-changes">
-          暂无变化
-        </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 
@@ -98,7 +117,6 @@ const formatValue = (val) => {
   position: relative;
   margin-left: 8px;
   margin-right: 8px;
-  z-index: 100;
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
@@ -138,6 +156,21 @@ const formatValue = (val) => {
   font-size: 0.8rem;
   color: #666;
   font-weight: 500;
+}
+
+.changes-btn.active {
+  background: rgba(0, 0, 0, 0.08);
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+.changes-panel-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 9998;
+  background: transparent;
 }
 
 .changes-panel {
@@ -316,7 +349,6 @@ const formatValue = (val) => {
     min-width: 200px;
     max-width: calc(100vw - 20px);
     max-height: 60vh;
-    z-index: 9999;
   }
   
   .panel-header {
@@ -345,6 +377,11 @@ const formatValue = (val) => {
 }
 
 /* 夜间模式 */
+.dark-mode .changes-btn.active {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
 .dark-mode .changes-panel {
   background: rgba(30, 30, 46, 0.98);
   border-color: rgba(99, 102, 241, 0.3);

@@ -13,7 +13,7 @@ const isInitializing = ref(true)
 const initError = ref('')
 
 /**
- * 检测世界书 API 是否已就绪
+ * 检测世界书 API 是否已就绪（名称 + 内容都已加载）
  * @returns {Promise<boolean>}
  */
 async function checkWorldbookReady() {
@@ -21,6 +21,11 @@ async function checkWorldbookReady() {
     // 检查 API 函数是否存在
     if (typeof window.getCharWorldbookNames !== 'function') {
       console.log('[App] getCharWorldbookNames not available')
+      return false
+    }
+    
+    if (typeof window.getWorldbook !== 'function') {
+      console.log('[App] getWorldbook not available')
       return false
     }
     
@@ -40,6 +45,18 @@ async function checkWorldbookReady() {
     if (!hasPrimary && !hasAdditional) {
       console.log('[App] No bound worldbooks found')
       return false
+    }
+    
+    // 【关键修复】不仅检查名称，还要验证世界书条目内容已实际加载
+    // SillyTavern 可能先注册了世界书名称，但条目内容尚未加载完毕
+    const bookName = books.primary || (books.additional && books.additional[0])
+    if (bookName) {
+      const entries = await window.getWorldbook(bookName)
+      if (!entries || !Array.isArray(entries) || entries.length === 0) {
+        console.log('[App] Worldbook names available but entries not yet loaded for:', bookName)
+        return false
+      }
+      console.log(`[App] Worldbook "${bookName}" verified: ${entries.length} entries loaded`)
     }
     
     console.log('[App] Worldbook ready:', books)
@@ -90,18 +107,33 @@ async function onConfirmWorldbookReady() {
 }
 
 onMounted(async () => {
-  // 首先检测世界书是否就绪
-  const worldbookReady = await checkWorldbookReady()
+  // 自动轮询等待世界书就绪（逐步递增间隔，最多约 18 秒）
+  // SillyTavern 加载世界书条目内容需要时间，不能仅凭名称就判定就绪
+  const pollDelays = [300, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000]
   
-  if (worldbookReady) {
-    // 世界书已就绪，直接初始化
-    await doInitialize()
-  } else {
-    // 世界书未就绪，显示等待弹窗
-    console.log('[App] Worldbook not ready, showing wait modal')
-    showWorldbookWaitModal.value = true
-    isInitializing.value = false
+  for (const delay of pollDelays) {
+    const ready = await checkWorldbookReady()
+    if (ready) {
+      console.log('[App] Worldbook ready after polling, initializing...')
+      await doInitialize()
+      return
+    }
+    console.log(`[App] Worldbook not ready, retrying in ${delay}ms...`)
+    await new Promise(resolve => setTimeout(resolve, delay))
   }
+  
+  // 最后一次检测
+  const finalCheck = await checkWorldbookReady()
+  if (finalCheck) {
+    console.log('[App] Worldbook ready on final check, initializing...')
+    await doInitialize()
+    return
+  }
+  
+  // 超时后才显示手动确认弹窗
+  console.log('[App] Worldbook not ready after polling, showing wait modal')
+  showWorldbookWaitModal.value = true
+  isInitializing.value = false
 })
 
 // 监听夜间模式变化

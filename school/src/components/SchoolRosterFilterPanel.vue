@@ -2,7 +2,7 @@
 <script setup>
 import { ref, onMounted, computed, watch, toRaw } from 'vue'
 import { useGameStore } from '../stores/gameStore'
-import { updateClassDataInWorldbook, deleteClassDataFromWorldbook, createDefaultRosterBackupWorldbook, restoreFromBackupWorldbook, hasBackupWorldbook, fetchMapDataFromWorldbook } from '../utils/worldbookParser'
+import { updateClassDataInWorldbook, deleteClassDataFromWorldbook, createDefaultRosterBackupWorldbook, restoreFromBackupWorldbook, hasBackupWorldbook, fetchMapDataFromWorldbook, ensureClubExistsInWorldbook, createClubInWorldbook, syncClubWorldbookState, updateStaffRosterInWorldbook } from '../utils/worldbookParser'
 import { saveRosterBackup, getRosterBackup, saveFullCharacterPool, getFullCharacterPool, saveRosterPresets, getRosterPresets } from '../utils/indexedDB'
 import { ELECTIVE_PREFERENCES } from '../data/coursePoolData'
 import { DEFAULT_TEMPLATES } from '../utils/npcScheduleSystem'
@@ -83,10 +83,15 @@ const characterEditForm = ref({
   assignments: [], // { classId: string, isHeadTeacher: boolean, subject: string }[]
   electivePreference: 'general',
   scheduleTag: '',
+  staffTitle: '', // 职工专属
+  workplace: '', // 职工专属
+  isPending: false, // 待入学新生
+  notes: '', // 玩家备注
   personality: { order: 0, altruism: 0, tradition: 0, peace: 50 }
 })
 const charEditorSearchQuery = ref('')
-const charEditorRoleFilter = ref('all') // 'all' | 'student' | 'teacher' | 'pending'
+const charEditorRoleFilter = ref('all') // 'all' | 'student' | 'teacher' | 'staff' | 'pending'
+const showMapEditorForWorkplace = ref(false) // 职工工作地点选择
 
 // ==================== AI角色导入状态 ====================
 const showAIImportInput = ref(false) // 输入面板
@@ -146,10 +151,15 @@ const buildAIImportPrompt = () => {
 5. 选课倾向可选值：${prefKeys}
 6. 日程模板可选值：${templateKeys}
 7. 关系中的数值范围：intimacy(亲密度,0~100), trust(信赖度,0~100), passion(激情度,0~100), hostility(敌意度,0~100)
+8. 角色分类建议：请根据角色在原作中的年龄、职业和身份，给出 role_suggestion (student/teacher/staff/uncertain) 和 role_reason (理由)。
+   - student: 适龄学生
+   - teacher: 教师、教授、导师
+   - staff: 校医、护士、管理员、警卫、后勤人员等非教学职工
+   - uncertain: 不确定或不适合放入校园环境
 
 [返回格式 - 查询特定角色]
 对每个查询的角色返回：
-<roster_character name="角色名" work="作品名" found="true" gender="male或female">
+<roster_character name="角色名" work="作品名" found="true" gender="male或female" role_suggestion="student/teacher/staff/uncertain" role_reason="理由">
   <personality order="数值" altruism="数值" tradition="数值" peace="数值" />
   <elective_preference>类型</elective_preference>
   <schedule_tag>模板ID</schedule_tag>
@@ -253,6 +263,8 @@ const parseAIImportResponse = (text) => {
       name: attrs.name || '未知',
       work: attrs.work || '未知',
       gender: attrs.gender || 'female',
+      roleSuggestion: attrs.role_suggestion || 'student',
+      roleReason: attrs.role_reason || '',
       personality, electivePreference, scheduleTag, relationships,
       selected: true
     })
@@ -284,7 +296,12 @@ const parseAIImportResponse = (text) => {
     let cm
     while ((cm = cRegex.exec(match[2])) !== null) {
       const ca = parseAttributes(cm[1])
-      chars.push({ name: ca.name || '未知', gender: ca.gender || 'female', selected: true })
+      chars.push({ 
+        name: ca.name || '未知', 
+        gender: ca.gender || 'female', 
+        roleSuggestion: ca.role_suggestion || 'student',
+        selected: true 
+      })
     }
     workResults.push({ work: attrs.work || '未知', found: true, characters: chars })
   }
@@ -401,12 +418,29 @@ const confirmAIImport = async () => {
       skippedCount++
       continue
     }
+    
+    // 根据建议角色类型设置默认值
+    let role = 'student'
+    let staffTitle = ''
+    let workplace = ''
+    
+    // 如果用户手动修改了建议，这里应该使用修改后的值（需要 UI 支持修改）
+    // 目前简单处理：如果是 staff，自动设置 staffTitle
+    if (char.roleSuggestion === 'staff') {
+      role = 'staff'
+      staffTitle = '职工' // 默认值，用户后续可编辑
+    } else if (char.roleSuggestion === 'teacher') {
+      role = 'teacher'
+    }
+
     characterPool.value.push({
       name: char.name,
       gender: char.gender,
       origin: `(${char.work})`,
       classId: '',
-      role: 'student',
+      role: role,
+      staffTitle: staffTitle,
+      workplace: workplace,
       subject: '',
       isHeadTeacher: false,
       electivePreference: char.electivePreference || 'general',
@@ -421,6 +455,11 @@ const confirmAIImport = async () => {
   aiImportResults.value = { found: [], notFound: [], workResults: [] }
   const msg = `已导入 ${addedCount} 个角色` + (skippedCount > 0 ? `，跳过 ${skippedCount} 个已存在角色` : '')
   alert(msg)
+}
+
+// 切换角色建议类型
+const changeAIRoleSuggestion = (index, newRole) => {
+  aiImportResults.value.found[index].roleSuggestion = newRole
 }
 
 const closeAIImport = () => {
@@ -1763,6 +1802,7 @@ const startEditCharacter = (char) => {
     assignments: assignments,
     electivePreference: char.electivePreference || 'general',
     scheduleTag: char.scheduleTag || '',
+    notes: char.notes || gameStore.characterNotes?.[char.name] || '',
     personality: char.personality ? { ...char.personality } : { order: 0, altruism: 0, tradition: 0, peace: 50 }
   }
   showCharacterEditor.value = true
@@ -1781,6 +1821,7 @@ const addNewCharacter = () => {
     assignments: [], // 教师多班级任职
     electivePreference: 'general',
     scheduleTag: '',
+    notes: '',
     personality: { order: 0, altruism: 0, tradition: 0, peace: 50 }
   }
   showCharacterEditor.value = true
@@ -1910,6 +1951,7 @@ const saveCharacterEdit = async () => {
       isHeadTeacher: form.role === 'teacher' ? form.isHeadTeacher : false,
       electivePreference: form.role === 'student' ? form.electivePreference : 'general',
       scheduleTag: form.role === 'student' ? form.scheduleTag : '',
+      notes: form.notes,
       personality: { ...form.personality }
     }
     
@@ -1925,6 +1967,14 @@ const saveCharacterEdit = async () => {
       }
       characterPool.value.push(charData)
     }
+  }
+
+  // 同步备注到 GameStore
+  if (!gameStore.characterNotes) gameStore.characterNotes = {}
+  if (form.notes) {
+    gameStore.characterNotes[form.name] = form.notes
+  } else if (gameStore.characterNotes[form.name]) {
+    delete gameStore.characterNotes[form.name]
   }
   
   // 保存到 IndexedDB
@@ -2039,6 +2089,12 @@ const handleSave = async () => {
     for (const classId of changes) {
       const success = await updateClassDataInWorldbook(classId, gameStore.allClassData[classId])
       if (success) successCount++
+    }
+
+    // 同步教职工名册
+    const staffList = characterPool.value.filter(c => c.role === 'staff')
+    if (staffList.length > 0) {
+      await updateStaffRosterInWorldbook(staffList, gameStore.currentRunId)
     }
 
     if (!isLocked.value) {
@@ -2354,12 +2410,328 @@ const getTeacherAssignmentsPreview = (char) => {
   return assignments
 }
 
+// ==================== 社团编辑器状态 ====================
+const clubEditorSearchQuery = ref('')
+const showClubEditor = ref(false)
+const editingClub = ref(null)
+const showMapEditorForClub = ref(false)
+const clubEditorSaving = ref(false)
+const clubMemberSearchQuery = ref('')
+const clubEditForm = ref({
+  id: '',
+  name: '',
+  description: '',
+  coreSkill: '',
+  activityDay: '未定',
+  location: '',
+  advisor: '',
+  president: [],
+  vicePresident: [],
+  members: [],
+  isConstant: false // 蓝灯模式
+})
+
+// 社团列表（从 gameStore 获取）
+const allClubsList = computed(() => {
+  if (!gameStore.allClubs) return []
+  return Object.entries(gameStore.allClubs).map(([id, club]) => ({
+    ...club,
+    id: club.id || id,
+    memberCount: (club.members || []).length,
+    isConstant: club._strategy?.type === 'constant' || id === 'student_council'
+  }))
+})
+
+// 过滤后的社团列表
+const filteredClubsList = computed(() => {
+  let result = allClubsList.value
+  if (clubEditorSearchQuery.value) {
+    const query = clubEditorSearchQuery.value.toLowerCase()
+    result = result.filter(c =>
+      c.name?.toLowerCase().includes(query) ||
+      c.description?.toLowerCase().includes(query) ||
+      c.id?.toLowerCase().includes(query)
+    )
+  }
+  return result
+})
+
+// 获取已占用的社团活动室列表
+const clubOccupiedLocations = computed(() => {
+  const locations = []
+  if (gameStore.allClubs) {
+    Object.values(gameStore.allClubs).forEach(club => {
+      if (club.location && club.location.trim()) {
+        locations.push(club.location.trim())
+      }
+    })
+  }
+  return locations
+})
+
+// 获取所有角色名列表（用于成员选择）
+const allCharacterNames = computed(() => {
+  const names = new Set()
+  // 从角色池获取
+  characterPool.value.forEach(c => {
+    if (c.name) names.add(c.name)
+  })
+  // 从班级数据获取
+  if (gameStore.allClassData) {
+    for (const classInfo of Object.values(gameStore.allClassData)) {
+      if (classInfo.headTeacher?.name) names.add(classInfo.headTeacher.name)
+      const teachers = Array.isArray(classInfo.teachers) ? classInfo.teachers : []
+      teachers.forEach(t => { if (t.name) names.add(t.name) })
+      const students = Array.isArray(classInfo.students) ? classInfo.students : []
+      students.forEach(s => { if (s.name) names.add(s.name) })
+    }
+  }
+  // 从 npcs 获取
+  if (gameStore.npcs) {
+    gameStore.npcs.forEach(n => { if (n.name) names.add(n.name) })
+  }
+  return Array.from(names).sort((a, b) => a.localeCompare(b, 'zh-CN'))
+})
+
+// 过滤可添加的成员列表（排除已在社团中的人员）
+const filteredMemberCandidates = computed(() => {
+  const currentMembers = new Set(clubEditForm.value.members)
+  const presidents = clubEditForm.value.president || []
+  const vps = clubEditForm.value.vicePresident || []
+  presidents.forEach(p => currentMembers.add(p))
+  vps.forEach(v => currentMembers.add(v))
+  
+  let candidates = allCharacterNames.value.filter(name => !currentMembers.has(name))
+  
+  if (clubMemberSearchQuery.value) {
+    const query = clubMemberSearchQuery.value.toLowerCase()
+    candidates = candidates.filter(name => name.toLowerCase().includes(query))
+  }
+  
+  return candidates
+})
+
+// 将 president/vicePresident 字段规范化为数组
+const normalizeToArray = (val) => {
+  if (!val) return []
+  if (Array.isArray(val)) return [...val]
+  return [val]
+}
+
+// 开始编辑社团
+const startEditClub = (club) => {
+  editingClub.value = club
+  clubEditForm.value = {
+    id: club.id || '',
+    name: club.name || '',
+    description: club.description || '',
+    coreSkill: club.coreSkill || '',
+    activityDay: club.activityDay || '未定',
+    location: club.location || '',
+    advisor: club.advisor || '',
+    president: normalizeToArray(club.president),
+    vicePresident: normalizeToArray(club.vicePresident),
+    members: [...(club.members || [])],
+    isConstant: club._strategy?.type === 'constant' || club.id === 'student_council'
+  }
+  clubMemberSearchQuery.value = ''
+  showClubEditor.value = true
+}
+
+// 新建社团
+const addNewClub = () => {
+  editingClub.value = null
+  const newId = `club_${Date.now().toString(36)}`
+  clubEditForm.value = {
+    id: newId,
+    name: '',
+    description: '',
+    coreSkill: '',
+    activityDay: '未定',
+    location: '',
+    advisor: '',
+    president: [],
+    vicePresident: [],
+    members: [],
+    isConstant: false
+  }
+  clubMemberSearchQuery.value = ''
+  showClubEditor.value = true
+}
+
+// 添加部长
+const addClubPresident = (name) => {
+  if (!clubEditForm.value.president.includes(name)) {
+    clubEditForm.value.president.push(name)
+    // 同时确保在成员列表中
+    if (!clubEditForm.value.members.includes(name)) {
+      clubEditForm.value.members.push(name)
+    }
+  }
+}
+
+// 移除部长
+const removeClubPresident = (index) => {
+  clubEditForm.value.president.splice(index, 1)
+}
+
+// 添加副部长
+const addClubVicePresident = (name) => {
+  if (!clubEditForm.value.vicePresident.includes(name)) {
+    clubEditForm.value.vicePresident.push(name)
+    if (!clubEditForm.value.members.includes(name)) {
+      clubEditForm.value.members.push(name)
+    }
+  }
+}
+
+// 移除副部长
+const removeClubVicePresident = (index) => {
+  clubEditForm.value.vicePresident.splice(index, 1)
+}
+
+// 添加成员
+const addClubMember = (name) => {
+  if (!clubEditForm.value.members.includes(name)) {
+    clubEditForm.value.members.push(name)
+  }
+  clubMemberSearchQuery.value = ''
+}
+
+// 移除成员
+const removeClubMember = (index) => {
+  const name = clubEditForm.value.members[index]
+  clubEditForm.value.members.splice(index, 1)
+  // 同时从部长/副部长中移除
+  const pIdx = clubEditForm.value.president.indexOf(name)
+  if (pIdx !== -1) clubEditForm.value.president.splice(pIdx, 1)
+  const vpIdx = clubEditForm.value.vicePresident.indexOf(name)
+  if (vpIdx !== -1) clubEditForm.value.vicePresident.splice(vpIdx, 1)
+}
+
+// 打开地图编辑器选择社团活动室
+const openMapForClubLocation = () => {
+  showMapEditorForClub.value = true
+}
+
+// 处理地图选择结果（社团活动室）
+const handleClubLocationSelected = (location) => {
+  clubEditForm.value.location = location.name || location.id
+  showMapEditorForClub.value = false
+}
+
+// 保存社团编辑
+const saveClubEdit = async () => {
+  const form = clubEditForm.value
+  if (!form.name) {
+    alert('请填写社团名称')
+    return
+  }
+
+  clubEditorSaving.value = true
+  try {
+    // 构建社团数据
+    const clubData = {
+      id: form.id,
+      name: form.name,
+      description: form.description,
+      coreSkill: form.coreSkill,
+      activityDay: form.activityDay,
+      location: form.location,
+      advisor: form.advisor,
+      president: form.president.length === 1 ? form.president[0] : (form.president.length > 1 ? form.president : ''),
+      vicePresident: form.vicePresident.length === 1 ? form.vicePresident[0] : (form.vicePresident.length > 1 ? form.vicePresident : ''),
+      members: [...form.members]
+    }
+
+    // 保留原有的 _bookName 等元信息
+    if (editingClub.value) {
+      if (editingClub.value._bookName) clubData._bookName = editingClub.value._bookName
+      if (editingClub.value._entryName) clubData._entryName = editingClub.value._entryName
+    }
+
+    // 设置策略信息
+    clubData._strategy = { type: form.isConstant ? 'constant' : 'selective' }
+
+    // 更新到 gameStore
+    if (!gameStore.allClubs) gameStore.allClubs = {}
+    gameStore.allClubs[form.id] = clubData
+
+    // 同步到世界书
+    const runId = gameStore.currentRunId
+    await ensureClubExistsInWorldbook(clubData, form.isConstant ? null : runId)
+    
+    // 同步世界书状态
+    await syncClubWorldbookState(runId)
+
+    // 保存到存储
+    if (typeof gameStore.saveToStorage === 'function') {
+      gameStore.saveToStorage(true)
+    }
+
+    showClubEditor.value = false
+    alert(`社团"${form.name}"已保存！`)
+    console.log('[ClubEditor] Club saved:', form.id, form.name)
+  } catch (e) {
+    console.error('[ClubEditor] Error saving club:', e)
+    alert('保存失败，请检查控制台')
+  } finally {
+    clubEditorSaving.value = false
+  }
+}
+
+// 删除社团
+const deleteClub = async (club) => {
+  if (!confirm(`确定要删除社团"${club.name}"吗？该操作不可撤销。`)) return
+  
+  clubEditorSaving.value = true
+  try {
+    const clubId = club.id
+    
+    // 从 gameStore 移除
+    if (gameStore.allClubs && gameStore.allClubs[clubId]) {
+      delete gameStore.allClubs[clubId]
+    }
+    
+    // 从玩家加入列表中移除
+    const joinIdx = gameStore.player.joinedClubs.indexOf(clubId)
+    if (joinIdx !== -1) {
+      gameStore.player.joinedClubs.splice(joinIdx, 1)
+    }
+
+    // 同步世界书（禁用对应条目）
+    await syncClubWorldbookState(gameStore.currentRunId)
+    
+    // 保存
+    if (typeof gameStore.saveToStorage === 'function') {
+      gameStore.saveToStorage(true)
+    }
+
+    alert(`社团"${club.name}"已删除`)
+    console.log('[ClubEditor] Club deleted:', clubId)
+  } catch (e) {
+    console.error('[ClubEditor] Error deleting club:', e)
+    alert('删除失败')
+  } finally {
+    clubEditorSaving.value = false
+  }
+}
+
 // 监听标签页切换
 watch(activeTab, async (newTab) => {
   if (newTab === 'composer') {
     await initComposer()
   } else if (newTab === 'characterEditor') {
     await loadCharacterPool()
+  } else if (newTab === 'clubEditor') {
+    // 确保社团数据已加载
+    if (!gameStore.allClubs || Object.keys(gameStore.allClubs).length === 0) {
+      await gameStore.loadClubData()
+    }
+    // 确保角色池已加载（用于成员选择）
+    if (characterPool.value.length === 0) {
+      await loadCharacterPool()
+    }
   }
 })
 </script>
@@ -2387,6 +2759,13 @@ watch(activeTab, async (newTab) => {
           </button>
           <button 
             class="tab-btn" 
+            :class="{ active: activeTab === 'characterEditor' }"
+            @click="activeTab = 'characterEditor'"
+          >
+            ✏️ 角色编辑器
+          </button>
+          <button 
+            class="tab-btn" 
             :class="{ active: activeTab === 'composer' }"
             @click="activeTab = 'composer'"
           >
@@ -2394,10 +2773,10 @@ watch(activeTab, async (newTab) => {
           </button>
           <button 
             class="tab-btn" 
-            :class="{ active: activeTab === 'characterEditor' }"
-            @click="activeTab = 'characterEditor'"
+            :class="{ active: activeTab === 'clubEditor' }"
+            @click="activeTab = 'clubEditor'"
           >
-            ✏️ 角色编辑器
+            🎭 社团编辑器
           </button>
         </div>
         
@@ -2535,6 +2914,31 @@ watch(activeTab, async (newTab) => {
                   </div>
                 </div>
                  <div v-if="Object.keys(processedTeacherGroups).length === 0" class="empty-hint">暂无教师数据</div>
+              </div>
+            </div>
+
+            <!-- 职工区域 -->
+            <div class="section staff-section" v-if="characterPool.some(c => c.role === 'staff')">
+              <div class="section-header">
+                <span class="section-icon">🏢</span>
+                <h4>校内职工</h4>
+              </div>
+              <div class="staff-grid">
+                <div 
+                  v-for="staff in characterPool.filter(c => c.role === 'staff')" 
+                  :key="staff.name"
+                  class="staff-card"
+                  @click="startEditCharacter(staff)"
+                >
+                  <div class="staff-info">
+                    <span class="staff-name">{{ staff.name }}</span>
+                    <span class="staff-title">{{ staff.staffTitle || '职工' }}</span>
+                  </div>
+                  <div class="staff-meta">
+                    <span class="staff-location">📍 {{ staff.workplace || '未定' }}</span>
+                  </div>
+                  <button class="delete-btn-small" @click.stop="deleteCharacter(staff)">×</button>
+                </div>
               </div>
             </div>
 
@@ -2960,6 +3364,56 @@ watch(activeTab, async (newTab) => {
               </div>
             </div>
           </div>
+
+          <!-- ========== 社团编辑器面板 ========== -->
+          <div v-if="activeTab === 'clubEditor'" class="tab-content">
+            <div class="club-editor-toolbar">
+              <input 
+                type="text" 
+                v-model="clubEditorSearchQuery" 
+                placeholder="搜索社团..." 
+                class="search-input"
+              />
+              <button class="add-btn" @click="addNewClub">+ 新增社团</button>
+            </div>
+            
+            <div class="club-editor-list">
+              <div 
+                v-for="club in filteredClubsList" 
+                :key="club.id"
+                class="club-card-editor"
+                :class="{ 'is-constant': club.isConstant }"
+                @click="startEditClub(club)"
+              >
+                <div class="club-header">
+                  <span class="club-name">{{ club.name }}</span>
+                  <span v-if="club.isConstant" class="constant-badge" title="常驻社团（蓝灯）">🔷</span>
+                </div>
+                <div class="club-desc">{{ club.description || '暂无描述' }}</div>
+                <div class="club-meta">
+                  <span class="meta-item">📍 {{ club.location || '未定' }}</span>
+                  <span class="meta-item">📅 {{ club.activityDay || '未定' }}</span>
+                  <span class="meta-item">👥 {{ club.memberCount }}人</span>
+                </div>
+                <div class="club-leadership">
+                  <div v-if="club.president" class="leader-row">
+                    <span class="leader-label">部长:</span>
+                    <span class="leader-value">{{ Array.isArray(club.president) ? club.president.join('、') : club.president }}</span>
+                  </div>
+                  <div v-if="club.vicePresident" class="leader-row">
+                    <span class="leader-label">副部:</span>
+                    <span class="leader-value">{{ Array.isArray(club.vicePresident) ? club.vicePresident.join('、') : club.vicePresident }}</span>
+                  </div>
+                </div>
+                <button class="delete-btn-small" @click.stop="deleteClub(club)">×</button>
+              </div>
+              <div v-if="filteredClubsList.length === 0" class="empty-state">
+                <span class="empty-icon">🎭</span>
+                <p>暂无社团数据</p>
+                <button class="add-btn" @click="addNewClub">创建第一个社团</button>
+              </div>
+            </div>
+          </div>
         </div>
         
         <!-- 班级组合器操作栏（固定在底部，不随内容滚动） -->
@@ -3064,6 +3518,7 @@ watch(activeTab, async (newTab) => {
               <select v-model="characterEditForm.role" class="input-field">
                 <option value="student">学生</option>
                 <option value="teacher">教师</option>
+                <option value="staff">校内职工</option>
               </select>
             </div>
             
@@ -3106,6 +3561,30 @@ watch(activeTab, async (newTab) => {
               </div>
             </template>
             
+            <!-- 职工专属字段 -->
+            <template v-if="characterEditForm.role === 'staff'">
+              <div class="form-row">
+                <label>职务名称：</label>
+                <input type="text" v-model="characterEditForm.staffTitle" class="input-field" placeholder="如：校医、图书管理员" />
+              </div>
+              <div class="form-row">
+                <label>工作地点：</label>
+                <div class="location-picker">
+                  <input type="text" v-model="characterEditForm.workplace" class="input-field" readonly placeholder="点击选择工作地点" />
+                  <button class="map-btn" @click="showMapEditorForWorkplace = true">🗺️ 选择</button>
+                </div>
+              </div>
+              <div class="form-row">
+                <label>日程模板：</label>
+                <select v-model="characterEditForm.scheduleTag" class="input-field">
+                  <option value="">自动推断 (staff_normal)</option>
+                  <option value="staff_nurse">校医 (staff_nurse)</option>
+                  <option value="staff_librarian">图书管理员 (staff_librarian)</option>
+                  <option value="staff_security">保安 (staff_security)</option>
+                </select>
+              </div>
+            </template>
+
             <!-- 学生专属字段 -->
             <template v-if="characterEditForm.role === 'student'">
               <div class="form-row">
@@ -3125,9 +3604,15 @@ watch(activeTab, async (newTab) => {
                   </option>
                 </select>
               </div>
+              <div class="form-row">
+                <label class="checkbox-label">
+                  <input type="checkbox" v-model="characterEditForm.isPending" />
+                  <span>加入待入学新生列表 (暂不分配班级)</span>
+                </label>
+              </div>
             </template>
             
-            <div class="form-row">
+            <div class="form-row" v-if="characterEditForm.role === 'student' && !characterEditForm.isPending">
               <label>班级（可选）：</label>
               <select v-model="characterEditForm.classId" class="input-field">
                 <option value="">无（待分配）</option>
@@ -3135,6 +3620,16 @@ watch(activeTab, async (newTab) => {
                   {{ classInfo.name || classId }}
                 </option>
               </select>
+            </div>
+
+            <div class="form-row">
+              <label>备注 (将发送给AI)：</label>
+              <textarea 
+                v-model="characterEditForm.notes" 
+                class="input-field textarea" 
+                rows="3" 
+                placeholder="关于该角色的额外说明，例如外貌特征、说话风格等..."
+              ></textarea>
             </div>
             
             <!-- 性格滑条 -->
@@ -3154,6 +3649,151 @@ watch(activeTab, async (newTab) => {
           </div>
         </div>
         
+        <!-- 社团编辑弹窗 -->
+        <div v-if="showClubEditor" class="modal-overlay" @click.self="showClubEditor = false">
+          <div class="modal large-modal club-edit-modal">
+            <h3>{{ editingClub ? '编辑社团' : '新增社团' }}</h3>
+            
+            <div class="modal-body-scroll">
+              <!-- 基本信息 -->
+              <div class="form-section">
+                <h4>基本信息</h4>
+                <div class="form-row">
+                  <label>社团名称：</label>
+                  <input type="text" v-model="clubEditForm.name" class="input-field" placeholder="请输入社团名称" />
+                </div>
+                <div class="form-row">
+                  <label>社团描述：</label>
+                  <textarea v-model="clubEditForm.description" class="input-field textarea" rows="3"></textarea>
+                </div>
+                <div class="form-row half">
+                  <div class="col">
+                    <label>核心技能：</label>
+                    <input type="text" v-model="clubEditForm.coreSkill" class="input-field" placeholder="如：绘画、编程" />
+                  </div>
+                  <div class="col">
+                    <label>活动日：</label>
+                    <select v-model="clubEditForm.activityDay" class="input-field">
+                      <option value="未定">未定</option>
+                      <option value="每日">每日</option>
+                      <option value="周一">周一</option>
+                      <option value="周二">周二</option>
+                      <option value="周三">周三</option>
+                      <option value="周四">周四</option>
+                      <option value="周五">周五</option>
+                      <option value="周六">周六</option>
+                      <option value="周日">周日</option>
+                      <option value="周末">周末</option>
+                    </select>
+                  </div>
+                </div>
+                
+                <div class="form-row">
+                  <label>活动地点：</label>
+                  <div class="location-picker">
+                    <input type="text" v-model="clubEditForm.location" class="input-field" readonly placeholder="点击右侧按钮选择" />
+                    <button class="map-btn" @click="openMapForClubLocation">🗺️ 选择</button>
+                  </div>
+                </div>
+
+                <div class="form-row">
+                  <label class="checkbox-label constant-toggle">
+                    <input type="checkbox" v-model="clubEditForm.isConstant" />
+                    <span class="toggle-text">
+                      <span class="toggle-title">常驻社团模式 (蓝灯)</span>
+                      <span class="toggle-desc">勾选后，该社团信息将始终包含在世界书中（如学生会）。不勾选则为普通社团（绿灯）。</span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- 人员管理 -->
+              <div class="form-section">
+                <h4>人员管理</h4>
+                
+                <div class="form-row">
+                  <label>顾问教师：</label>
+                  <input type="text" v-model="clubEditForm.advisor" class="input-field" placeholder="输入教师姓名" />
+                </div>
+
+                <!-- 部长设置 -->
+                <div class="leaders-config">
+                  <div class="leader-col">
+                    <label>部长 ({{ clubEditForm.president.length }})</label>
+                    <div class="tags-input">
+                      <span v-for="(name, idx) in clubEditForm.president" :key="idx" class="tag">
+                        {{ name }} <span class="remove-tag" @click="removeClubPresident(idx)">×</span>
+                      </span>
+                    </div>
+                  </div>
+                  <div class="leader-col">
+                    <label>副部长 ({{ clubEditForm.vicePresident.length }})</label>
+                    <div class="tags-input">
+                      <span v-for="(name, idx) in clubEditForm.vicePresident" :key="idx" class="tag">
+                        {{ name }} <span class="remove-tag" @click="removeClubVicePresident(idx)">×</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 成员列表 -->
+                <div class="members-list-section">
+                  <div class="members-header">
+                    <label>成员列表 ({{ clubEditForm.members.length }}人)</label>
+                    <input 
+                      type="text" 
+                      v-model="clubMemberSearchQuery" 
+                      placeholder="搜索并添加成员..." 
+                      class="member-search"
+                    />
+                  </div>
+                  
+                  <!-- 搜索结果下拉 -->
+                  <div v-if="clubMemberSearchQuery" class="member-search-results">
+                    <div 
+                      v-for="name in filteredMemberCandidates.slice(0, 10)" 
+                      :key="name" 
+                      class="search-item"
+                      @click="addClubMember(name)"
+                    >
+                      + {{ name }}
+                    </div>
+                    <div v-if="filteredMemberCandidates.length === 0" class="search-empty">无匹配角色</div>
+                  </div>
+
+                  <div class="members-grid">
+                    <div v-for="(name, idx) in clubEditForm.members" :key="idx" class="member-tag">
+                      <span class="member-name">{{ name }}</span>
+                      <div class="member-roles">
+                        <button 
+                          class="role-btn" 
+                          :class="{ active: clubEditForm.president.includes(name) }"
+                          @click="addClubPresident(name)"
+                          title="设为部长"
+                        >👑</button>
+                        <button 
+                          class="role-btn" 
+                          :class="{ active: clubEditForm.vicePresident.includes(name) }"
+                          @click="addClubVicePresident(name)"
+                          title="设为副部长"
+                        >⭐</button>
+                        <button class="remove-member-btn" @click="removeClubMember(idx)">×</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="modal-actions">
+              <button class="action-btn primary" @click="saveClubEdit" :disabled="clubEditorSaving">
+                {{ clubEditorSaving ? '保存中...' : '保存' }}
+              </button>
+              <button class="action-btn secondary" @click="showClubEditor = false">取消</button>
+            </div>
+          </div>
+        </div>
+
         <!-- 地图编辑器（创建教室） -->
         <MapEditorPanel
           v-if="showMapEditorForClassroom"
@@ -3164,6 +3804,25 @@ watch(activeTab, async (newTab) => {
           :prefill-name="getClassDisplayName(composerTargetClass) + '教室'"
           @location-selected="onClassroomLocationSelected"
           @close="closeMapEditor"
+        />
+
+        <!-- 地图编辑器（选择社团活动室） -->
+        <MapEditorPanel
+          v-if="showMapEditorForClub"
+          :selection-mode="true"
+          selection-title="选择社团活动室"
+          :occupied-locations="clubOccupiedLocations"
+          @location-selected="handleClubLocationSelected"
+          @close="showMapEditorForClub = false"
+        />
+
+        <!-- 地图编辑器（选择职工工作地点） -->
+        <MapEditorPanel
+          v-if="showMapEditorForWorkplace"
+          :selection-mode="true"
+          selection-title="选择工作地点"
+          @location-selected="(loc) => { characterEditForm.workplace = loc.name || loc.id; showMapEditorForWorkplace = false }"
+          @close="showMapEditorForWorkplace = false"
         />
 
         <!-- 角色冲突解决弹窗 -->
@@ -3351,6 +4010,19 @@ watch(activeTab, async (newTab) => {
                     <span class="ai-card-gender">{{ char.gender === 'female' ? '♀' : '♂' }}</span>
                     <span class="ai-card-work">{{ char.work }}</span>
                   </div>
+                  
+                  <!-- 角色类型建议 -->
+                  <div class="ai-role-suggestion" @click.stop>
+                    <span class="ai-detail-label">建议身份:</span>
+                    <select v-model="char.roleSuggestion" class="ai-role-select">
+                      <option value="student">学生</option>
+                      <option value="teacher">教师</option>
+                      <option value="staff">职工</option>
+                      <option value="uncertain">不确定</option>
+                    </select>
+                    <span class="ai-role-reason" v-if="char.roleReason">({{ char.roleReason }})</span>
+                  </div>
+
                   <div class="ai-card-details">
                     <div class="ai-card-row">
                       <span class="ai-detail-label">选课倾向:</span>
@@ -3826,6 +4498,62 @@ watch(activeTab, async (newTab) => {
   gap: 10px;
   padding: 10px;
   background: white;
+}
+
+/* 职工网格 */
+.staff-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  padding: 10px;
+  background: white;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+.staff-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 10px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.staff-card:hover {
+  border-color: var(--primary-color);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.staff-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.staff-name { font-weight: 600; color: #333; }
+.staff-title { 
+  font-size: 0.75rem; 
+  color: #555; 
+  background: #e0f2f1; 
+  padding: 2px 6px; 
+  border-radius: 4px; 
+}
+
+.staff-meta {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.staff-location {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .teacher-card {
@@ -5913,6 +6641,385 @@ watch(activeTab, async (newTab) => {
   font-size: 0.8rem;
 }
 
+/* ==================== 社团编辑器样式 ==================== */
+.club-editor-toolbar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.club-editor-toolbar .search-input {
+  flex: 1;
+  min-width: 200px;
+  padding: 10px 16px;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+}
+
+.club-editor-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.club-card-editor {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  padding: 14px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.club-card-editor:hover {
+  border-color: var(--primary-color);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  transform: translateY(-1px);
+}
+
+.club-card-editor.is-constant {
+  border-left: 3px solid #1976d2;
+  background: linear-gradient(to bottom right, #e3f2fd 0%, white 30%);
+}
+
+.club-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.club-name {
+  font-weight: 600;
+  font-size: 1.05rem;
+  color: #333;
+}
+
+.constant-badge {
+  font-size: 1rem;
+}
+
+.club-desc {
+  font-size: 0.85rem;
+  color: #666;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 2.4em;
+}
+
+.club-meta {
+  display: flex;
+  gap: 10px;
+  font-size: 0.8rem;
+  color: #888;
+  flex-wrap: wrap;
+}
+
+.meta-item {
+  background: #f5f5f5;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.club-leadership {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px dashed #eee;
+  font-size: 0.85rem;
+}
+
+.leader-row {
+  display: flex;
+  margin-bottom: 2px;
+}
+
+.leader-label {
+  color: #888;
+  margin-right: 6px;
+  min-width: 35px;
+}
+
+.leader-value {
+  color: #333;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 社团编辑弹窗 */
+.club-edit-modal {
+  width: 600px;
+  max-width: 95%;
+  height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-body-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.form-section {
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #eee;
+}
+
+.form-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.form-section h4 {
+  margin: 0 0 16px 0;
+  color: #1976d2;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-section h4::before {
+  content: '';
+  display: block;
+  width: 4px;
+  height: 16px;
+  background: #1976d2;
+  border-radius: 2px;
+}
+
+.half {
+  display: flex;
+  gap: 16px;
+}
+
+.col { flex: 1; }
+
+.textarea { resize: vertical; }
+
+.location-picker {
+  display: flex;
+  gap: 8px;
+}
+
+.map-btn {
+  padding: 8px 12px;
+  background: #e3f2fd;
+  color: #1976d2;
+  border: 1px solid #90caf9;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.map-btn:hover {
+  background: #bbdefb;
+}
+
+/* 策略开关 */
+.checkbox-label.constant-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  background: #e3f2fd;
+  border: 1px solid #90caf9;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.checkbox-label.constant-toggle:hover {
+  background: #bbdefb;
+}
+
+.checkbox-label input[type="checkbox"] {
+  margin-top: 4px;
+  width: 18px;
+  height: 18px;
+  accent-color: #1976d2;
+}
+
+.toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.toggle-title {
+  font-weight: 600;
+  color: #1565c0;
+}
+
+.toggle-desc {
+  font-size: 0.85rem;
+  color: #546e7a;
+  line-height: 1.4;
+}
+
+/* 领导层配置 */
+.leaders-config {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.leader-col {
+  flex: 1;
+  background: #f9f9f9;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+.tags-input {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 32px;
+}
+
+.tag {
+  background: white;
+  border: 1px solid #ccc;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.remove-tag {
+  color: #999;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.remove-tag:hover { color: #ff5252; }
+
+/* 成员列表 */
+.members-list-section {
+  background: #f9f9f9;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+  position: relative;
+}
+
+.members-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.member-search {
+  padding: 6px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  width: 200px;
+}
+
+.member-search-results {
+  position: absolute;
+  top: 45px;
+  right: 12px;
+  width: 200px;
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  z-index: 100;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.search-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.search-item:hover { background: #f0f0f0; }
+
+.search-empty {
+  padding: 12px;
+  color: #999;
+  text-align: center;
+  font-size: 0.9rem;
+}
+
+.members-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.member-tag {
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.member-name { font-weight: 500; color: #333; }
+
+.member-roles {
+  display: flex;
+  gap: 4px;
+}
+
+.role-btn {
+  border: none;
+  background: #f0f0f0;
+  color: #ccc;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  transition: all 0.2s;
+}
+
+.role-btn:hover { background: #e0e0e0; }
+
+.role-btn.active {
+  background: #fff8e1;
+  color: #ffc107;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.remove-member-btn {
+  border: none;
+  background: none;
+  color: #ff5252;
+  cursor: pointer;
+  font-size: 1.1rem;
+  padding: 0 4px;
+  opacity: 0.6;
+}
+
+.remove-member-btn:hover { opacity: 1; }
+
 /* AI导入移动端适配 */
 @media (max-width: 480px) {
   .ai-import-modal,
@@ -5939,6 +7046,30 @@ watch(activeTab, async (newTab) => {
   .ai-card-row {
     flex-direction: column;
     gap: 2px;
+  }
+
+  .ai-role-suggestion {
+    margin-bottom: 8px;
+    padding: 4px 8px;
+    background: #f5f5f5;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .ai-role-select {
+    padding: 2px 4px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 0.85rem;
+  }
+
+  .ai-role-reason {
+    font-size: 0.8rem;
+    color: #666;
+    font-style: italic;
   }
   
   .ai-nf-reason {

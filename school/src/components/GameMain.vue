@@ -497,7 +497,8 @@ const sendMessage = async () => {
   let isBlockSystemTag = false
   let isConsumingPostTagWhitespace = false
   const allowedTags = gameStore.settings.customContentTags || ['content']
-  const startTagRegex = new RegExp(`<(${allowedTags.join('|')})>`, 'i')
+  // 优化正则：支持带属性或空格的标签，如 <content > 或 <content type="text">
+  const startTagRegex = new RegExp(`<(${allowedTags.join('|')})(?:\\s+[^>]*)?>`, 'i')
 
   const blockSystemTags = [
     'social_msg', 'add_friend', 'social_status', 
@@ -732,6 +733,23 @@ const sendMessage = async () => {
         }
       }
       
+      // 流式结束后，如果从未找到正文标签（currentTagName 一直为 null），
+      // 且没有输出过任何内容，显示提示
+      if (!hasAddedLog && !currentTagName && fullResponse && fullResponse !== '__STOPPED__' && fullResponse !== '__ERROR__') {
+        const tagNames = allowedTags.join(', ')
+        console.warn(`[GameMain] 流式解析未找到正文标签 <${tagNames}>，AI 可能未按格式输出`)
+        const warningContent = `<div class="empty-reply-warning format-issue">
+            <div class="warning-header">⚠️ 未检测到正文内容</div>
+            <div class="warning-body">AI 回复中未找到正文标签（如 &lt;${allowedTags[0]}&gt;），流式输出无法显示。</div>
+            <div class="warning-detail">后台已收到完整回复，变量已正常更新。正在尝试解析完整回复...</div>
+            <div class="warning-hint">💡 如内容仍为空，建议点击"重roll"重新生成。</div>
+          </div>`
+        currentAiLog.value.content = warningContent
+        gameLog.value.push(currentAiLog.value)
+        hasAddedLog = true
+        handleNewContent(contentAreaRef.value)
+      }
+      
       if (hasAddedLog) {
         delete currentAiLog.value.isStreaming
       }
@@ -749,6 +767,35 @@ const sendMessage = async () => {
     }
 
     if (fullResponse === '__STOPPED__' || fullResponse === '__ERROR__') {
+      const isStop = fullResponse === '__STOPPED__'
+      const warningContent = isStop
+        ? `<div class="empty-reply-warning">
+            <div class="warning-header">⚠️ 生成已停止</div>
+            <div class="warning-body">AI 生成已被手动中断。</div>
+            <div class="warning-hint">💡 如需继续，请重新发送消息或点击"重roll"。</div>
+          </div>`
+        : `<div class="empty-reply-warning error">
+            <div class="warning-header">❌ 生成出错</div>
+            <div class="warning-body">AI 生成过程中发生错误，请检查后台日志。</div>
+            <div class="warning-hint">💡 建议检查 API 连接状态，或点击"重roll"重试。</div>
+          </div>`
+      
+      // 如果流式阶段已有日志，更新内容
+      if (hasAddedLog) {
+        if (!currentAiLog.value.content?.trim()) {
+          currentAiLog.value.content = warningContent
+        }
+        delete currentAiLog.value.isStreaming
+        delete currentAiLog.value.isPlaceholder
+      } else {
+        gameLog.value.push({
+          type: 'ai',
+          content: warningContent,
+          isWarning: true
+        })
+      }
+      gameStore.currentFloor = gameLog.value.length
+      isGenerating.value = false
       return
     }
 
@@ -1014,32 +1061,73 @@ const processAIResponse = async (response) => {
             </div>`
   })
 
-  if (cleanedContent || displayContent || gameStore.settings.debugMode) {
+  // 诊断空回原因
+  const hasCleanedContent = !!cleanedContent?.trim()
+  const hasDisplayContent = !!displayContent?.trim()
+  const hasRawResponse = !!cleanResponse?.trim()
+  
+  if (hasCleanedContent || hasDisplayContent || hasRawResponse || gameStore.settings.debugMode) {
     const aiSnapshot = gameStore.getGameState()
     const lastLog = gameLog.value[gameLog.value.length - 1]
     const trueRawContent = cleanResponse
 
+    // 当 displayContent 为空但原始回复非空时，生成诊断提示
+    let finalDisplayContent = displayContent
+    if (!hasDisplayContent && hasRawResponse) {
+      console.warn('[GameMain] displayContent 为空但 AI 有原始回复，诊断原因...')
+      
+      // 诊断：检查是否所有内容都被系统标签清理掉了
+      const rawStrippedGameData = cleanResponse.replace(/\[GAME_DATA\][\s\S]*?\[\/GAME_DATA\]/g, '').trim()
+      const hasOnlySystemTags = rawStrippedGameData.length > 0 && !hasCleanedContent
+      
+      let reason = ''
+      let detail = ''
+      if (hasOnlySystemTags) {
+        reason = 'AI 回复仅包含系统标签，无可显示的正文内容'
+        detail = '回复中的内容（如论坛帖子、社交消息、数据标签等）已被正常处理，但没有叙事正文。'
+      } else if (!hasCleanedContent && !rawStrippedGameData.trim()) {
+        reason = 'AI 返回了空回复'
+        detail = '清理后的回复内容为空。'
+      } else {
+        reason = '正文内容经过正则和清理后变为空'
+        detail = '可能是自定义正则规则过滤掉了所有内容。'
+      }
+      
+      const warningHtml = `<div class="empty-reply-warning content-empty">
+          <div class="warning-header">⚠️ AI回复无正文显示</div>
+          <div class="warning-body">${reason}</div>
+          <div class="warning-detail">${detail}</div>
+          <div class="warning-hint">💡 变量已正常更新。建议点击"重roll"重新生成，或长按此消息编辑查看原始内容。</div>
+        </div>`
+      
+      hasContentWarning.value = true
+      finalDisplayContent = warningHtml
+    }
+
     if (lastLog && lastLog.isPlaceholder) {
-      if (!displayContent && lastLog.content && !gameStore.settings.debugMode) {
-        hasContentWarning.value = true
+      if (!hasDisplayContent && lastLog.content && !gameStore.settings.debugMode) {
+        // 流式阶段有内容但后处理后为空：保留流式内容并附加提示
+        const streamContent = lastLog.content
+        lastLog.content = finalDisplayContent || streamContent
         lastLog.snapshot = aiSnapshot
         lastLog.preVariableSnapshot = preVariableSnapshot
         lastLog.rawContent = trueRawContent || lastLog.content
         delete lastLog.isPlaceholder
         delete lastLog.isStreaming
-        return
+        
+        // 不再 return，继续后续总结和保存流程
+      } else {
+        lastLog.content = finalDisplayContent
+        lastLog.snapshot = aiSnapshot
+        lastLog.preVariableSnapshot = preVariableSnapshot
+        lastLog.rawContent = trueRawContent
+        delete lastLog.isPlaceholder
+        delete lastLog.isStreaming
       }
-
-      lastLog.content = displayContent
-      lastLog.snapshot = aiSnapshot
-      lastLog.preVariableSnapshot = preVariableSnapshot
-      lastLog.rawContent = trueRawContent
-      delete lastLog.isPlaceholder
-      delete lastLog.isStreaming
     } else {
       gameLog.value.push({ 
         type: 'ai', 
-        content: displayContent,
+        content: finalDisplayContent,
         snapshot: aiSnapshot,
         preVariableSnapshot: preVariableSnapshot,
         rawContent: trueRawContent

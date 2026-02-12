@@ -439,7 +439,9 @@ export interface NpcStats {
   isAlive: boolean
   aliveRemaining?: number
   location: string
-  role?: 'student' | 'teacher' | 'other'
+  role?: 'student' | 'teacher' | 'staff' | 'other'
+  staffTitle?: string
+  workplace?: string
   mood?: NpcMoodType
   moodReason?: string
   moodDuration?: number
@@ -525,6 +527,7 @@ export interface GameState {
   player: PlayerStats
   npcs: NpcStats[]
   npcRelationships: Record<string, NpcFullData>
+  characterNotes: Record<string, string>
   graduatedNpcs: GraduatedNpc[]
   lastAcademicYear: number // 上次进级的学年（防止重复触发）
   gameTime: {

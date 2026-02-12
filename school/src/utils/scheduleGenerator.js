@@ -791,7 +791,7 @@ export function getCurrentClassStatus(gameTime, weeklySchedule) {
       return {
         status: 'in_class',
         currentClass: classInfo,
-        message: `现在是${classInfo.subject}课，地点：${classInfo.location}，下课时间：${classInfo.end}`,
+        message: `现在是${classInfo.subject}课${classInfo.teacher ? '（' + classInfo.teacher + '）' : ''}，地点：${classInfo.location}，下课时间：${classInfo.end}`,
         eventInfo: dayStatus.eventInfo
       }
     } else if (currentMinutes < start) {
@@ -799,7 +799,7 @@ export function getCurrentClassStatus(gameTime, weeklySchedule) {
       return {
         status: 'between_classes',
         nextClass: classInfo,
-        message: `下一节课是${classInfo.subject}，地点：${classInfo.location}，上课时间：${classInfo.start}`,
+        message: `下一节课是${classInfo.subject}${classInfo.teacher ? '（' + classInfo.teacher + '）' : ''}，地点：${classInfo.location}，上课时间：${classInfo.start}`,
         eventInfo: dayStatus.eventInfo
       }
     }
@@ -862,7 +862,7 @@ export function getTodayScheduleSummary(gameTime, weeklySchedule) {
   // 生成课表摘要
   const classes = effectiveSchedule
     .filter(c => !c.isEmpty)
-    .map(c => `${c.start} ${c.subject}(${c.location})`)
+    .map(c => `${c.start} ${c.subject}(${c.teacher ? c.teacher + ' | ' : ''}${c.location})`)
   
   if (classes.length === 0) {
     return prefix + '今天无课程安排。'
@@ -933,7 +933,7 @@ export function getNextDayScheduleSummary(gameTime, weeklySchedule) {
   // 5. 生成课表字符串
   const classes = effectiveSchedule
     .filter(c => !c.isEmpty)
-    .map(c => `${c.start} ${c.subject}(${c.location})`)
+    .map(c => `${c.start} ${c.subject}(${c.teacher ? c.teacher + ' | ' : ''}${c.location})`)
   
   if (classes.length === 0) {
     return prefix + '全天无课。'

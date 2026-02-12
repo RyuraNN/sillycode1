@@ -247,13 +247,13 @@ export const buildSchedulePrompt = (gameTime, weeklySchedule) => {
       break
     case 'before_school':
       if (classStatus.nextClass) {
-        prompt += `\n[当前状态] 尚未开始上课。第一节课：${classStatus.nextClass.subject}，${classStatus.nextClass.start}开始，地点：${classStatus.nextClass.location}`
+      prompt += `\n[当前状态] 尚未开始上课。第一节课：${classStatus.nextClass.subject}${classStatus.nextClass.teacher ? '（' + classStatus.nextClass.teacher + '）' : ''}，${classStatus.nextClass.start}开始，地点：${classStatus.nextClass.location}`
       }
       break
     case 'lunch':
       prompt += `\n[当前状态] ${classStatus.message}`
       if (classStatus.nextClass) {
-        prompt += `。下午第一节课：${classStatus.nextClass.subject}，${classStatus.nextClass.start}开始，地点：${classStatus.nextClass.location}`
+        prompt += `。下午第一节课：${classStatus.nextClass.subject}${classStatus.nextClass.teacher ? '（' + classStatus.nextClass.teacher + '）' : ''}，${classStatus.nextClass.start}开始，地点：${classStatus.nextClass.location}`
       }
       break
     case 'club_time':
@@ -594,11 +594,26 @@ export const buildSystemPromptContent = (gameState) => {
         details += `Club: ${clubNames.length > 0 ? clubNames.join(', ') : 'None'}\n`
         
         // 角色详情 (Role)
-        details += `Role: ${npc.role || 'Unknown'}\n`
+        let roleStr = npc.role || 'Unknown'
+        if (npc.role === 'staff' && npc.staffTitle) {
+          roleStr += ` (${npc.staffTitle})`
+        }
+        details += `Role: ${roleStr}\n`
+        
+        // 工作地点 (职工)
+        if (npc.role === 'staff' && npc.workplace) {
+          const workplaceName = getItem(npc.workplace)?.name || npc.workplace
+          details += `Workplace: ${workplaceName}\n`
+        }
 
         // 心情状态
         if (npc.mood) {
           details += `Mood: ${npc.mood} ${npc.moodReason ? `(Reason: ${npc.moodReason})` : ''}\n`
+        }
+
+        // 备注信息
+        if (gameState.characterNotes && gameState.characterNotes[npc.name]) {
+          details += `Notes: ${gameState.characterNotes[npc.name]}\n`
         }
 
         // 关系链

@@ -662,13 +662,42 @@ export const classClubActions = {
   async rebuildWorldbookState(this: any) {
     console.log('[GameStore] Rebuilding worldbook state for run:', this.currentRunId)
     
+    // 【防护】验证世界书内容确实已加载，避免在内容未就绪时执行写操作导致数据缺失
+    if (typeof window.getCharWorldbookNames === 'function' && typeof window.getWorldbook === 'function') {
+      try {
+        const books = window.getCharWorldbookNames('current')
+        const bookName = books?.primary || (books?.additional && books.additional[0])
+        if (bookName) {
+          const entries = await window.getWorldbook(bookName)
+          if (!entries || !Array.isArray(entries) || entries.length === 0) {
+            console.error('[GameStore] ⚠️ rebuildWorldbookState aborted: worldbook entries not loaded yet for', bookName)
+            console.error('[GameStore] This may cause incomplete world data. Skipping rebuild to prevent data corruption.')
+            return
+          }
+          console.log(`[GameStore] Worldbook "${bookName}" verified: ${entries.length} entries available`)
+        }
+      } catch (e) {
+        console.warn('[GameStore] Error verifying worldbook readiness, proceeding with caution:', e)
+      }
+    }
+    
     // 【调试】记录当前玩家社团状态
     const playerClubsBefore = this.player?.joinedClubs ? [...this.player.joinedClubs] : []
     const allClubIdsBefore = this.allClubs ? Object.keys(this.allClubs) : []
     console.log('[GameStore] Before rebuild - joinedClubs:', playerClubsBefore, 'allClubs:', allClubIdsBefore)
 
-    // 确保班级数据已加载（因为 setPlayerClass 和关系系统都依赖它）
-    await this.loadClassData()
+    // 【修复】如果 allClassData 已经从快照恢复（非空），不要用 loadClassData 覆盖
+    // loadClassData → fetchClassDataFromWorldbook 无法读取带 runId 的条目 [Class:2-A:abc123]，
+    // 会导致进级后的班级数据被回退为旧的原始条目数据
+    const hasRestoredClassData = this.allClassData && Object.keys(this.allClassData).length > 0
+    if (hasRestoredClassData) {
+      console.log('[GameStore] allClassData already restored from snapshot, skipping loadClassData. Classes:', Object.keys(this.allClassData))
+      // 仅重新初始化 NPC 列表（确保所有班级的 NPC 都在全局列表中）
+      this.initializeAllClassNpcs()
+    } else {
+      // 首次加载或数据为空时，从世界书加载
+      await this.loadClassData()
+    }
     
     // 在重新加载前，确保内存中的玩家社团数据被保留（如果需要）
     // loadClubData 会尝试保留 existingClubs，所以不会丢失内存中的社团数据

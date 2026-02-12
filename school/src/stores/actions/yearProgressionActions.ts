@@ -352,13 +352,19 @@ export const yearProgressionActions = {
         club.members = club.members.filter(m => !graduatedNames.has(m))
       }
 
-      // 清理社长
-      if (typeof club.president === 'string' && graduatedNames.has(club.president)) {
+      // 清理社长（支持 string 和 string[] 类型）
+      if (Array.isArray(club.president)) {
+        club.president = (club.president as string[]).filter(p => !graduatedNames.has(p))
+        if ((club.president as string[]).length === 0) club.president = ''
+      } else if (typeof club.president === 'string' && graduatedNames.has(club.president)) {
         club.president = ''
       }
 
-      // 清理副社长
-      if (typeof club.vicePresident === 'string' && graduatedNames.has(club.vicePresident)) {
+      // 清理副社长（支持 string 和 string[] 类型）
+      if (Array.isArray(club.vicePresident)) {
+        club.vicePresident = (club.vicePresident as string[]).filter(vp => !graduatedNames.has(vp))
+        if ((club.vicePresident as string[]).length === 0) club.vicePresident = ''
+      } else if (typeof club.vicePresident === 'string' && graduatedNames.has(club.vicePresident)) {
         club.vicePresident = ''
       }
 
@@ -368,8 +374,15 @@ export const yearProgressionActions = {
       }
 
       // 检查社团是否还有活跃成员
+      // 需要考虑 president/vicePresident 可能是数组的情况
+      const hasPresident = Array.isArray(club.president)
+        ? (club.president as string[]).length > 0
+        : !!club.president
+      const hasVicePresident = Array.isArray(club.vicePresident)
+        ? (club.vicePresident as string[]).length > 0
+        : !!club.vicePresident
       const hasActiveMembers = (club.members && club.members.length > 0) ||
-        (club.president && !graduatedNames.has(club.president as string))
+        hasPresident || hasVicePresident
 
       if (!hasActiveMembers && clubId !== 'student_council') {
         // 标记社团为关闭
@@ -605,6 +618,9 @@ export const yearProgressionActions = {
     const sortedGroups = Array.from(normalGroups.entries())
       .sort((a, b) => b[1].length - a[1].length)
 
+    // 预先缓存普通班级 ID 列表，避免每次分配时重新计算
+    const normalClassIds = Object.keys(newClasses).filter(id => extractGrade(id) === 1 && !id.endsWith('E'))
+
     for (const [_work, students] of sortedGroups) {
       // 找最少人的班级
       let minIdx = 0
@@ -616,9 +632,16 @@ export const yearProgressionActions = {
         }
       }
 
+      // 安全检查：确保索引不越界
+      const safeClassId = (idx: number) => {
+        if (idx < normalClassIds.length) return normalClassIds[idx]
+        // 后备：使用取模或构造默认ID
+        return normalClassIds[idx % normalClassIds.length] || makeClassId(1, classLetters[idx % classLetters.length])
+      }
+
       // 如果整组加入后不超过20人，整组一起
       if (classBuckets[minIdx].length + students.length <= 20) {
-        const classId = Object.keys(newClasses).filter(id => extractGrade(id) === 1 && !id.endsWith('E'))[minIdx]
+        const classId = safeClassId(minIdx)
         for (const student of students) {
           classBuckets[minIdx].push({
             name: student.name,
@@ -638,13 +661,13 @@ export const yearProgressionActions = {
           for (let i = 0; i < classBuckets.length; i++) {
             if (classBuckets[i].length < mc) { mc = classBuckets[i].length; mi = i }
           }
-          const classId = Object.keys(newClasses).filter(id => extractGrade(id) === 1 && !id.endsWith('E'))[mi]
+          const classId = safeClassId(mi)
           classBuckets[mi].push({
             name: student.name,
             gender: student.gender || 'female',
             origin: student.origin || '',
             role: 'student',
-            classId: classId || makeClassId(1, classLetters[mi]),
+            classId: classId,
             electivePreference: student.electivePreference || 'general',
             scheduleTag: student.scheduleTag || ''
           })

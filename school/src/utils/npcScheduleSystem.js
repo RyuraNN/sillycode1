@@ -1022,6 +1022,256 @@ export const DEFAULT_TEMPLATES = {
     ]
   },
 
+  // ============ 校内职工（通用）：在指定工作地点上班 ============
+  staff_normal: {
+    id: 'staff_normal',
+    name: '校内职工',
+    slots: [
+      // 工作日日程
+      { period: 'early_morning', weekdays: ['weekday'], locations: [
+        { id: 'home', weight: 60 },
+        { id: '{workplace}', weight: 40 }
+      ]},
+      { period: 'morning', weekdays: ['weekday'], locations: [
+        { id: '{workplace}', weight: 90 },
+        { id: 'ab_staff_room', weight: 10 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekday'], locations: [
+        { id: '{workplace}', weight: 85 },
+        { id: 'th_support_area', weight: 15 }
+      ]},
+      { period: 'lunch', weekdays: ['weekday'], locations: [
+        { id: 'cafeteria', weight: 50 },
+        { id: '{workplace}', weight: 40 },
+        { id: 'ab_staff_room', weight: 10 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekday'], locations: [
+        { id: '{workplace}', weight: 85 },
+        { id: 'th_support_area', weight: 15 }
+      ]},
+      { period: 'club_time', weekdays: ['weekday'], locations: [
+        { id: '{workplace}', weight: 60 },
+        { id: 'ab_staff_room', weight: 20 },
+        { id: 'home', weight: 20 }
+      ]},
+      // 周末日程
+      { period: 'early_morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 100 }
+      ]},
+      { period: 'morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 70 },
+        { id: 'shopping_street', weight: 30 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 50 },
+        { id: 'shopping_street', weight: 30 },
+        { id: '{workplace}', weight: 20 }
+      ]},
+      { period: 'lunch', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 60 },
+        { id: 'shopping_street', weight: 40 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 50 },
+        { id: 'shopping_street', weight: 30 },
+        { id: 'central_park', weight: 20 }
+      ]},
+      { period: 'club_time', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 60 },
+        { id: 'shopping_street', weight: 40 }
+      ]},
+      // 通用时段
+      { period: 'evening', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
+    ]
+  },
+
+  // ============ 校医：以校医室为主 ============
+  staff_nurse: {
+    id: 'staff_nurse',
+    name: '校医',
+    slots: [
+      { period: 'early_morning', weekdays: ['weekday'], locations: [
+        { id: 'home', weight: 50 },
+        { id: 'infirmary', weight: 50 }
+      ]},
+      { period: 'morning', weekdays: ['weekday'], locations: [
+        { id: 'infirmary', weight: 95 },
+        { id: 'ab_staff_room', weight: 5 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekday'], locations: [
+        { id: 'infirmary', weight: 95 },
+        { id: 'track_and_field', weight: 5 }
+      ]},
+      { period: 'lunch', weekdays: ['weekday'], locations: [
+        { id: 'cafeteria', weight: 40 },
+        { id: 'infirmary', weight: 50 },
+        { id: 'ab_staff_room', weight: 10 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekday'], locations: [
+        { id: 'infirmary', weight: 90 },
+        { id: 'main_gymnasium', weight: 10 }
+      ]},
+      { period: 'club_time', weekdays: ['weekday'], locations: [
+        { id: 'infirmary', weight: 70 },
+        { id: 'home', weight: 30 }
+      ]},
+      { period: 'early_morning', weekdays: ['weekend'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 70 },
+        { id: 'infirmary', weight: 30 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 60 },
+        { id: 'infirmary', weight: 20 },
+        { id: 'shopping_street', weight: 20 }
+      ]},
+      { period: 'lunch', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 70 },
+        { id: 'cafe_maisy', weight: 30 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 60 },
+        { id: 'shopping_street', weight: 40 }
+      ]},
+      { period: 'club_time', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 70 },
+        { id: 'shopping_street', weight: 30 }
+      ]},
+      { period: 'evening', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
+    ]
+  },
+
+  // ============ 图书管理员：以图书馆为主 ============
+  staff_librarian: {
+    id: 'staff_librarian',
+    name: '图书管理员',
+    slots: [
+      { period: 'early_morning', weekdays: ['weekday'], locations: [
+        { id: 'home', weight: 60 },
+        { id: 'library', weight: 40 }
+      ]},
+      { period: 'morning', weekdays: ['weekday'], locations: [
+        { id: 'library', weight: 90 },
+        { id: 'lib_reading_hall', weight: 10 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekday'], locations: [
+        { id: 'library', weight: 70 },
+        { id: 'lib_reading_hall', weight: 30 }
+      ]},
+      { period: 'lunch', weekdays: ['weekday'], locations: [
+        { id: 'cafeteria', weight: 40 },
+        { id: 'library', weight: 50 },
+        { id: 'ab_staff_room', weight: 10 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekday'], locations: [
+        { id: 'library', weight: 70 },
+        { id: 'lib_reading_hall', weight: 30 }
+      ]},
+      { period: 'club_time', weekdays: ['weekday'], locations: [
+        { id: 'library', weight: 60 },
+        { id: 'home', weight: 30 },
+        { id: 'bookstore', weight: 10 }
+      ]},
+      { period: 'early_morning', weekdays: ['weekend'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 60 },
+        { id: 'city_library', weight: 40 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 40 },
+        { id: 'city_library', weight: 30 },
+        { id: 'bookstore', weight: 30 }
+      ]},
+      { period: 'lunch', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 60 },
+        { id: 'cafe_maisy', weight: 40 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 50 },
+        { id: 'bookstore', weight: 30 },
+        { id: 'city_library', weight: 20 }
+      ]},
+      { period: 'club_time', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 70 },
+        { id: 'bookstore', weight: 30 }
+      ]},
+      { period: 'evening', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
+    ]
+  },
+
+  // ============ 保安/门卫：校门口和巡逻 ============
+  staff_security: {
+    id: 'staff_security',
+    name: '保安',
+    slots: [
+      { period: 'early_morning', weekdays: ['weekday'], locations: [
+        { id: 'th_main_gate', weight: 80 },
+        { id: 'home', weight: 20 }
+      ]},
+      { period: 'morning', weekdays: ['weekday'], locations: [
+        { id: 'th_main_gate', weight: 70 },
+        { id: 'th_courtyard', weight: 20 },
+        { id: 'th_support_area', weight: 10 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekday'], locations: [
+        { id: 'th_main_gate', weight: 40 },
+        { id: 'th_courtyard', weight: 30 },
+        { id: 'th_support_area', weight: 30 }
+      ]},
+      { period: 'lunch', weekdays: ['weekday'], locations: [
+        { id: 'cafeteria', weight: 40 },
+        { id: 'th_main_gate', weight: 40 },
+        { id: 'th_support_area', weight: 20 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekday'], locations: [
+        { id: 'th_main_gate', weight: 40 },
+        { id: 'th_courtyard', weight: 30 },
+        { id: 'th_support_area', weight: 30 }
+      ]},
+      { period: 'club_time', weekdays: ['weekday'], locations: [
+        { id: 'th_main_gate', weight: 60 },
+        { id: 'th_courtyard', weight: 20 },
+        { id: 'home', weight: 20 }
+      ]},
+      { period: 'early_morning', weekdays: ['weekend'], locations: [
+        { id: 'th_main_gate', weight: 50 },
+        { id: 'home', weight: 50 }
+      ]},
+      { period: 'morning', weekdays: ['weekend'], locations: [
+        { id: 'th_main_gate', weight: 40 },
+        { id: 'home', weight: 60 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 60 },
+        { id: 'th_main_gate', weight: 40 }
+      ]},
+      { period: 'lunch', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 70 },
+        { id: 'convenience_store', weight: 30 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 60 },
+        { id: 'th_main_gate', weight: 40 }
+      ]},
+      { period: 'club_time', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 70 },
+        { id: 'shopping_street', weight: 30 }
+      ]},
+      { period: 'evening', weekdays: ['all'], locations: [
+        { id: 'th_main_gate', weight: 30 },
+        { id: 'home', weight: 70 }
+      ]},
+      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
+    ]
+  },
+
   // ============ 毕业生/大学生：在大学及周边活动 ============
   student_graduated: {
     id: 'student_graduated',
@@ -1102,6 +1352,7 @@ export const DEFAULT_TEMPLATES = {
 export const DEFAULT_ROLE_TEMPLATE_MAP = {
   student: 'student_normal',
   teacher: 'teacher',
+  staff: 'staff_normal',
   other: 'student_normal'
 }
 

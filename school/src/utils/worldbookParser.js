@@ -2179,6 +2179,94 @@ function formatMapItem(item) {
  * 保存地图数据到世界书
  * @param {Array} mapDataList 地图数据数组
  */
+/**
+ * 更新教职工名册到世界书
+ * @param {Array} staffList 职工列表
+ * @param {string} runId 当前存档ID
+ */
+export async function updateStaffRosterInWorldbook(staffList, runId) {
+  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
+    console.warn('[WorldbookParser] Worldbook API not available for staff roster')
+    return false
+  }
+
+  try {
+    const books = window.getCharWorldbookNames('current')
+    const bookName = books.primary || (books.additional && books.additional[0])
+    
+    if (!bookName) return false
+
+    console.log(`[WorldbookParser] Updating staff roster in worldbook: ${bookName}`)
+
+    // 格式化内容
+    let content = '[天华学园教职工名册]\n'
+    
+    // 按工作地点分组
+    const groups = {}
+    staffList.forEach(staff => {
+      const location = staff.workplace || '未知地点'
+      if (!groups[location]) groups[location] = []
+      groups[location].push(staff)
+    })
+    
+    for (const [location, staffs] of Object.entries(groups)) {
+      const staffStr = staffs.map(s => {
+        let str = s.name
+        if (s.staffTitle) str += `(${s.staffTitle})`
+        return str
+      }).join('、')
+      content += `${location} - ${staffStr}\n`
+    }
+
+    const entryName = `[TH_StaffRoster] 教职工名册`
+    
+    // 提取所有职工名字作为关键词
+    const keys = staffList.map(s => s.name)
+    keys.push('教职工', '职工', '校工')
+
+    await window.updateWorldbookWith(bookName, (entries) => {
+      const newEntries = [...entries]
+      const index = newEntries.findIndex(e => e.name === entryName)
+      
+      const entry = {
+        name: entryName,
+        content: content,
+        key: keys,
+        strategy: {
+          type: 'constant', // 蓝灯
+          keys: keys,
+          keys_secondary: { logic: 'and_any', keys: [] },
+          scan_depth: 'same_as_global'
+        },
+        position: {
+          type: 'before_character_definition',
+          order: 5 // 权重较高
+        },
+        probability: 100,
+        enabled: true,
+        recursion: {
+          prevent_outgoing: true
+        }
+      }
+
+      if (index !== -1) {
+        newEntries[index] = { ...newEntries[index], ...entry }
+      } else {
+        newEntries.push(entry)
+      }
+      
+      return newEntries
+    })
+    
+    console.log('[WorldbookParser] Staff roster updated')
+    return true
+
+  } catch (e) {
+    console.error('[WorldbookParser] Error updating staff roster:', e)
+    return false
+  }
+}
+
 export async function saveMapDataToWorldbook(mapDataList) {
   if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
     console.warn('[WorldbookParser] Worldbook API not available for saving map')

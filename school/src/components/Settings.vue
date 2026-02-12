@@ -574,7 +574,7 @@ const loadModels = async () => {
           <div class="card-body credits-body">
             <p>原作者：墨沈</p>
             <p @click="handleCreditsClick" style="cursor: pointer; user-select: none;">重置：Elyrene</p>
-            <p>版本号 V1.5</p>
+            <p>版本号 V1.7</p>
             <p>免费发布于DC类脑社区</p>
           </div>
         </div>
