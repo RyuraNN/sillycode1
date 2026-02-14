@@ -10,6 +10,8 @@ export const timeActions = {
    * 推进时间 (minutes)
    */
   advanceTime(this: any, minutes: number) {
+    const previousDay = this.gameTime.day
+    
     const currentDate = new Date(
       this.gameTime.year,
       this.gameTime.month - 1,
@@ -41,6 +43,22 @@ export const timeActions = {
     // 检查学年进级
     if (this.checkYearProgression) {
       this.checkYearProgression()
+    }
+
+    // 日期变化时：学业成长 + 考试检查
+    if (this.gameTime.day !== previousDay) {
+      if (this.updateDailyAcademicGrowth) {
+        this.updateDailyAcademicGrowth()
+      }
+      if (this.checkExamTrigger) {
+        const examSchedule = this.checkExamTrigger()
+        if (examSchedule && this.conductExam) {
+          const record = this.conductExam(examSchedule.type)
+          if (record) {
+            this.addCommand(`[系统] ${examSchedule.label}已结束，成绩已生成。`)
+          }
+        }
+      }
     }
     
     // 更新NPC位置（每小时更新一次，内部有缓存机制）

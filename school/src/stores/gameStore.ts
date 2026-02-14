@@ -24,6 +24,8 @@ import { timeActions } from './actions/timeActions'
 import { classClubActions } from './actions/classClubActions'
 import { electiveActions } from './actions/electiveActions'
 import { yearProgressionActions } from './actions/yearProgressionActions'
+import { academicActions } from './actions/academicActions'
+import { schoolRuleActions } from './actions/schoolRuleActions'
 
 // 重新导出类型，保持对外接口兼容
 export type { CommandEntry, ChatMessage }
@@ -66,6 +68,12 @@ export const useGameStore = defineStore('game', {
     ...socialActions,
 
     // ==================== 学年进级相关 ====================
-    ...yearProgressionActions
+    ...yearProgressionActions,
+
+    // ==================== 学业系统相关 ====================
+    ...academicActions,
+
+    // ==================== 校规系统相关 ====================
+    ...schoolRuleActions
   }
 })

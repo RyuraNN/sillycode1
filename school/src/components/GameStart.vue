@@ -1200,6 +1200,7 @@ const confirmSignature = async () => {
       v-if="showProfile" 
       :form-data="formData" 
       :custom-data="customData"
+      :player-role="playerRole"
       :options="{ family: familyOptions, childhood: childhoodOptions, elementary: elementaryOptions, middleSchool: middleSchoolOptions, talents: talentOptions }"
       @sign="confirmSignature"
       @back="showProfile = false"

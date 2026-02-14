@@ -6,30 +6,35 @@
 
 import { useGameStore } from '../stores/gameStore'
 import {
-  DEFAULT_RELATIONSHIPS,
-  DEFAULT_PERSONALITIES,
-  DEFAULT_GOALS,
-  DEFAULT_PRIORITIES,
   RELATIONSHIP_GROUPS,
   shouldBeSocialFriend,
   generateCharId
 } from '../data/relationshipData'
 import { saveImpressionData, saveImpressionDataImmediate } from './impressionWorldbook'
+import { ensureSocialDataWorldbook, fetchSocialData, saveSocialData } from './socialRelationshipsWorldbook'
 
 /**
  * 初始化所有角色的关系数据
- * 从班级数据和默认关系数据中构建完整的关系网络
+ * 从班级数据和世界书数据中构建完整的关系网络
  */
-export function initializeRelationships() {
+export async function initializeRelationships() {
   const gameStore = useGameStore()
   
-  // 如果已经有关系数据，不重复初始化
+  // 确保世界书存在并获取最新数据
+  // 注意：即便是已经有关系数据了，我们也可能需要从世界书更新（比如性格修正）
+  // 但为了避免覆盖运行时变化，我们只在初始化为空时完整构建，
+  // 或者在显式刷新时调用（目前这里是初始化）
+  
   if (gameStore.npcRelationships && Object.keys(gameStore.npcRelationships).length > 0) {
     console.log('[RelationshipManager] Relationships already initialized')
     return
   }
 
-  console.log('[RelationshipManager] Initializing relationships...')
+  console.log('[RelationshipManager] Initializing relationships from worldbook...')
+  
+  // 确保世界书存在
+  await ensureSocialDataWorldbook()
+  const socialData = await fetchSocialData() || {}
   
   // 收集所有角色名
   const allCharacters = getAllCharacterNames(gameStore)
@@ -71,23 +76,26 @@ export function initializeRelationships() {
       }
     }
 
+    // 从世界书数据中获取
+    const charSocialData = socialData[charName] || {}
+
     relationships[charName] = {
       gender: charGender,
-      // 性格轴 (优先使用自定义数据，其次是默认数据)
-      personality: customPersonality || DEFAULT_PERSONALITIES[charName] || {
+      // 性格轴 (优先使用世界书数据，其次是班级数据中的自定义数据，最后是默认值)
+      personality: charSocialData.personality || customPersonality || {
         order: 0,
         altruism: 0,
         tradition: 0,
         peace: 50
       },
       // 目标
-      goals: DEFAULT_GOALS[charName] || {
+      goals: charSocialData.goals || {
         immediate: '',
         shortTerm: '',
         longTerm: ''
       },
       // 行动优先级
-      priorities: DEFAULT_PRIORITIES[charName] || {
+      priorities: charSocialData.priorities || {
         academics: 50,
         social: 50,
         hobbies: 50,
@@ -98,10 +106,10 @@ export function initializeRelationships() {
       relations: {}
     }
     
-    // 加载默认关系
-    if (DEFAULT_RELATIONSHIPS[charName]) {
+    // 加载关系
+    if (charSocialData.relationships) {
       relationships[charName].relations = JSON.parse(
-        JSON.stringify(DEFAULT_RELATIONSHIPS[charName])
+        JSON.stringify(charSocialData.relationships)
       )
     }
   }
@@ -328,14 +336,13 @@ export function setRelationship(sourceName, targetName, relationData) {
     }
   }
   
-  // 限制印象标签数量为4个（保留最新的4个）
+// 限制印象标签数量为4个（保留最新的4个）
   let tags = relationData.tags || []
   if (tags.length > 4) {
     tags = tags.slice(-4)
   }
 
-  // 设置关系
-  gameStore.npcRelationships[sourceName].relations[targetName] = {
+  const newRelation = {
     intimacy: relationData.intimacy ?? 0,
     trust: relationData.trust ?? 0,
     passion: relationData.passion ?? 0,
@@ -344,6 +351,9 @@ export function setRelationship(sourceName, targetName, relationData) {
     tags: tags,
     events: relationData.events || []
   }
+
+  // 设置关系
+  gameStore.npcRelationships[sourceName].relations[targetName] = newRelation
   
   // 检查是否需要同步到社交APP
   syncSocialAppFriend(sourceName, targetName, relationData)
@@ -352,6 +362,19 @@ export function setRelationship(sourceName, targetName, relationData) {
   
   // 更新印象列表
   saveImpressionData()
+
+  // 异步保存到世界书 (不阻塞)
+  // 注意：这里我们只更新了内存中的一项，实际上应该更新世界书中的对应条目
+  // 但为了性能，我们可能不想每次都全量读写大JSON。
+  // 考虑到数据一致性，这里做一个简单的全量同步作为 MVP 实现。
+  // 如果性能有问题，后续可以优化 saveSocialData 只做局部更新。
+  fetchSocialData().then(data => {
+    if (!data) data = {}
+    if (!data[sourceName]) data[sourceName] = { relationships: {} }
+    if (!data[sourceName].relationships) data[sourceName].relationships = {}
+    data[sourceName].relationships[targetName] = newRelation
+    saveSocialData(data).catch(e => console.error('Failed to sync relationship to worldbook', e))
+  })
 }
 
 /**
@@ -527,10 +550,19 @@ function syncSocialAppFriend(sourceName, targetName, relationData) {
 export function updatePersonality(charName, personality) {
   const gameStore = useGameStore()
   if (gameStore.npcRelationships[charName]) {
-    gameStore.npcRelationships[charName].personality = {
+    const newPersonality = {
       ...gameStore.npcRelationships[charName].personality,
       ...personality
     }
+    gameStore.npcRelationships[charName].personality = newPersonality
+    
+    // 同步到世界书
+    fetchSocialData().then(data => {
+      if (!data) data = {}
+      if (!data[charName]) data[charName] = {}
+      data[charName].personality = newPersonality
+      saveSocialData(data).catch(e => console.error('Failed to sync personality to worldbook', e))
+    })
   }
 }
 
@@ -540,10 +572,19 @@ export function updatePersonality(charName, personality) {
 export function updateGoals(charName, goals) {
   const gameStore = useGameStore()
   if (gameStore.npcRelationships[charName]) {
-    gameStore.npcRelationships[charName].goals = {
+    const newGoals = {
       ...gameStore.npcRelationships[charName].goals,
       ...goals
     }
+    gameStore.npcRelationships[charName].goals = newGoals
+
+    // 同步到世界书
+    fetchSocialData().then(data => {
+      if (!data) data = {}
+      if (!data[charName]) data[charName] = {}
+      data[charName].goals = newGoals
+      saveSocialData(data).catch(e => console.error('Failed to sync goals to worldbook', e))
+    })
   }
 }
 
@@ -553,10 +594,19 @@ export function updateGoals(charName, goals) {
 export function updatePriorities(charName, priorities) {
   const gameStore = useGameStore()
   if (gameStore.npcRelationships[charName]) {
-    gameStore.npcRelationships[charName].priorities = {
+    const newPriorities = {
       ...gameStore.npcRelationships[charName].priorities,
       ...priorities
     }
+    gameStore.npcRelationships[charName].priorities = newPriorities
+
+    // 同步到世界书
+    fetchSocialData().then(data => {
+      if (!data) data = {}
+      if (!data[charName]) data[charName] = {}
+      data[charName].priorities = newPriorities
+      saveSocialData(data).catch(e => console.error('Failed to sync priorities to worldbook', e))
+    })
   }
 }
 

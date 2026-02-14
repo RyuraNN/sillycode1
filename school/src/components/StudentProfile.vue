@@ -13,6 +13,10 @@ const props = defineProps({
   options: {
     type: Object,
     required: true
+  },
+  playerRole: {
+    type: String,
+    default: 'student'
   }
 })
 
@@ -70,7 +74,7 @@ const genderName = computed(() => props.formData.gender === 'male' ? '男' : '�
     <div class="profile-paper slide-down">
       <div class="profile-header">
         <img src="https://files.catbox.moe/efg1xe.png" alt="Logo" class="mini-logo" />
-        <h2>天华学园新生档案</h2>
+        <h2>{{ playerRole === 'teacher' ? '天华学园教职工档案' : '天华学园新生档案' }}</h2>
       </div>
 
       <div class="profile-content">
@@ -79,7 +83,8 @@ const genderName = computed(() => props.formData.gender === 'male' ? '男' : '�
           <div class="info-grid">
             <div class="info-item"><span class="label">姓名：</span>{{ formData.name }}</div>
             <div class="info-item"><span class="label">性别：</span>{{ genderName }}</div>
-            <div class="info-item"><span class="label">班级：</span>{{ formData.classId || '待定' }}</div>
+            <div class="info-item" v-if="playerRole === 'teacher'"><span class="label">职务：</span>教师</div>
+            <div class="info-item" v-else><span class="label">班级：</span>{{ formData.classId || '待定' }}</div>
             <div class="info-item"><span class="label">人生目标：</span>{{ gameModeName }}</div>
           </div>
         </div>
@@ -87,9 +92,11 @@ const genderName = computed(() => props.formData.gender === 'male' ? '男' : '�
         <div class="section">
           <h3>二、人生轨迹</h3>
           <div class="info-row"><span class="label">家庭背景：</span>{{ familyName }}</div>
-          <div class="info-row"><span class="label">幼年经历：</span>{{ childhoodExp }}</div>
-          <div class="info-row"><span class="label">小学经历：</span>{{ elementaryExp }}</div>
-          <div class="info-row"><span class="label">初中经历：</span>{{ middleSchoolExp }}</div>
+          <template v-if="playerRole === 'student'">
+            <div class="info-row"><span class="label">幼年经历：</span>{{ childhoodExp }}</div>
+            <div class="info-row"><span class="label">小学经历：</span>{{ elementaryExp }}</div>
+            <div class="info-row"><span class="label">初中经历：</span>{{ middleSchoolExp }}</div>
+          </template>
           <div class="info-row"><span class="label">天赋特长：</span>{{ talentsList }}</div>
         </div>
       </div>

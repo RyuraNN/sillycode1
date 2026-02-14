@@ -4,7 +4,6 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
 import { viteSingleFile } from 'vite-plugin-singlefile'
-import legacy from '@vitejs/plugin-legacy'
 import { Plugin as importToCDN } from 'vite-plugin-cdn-import'
 
 // https://vite.dev/config/
@@ -19,9 +18,6 @@ export default defineConfig({
       }
     }),
     vueDevTools(),
-    legacy({
-      targets: ['defaults', 'not IE 11'],
-    }),
     viteSingleFile(),
     // importToCDN({
     //   modules: [
@@ -49,16 +45,24 @@ export default defineConfig({
     },
   },
   build: {
-    target: 'es2015',
-    minify: 'terser', // 尝试使用 terser 压缩，它比 esbuild 更稳健但稍慢
+    target: 'esnext', // SillyTavern 运行在现代 Chromium 内核，无需降级
+    minify: 'terser',
+    terserOptions: {
+      ecma: 2020,
+      mangle: {
+        reserved: ['$', 'jQuery'] // 避免 $ 作为压缩变量名，防止宏冲突
+      },
+      format: {
+        inline_script: true // 关键：转义 </ 和 <!-- 防止内联脚本被 HTML 解析器破坏
+      }
+    },
     assetsInlineLimit: 100000000, // 强制内联资源
     chunkSizeWarningLimit: 100000000,
     cssCodeSplit: false, // 禁用 CSS 分割，合并到 HTML 中
     rollupOptions: {
       output: {
         inlineDynamicImports: true, // 确保所有 JS 合并为一个文件
-        // 【核心修复】使用 IIFE 格式，将变量隔离在函数作用域内
-        format: 'iife', 
+        format: 'es', // ES 模块格式，每个模块有独立作用域，避免变量冲突
       },
     },
   },

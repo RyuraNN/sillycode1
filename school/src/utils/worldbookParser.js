@@ -15,6 +15,7 @@
 
 import { ELECTIVE_PREFERENCES } from '../data/coursePoolData'
 import { DEFAULT_TEMPLATES } from './npcScheduleSystem'
+import { parseAcademicTag } from '../data/academicData'
 
 // ==================== 社团数据格式规范 ====================
 /**
@@ -66,7 +67,11 @@ function parsePersonInfo(text, defaultRole = 'student') {
       const content = tagMatch[1].trim()
       
       // 智能识别标签类型
-      if (ELECTIVE_PREFERENCES[content]) {
+      if (content.startsWith('academic:')) {
+        // 匹配学力标签 (如 academic:poor/very_high:math_weak,music_strong)
+        const academicStr = content.substring('academic:'.length)
+        person.academicProfile = parseAcademicTag(academicStr)
+      } else if (ELECTIVE_PREFERENCES[content]) {
         // 匹配选课倾向ID (如 music, sports)
         person.electivePreference = content
       } else if (DEFAULT_TEMPLATES[content] || content.startsWith('student_')) {
@@ -100,6 +105,145 @@ function parsePersonInfo(text, defaultRole = 'student') {
   }
 
   return null
+}
+
+// ==================== 学力数据集中存储 ====================
+
+/**
+ * 从世界书获取学力数据库
+ * @returns {Promise<Object|null>} { [name]: { level, potential, traits } }
+ */
+export async function fetchAcademicDataFromWorldbook() {
+  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.getWorldbook !== 'function') {
+    return null
+  }
+
+  try {
+    const books = window.getCharWorldbookNames('current')
+    const bookNames = []
+    if (books && typeof books === 'object') {
+      if (books.primary) bookNames.push(books.primary)
+      if (Array.isArray(books.additional)) bookNames.push(...books.additional)
+    } else if (Array.isArray(books)) {
+      bookNames.push(...books)
+    }
+
+    const academicData = {}
+    const targetName = '[AcademicData] 全校学力数据库'
+
+    for (const name of bookNames) {
+      let entries
+      try {
+        entries = await window.getWorldbook(name)
+      } catch (e) {
+        continue
+      }
+      if (!entries || !Array.isArray(entries)) continue
+
+      const entry = entries.find(e => e.name === targetName)
+      if (entry) {
+        console.log('[WorldbookParser] Found academic database')
+        const lines = entry.content.split('\n')
+        for (const line of lines) {
+          if (!line.trim() || line.startsWith('#')) continue
+          
+          // 格式: 姓名|等级|潜力|特长列表
+          const parts = line.split('|').map(s => s.trim())
+          if (parts.length >= 3) {
+            const name = parts[0]
+            const level = parts[1] || 'avg'
+            const potential = parts[2] || 'medium'
+            const traits = parts[3] ? parts[3].split(/[,，]/).map(t => t.trim()).filter(t => t) : []
+            
+            academicData[name] = { level, potential, traits }
+          }
+        }
+        // 找到即止，假设只有一个
+        return academicData
+      }
+    }
+    return academicData
+  } catch (e) {
+    console.error('[WorldbookParser] Error fetching academic data:', e)
+    return null
+  }
+}
+
+/**
+ * 更新学力数据库到世界书
+ * @param {Array} allStudents 所有学生列表
+ * @returns {Promise<boolean>}
+ */
+export async function updateAcademicDataInWorldbook(allStudents) {
+  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
+    return false
+  }
+
+  try {
+    const books = window.getCharWorldbookNames('current')
+    const bookName = books.primary || (books.additional && books.additional[0])
+    
+    if (!bookName) return false
+
+    console.log('[WorldbookParser] Updating academic database...')
+
+    let content = '# 格式: 姓名|等级|潜力|特长列表\n'
+    let count = 0
+
+    for (const s of allStudents) {
+      // 过滤掉没有学力数据的
+      if (!s.academicProfile) continue
+      
+      // 确保是对象
+      let ap = s.academicProfile
+      if (typeof ap === 'string') {
+        ap = parseAcademicTag(ap)
+      }
+      
+      // 检查是否是默认值，如果是则不保存以节省空间
+      // 默认: level=avg, potential=medium, traits=[]
+      if (ap.level === 'avg' && ap.potential === 'medium' && (!ap.traits || ap.traits.length === 0)) {
+        continue
+      }
+
+      const traits = ap.traits ? ap.traits.join(',') : ''
+      content += `${s.name}|${ap.level}|${ap.potential}|${traits}\n`
+      count++
+    }
+
+    const entryName = '[AcademicData] 全校学力数据库'
+
+    await window.updateWorldbookWith(bookName, (entries) => {
+      const newEntries = [...entries]
+      const index = newEntries.findIndex(e => e.name === entryName)
+      
+      const entry = {
+        name: entryName,
+        content: content,
+        key: [], // 不需要 key，因为不启用
+        strategy: { type: 'selective' }, // 随意，反正不启用
+        position: { type: 'before_character_definition', order: 100 },
+        probability: 100,
+        enabled: false, // 关键：禁用
+        recursion: { prevent_outgoing: true }
+      }
+
+      if (index !== -1) {
+        newEntries[index] = { ...newEntries[index], ...entry }
+      } else {
+        newEntries.push(entry)
+      }
+      
+      return newEntries
+    })
+    
+    console.log(`[WorldbookParser] Academic database updated with ${count} records`)
+    return true
+
+  } catch (e) {
+    console.error('[WorldbookParser] Error updating academic data:', e)
+    return false
+  }
 }
 
 // ==================== 社团数据解析 ====================
@@ -1041,7 +1185,7 @@ export async function setPlayerClass(classId) {
 }
 
 // 格式化人员信息
-function formatPerson(p) {
+function formatPerson(p, includeAcademic = true) {
   const gender = p.gender === 'female' ? '女' : '男'
   let text = `${p.name} ${gender} (${p.origin})`
   
@@ -1055,11 +1199,25 @@ function formatPerson(p) {
     text += `[${p.scheduleTag}]`
   }
   
+  // 添加学力档案标签 [academic:level/potential:trait1,trait2]
+  if (includeAcademic && p.academicProfile) {
+    const ap = p.academicProfile
+    // 如果已经是字符串格式（从世界书解析的原始值），直接使用
+    if (typeof ap === 'string') {
+      text += `[academic:${ap}]`
+    } else if (ap.level || ap.potential || (ap.traits && ap.traits.length > 0)) {
+      const level = ap.level || 'avg'
+      const potential = ap.potential || 'medium'
+      const traits = (ap.traits && ap.traits.length > 0) ? ':' + ap.traits.join(',') : ''
+      text += `[academic:${level}/${potential}${traits}]`
+    }
+  }
+  
   return text
 }
 
 // 将班级数据格式化为文本
-function formatClassData(data) {
+function formatClassData(data, excludeAcademic = false) {
   let text = `${data.name}:{\n`
   
   // 教室ID
@@ -1069,7 +1227,7 @@ function formatClassData(data) {
   
   // 班主任
   if (data.headTeacher && data.headTeacher.name) {
-    text += `  班主任: ${formatPerson(data.headTeacher)}\n`
+    text += `  班主任: ${formatPerson(data.headTeacher, !excludeAcademic)}\n`
   }
   
   // 科任教师
@@ -1077,7 +1235,7 @@ function formatClassData(data) {
     text += `  科任教师: {\n`
     data.teachers.forEach(t => {
       if (t.name) {
-        text += `    ${t.subject}: ${formatPerson(t)}\n`
+        text += `    ${t.subject}: ${formatPerson(t, !excludeAcademic)}\n`
       }
     })
     text += `  }\n`
@@ -1088,7 +1246,7 @@ function formatClassData(data) {
     text += `  学生列表: {\n`
     data.students.forEach((s, i) => {
       if (s.name) {
-        text += `    ${i + 1}. ${formatPerson(s)}\n`
+        text += `    ${i + 1}. ${formatPerson(s, !excludeAcademic)}\n`
       }
     })
     text += `  }\n`
@@ -1141,9 +1299,10 @@ export async function deleteClassDataFromWorldbook(classId) {
  * 更新世界书中的班级数据
  * @param {string} classId 班级ID
  * @param {Object} classData 班级数据对象
+ * @param {boolean} excludeAcademic 是否排除学力数据（默认false）
  * @returns {Promise<boolean>} 是否成功
  */
-export async function updateClassDataInWorldbook(classId, classData) {
+export async function updateClassDataInWorldbook(classId, classData, excludeAcademic = false) {
   if (typeof window.updateWorldbookWith !== 'function') {
     console.warn('[WorldbookParser] updateWorldbookWith API not available')
     return false
@@ -1173,7 +1332,7 @@ export async function updateClassDataInWorldbook(classId, classData) {
         if (classData.name && !names.includes(classData.name)) names.push(classData.name)
         newEntries[index] = {
           ...newEntries[index],
-          content: formatClassData(classData),
+          content: formatClassData(classData, excludeAcademic),
           key: names
         }
       } else {
@@ -1187,7 +1346,7 @@ export async function updateClassDataInWorldbook(classId, classData) {
         
         newEntries.push({
           name: `[Class:${classId}] ${classData.name || classId}`,
-          content: formatClassData(classData),
+          content: formatClassData(classData, excludeAcademic),
           key: names,
           strategy: {
             type: 'selective',
@@ -1989,8 +2148,16 @@ export async function setupTeacherClassEntries(teachingClasses, homeroomClassId,
           newEntries.push(newEntry)
         }
 
-        // 禁用原始条目 (将在 syncClassWorldbookState 中处理，但这里先禁用以防万一)
-        // 注意：syncClassWorldbookState 会再次处理启用/禁用逻辑
+        // 禁用原始条目
+        if (originalEntry) {
+          const originalIndex = newEntries.findIndex(e => e.name === originalEntry.name)
+          if (originalIndex !== -1) {
+            newEntries[originalIndex] = {
+              ...newEntries[originalIndex],
+              enabled: false
+            }
+          }
+        }
       }
 
       return newEntries
@@ -2049,18 +2216,12 @@ export async function syncClassWorldbookState(currentRunId, allClassData) {
             const runId = specificMatch[2]
             
             if (runId === currentRunId) {
-              // 当前存档的条目：
-              // 只有当该班级ID在当前 allClassData 中存在时才启用
-              const shouldEnable = currentClassIds.has(classId)
-              
-              // 如果是玩家班级，设为 constant（蓝灯），否则 selective（绿灯）
+              // 当前存档的条目：启用 (前提是该班级依然相关)
+              // 这里简化为：只要是当前存档生成的 runId 条目，就启用 (enabled: true)
+              // 具体的 constant/selective 策略在生成时已经设定好，或者在这里不做修改
               return {
                 ...entry,
-                enabled: shouldEnable,
-                strategy: {
-                  ...entry.strategy,
-                  type: shouldEnable ? entry.strategy?.type || 'selective' : 'selective'
-                }
+                enabled: true
               }
             } else {
               // 其他存档的条目，一律禁用
@@ -2078,6 +2239,9 @@ export async function syncClassWorldbookState(currentRunId, allClassData) {
             const classId = originalMatch[1]
             
             // 如果该班级在当前存档有带 runId 的副本，则禁用原始条目
+            // 注意：activeRunClassIds 只包含当前存档 (currentRunId) 的副本
+            // 如果切换到其他存档，activeRunClassIds 会变为空（或变为那个存档的副本），
+            // 从而使 hasActiveRunCopy 为 false，进而重新启用原始条目。
             const hasActiveRunCopy = activeRunClassIds.has(classId)
             
             if (hasActiveRunCopy) {
@@ -2087,16 +2251,11 @@ export async function syncClassWorldbookState(currentRunId, allClassData) {
                 enabled: false
               }
             } else {
-              // 没有活跃的 runId 副本 → 
-              // 如果该班级ID在当前 allClassData 中存在，启用原始条目
-              const shouldEnable = currentClassIds.has(classId)
+              // 没有活跃的 runId 副本 → 启用原始条目
+              // (假设原始条目是默认启用的，如果之前被禁用了这里会恢复)
               return {
                 ...entry,
-                enabled: shouldEnable,
-                strategy: {
-                  ...entry.strategy,
-                  type: shouldEnable ? entry.strategy?.type || 'selective' : 'selective'
-                }
+                enabled: true
               }
             }
           }

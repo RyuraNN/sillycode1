@@ -6,6 +6,7 @@
 import { seededRandom } from './random.js'
 import { WEEKDAY_MAP } from './constants.js'
 import { getRequiredCourses } from '../data/coursePoolData.js'
+import { getResolvedExamOnDate } from '../data/academicData.js'
 
 // ============ 时间常量 ============
 
@@ -258,10 +259,11 @@ function isDateInRange(month, day, startMonth, startDay, endMonth, endDay) {
  * 检查某天的课程安排状态
  * @param {number} month 月份
  * @param {number} day 日期
+ * @param {number} [year] 年份（可选，用于月考日顺移计算）
  * @returns {Object} { isHoliday, holidayType, eventInfo }
- *   holidayType: 'full' | 'am_off' | 'pm_off' | 'none'
+ *   holidayType: 'full' | 'am_off' | 'pm_off' | 'exam' | 'none'
  */
-export function checkDayStatus(month, day) {
+export function checkDayStatus(month, day, year) {
   // 1. 检查假期
   const vacation = checkVacation(month, day)
   if (vacation) {
@@ -301,6 +303,23 @@ export function checkDayStatus(month, day) {
         isHoliday: false,
         holidayType: 'exam',
         eventInfo: { id: range.id, name: range.name, isExam: true }
+      }
+    }
+  }
+  
+  // 3.6 检查月考日（经过顺移处理的实际考试日）
+  if (year) {
+    const resolvedExam = getResolvedExamOnDate(year, month, day)
+    if (resolvedExam) {
+      return {
+        isHoliday: false,
+        holidayType: 'exam',
+        eventInfo: { 
+          id: `event_monthly_exam_${month}`, 
+          name: resolvedExam.label, 
+          isExam: true,
+          examType: resolvedExam.type
+        }
       }
     }
   }
@@ -787,7 +806,7 @@ export function timeToMinutes(timeStr) {
  * @returns {Object} 课程状态信息
  */
 export function getCurrentClassStatus(gameTime, weeklySchedule) {
-  const { hour, minute, weekday, month, day } = gameTime
+  const { hour, minute, weekday, month, day, year } = gameTime
   
   // 1. 检查是否是周末
   if (isWeekend(weekday)) {
@@ -798,7 +817,7 @@ export function getCurrentClassStatus(gameTime, weeklySchedule) {
   }
   
   // 2. 检查节假日状态
-  const dayStatus = checkDayStatus(month, day)
+  const dayStatus = checkDayStatus(month, day, year)
   
   if (dayStatus.isHoliday) {
     return {
@@ -927,7 +946,7 @@ export function getCurrentClassStatus(gameTime, weeklySchedule) {
  * @returns {string} 课表摘要文本
  */
 export function getTodayScheduleSummary(gameTime, weeklySchedule) {
-  const { weekday, month, day } = gameTime
+  const { weekday, month, day, year } = gameTime
   
   // 检查周末
   if (isWeekend(weekday)) {
@@ -935,7 +954,7 @@ export function getTodayScheduleSummary(gameTime, weeklySchedule) {
   }
   
   // 检查假期
-  const dayStatus = checkDayStatus(month, day)
+  const dayStatus = checkDayStatus(month, day, year)
   if (dayStatus.isHoliday) {
     return `今天是${dayStatus.eventInfo.name}，无课程安排。`
   }
@@ -1002,7 +1021,8 @@ export function getNextDayScheduleSummary(gameTime, weeklySchedule) {
   const tmrWeekdayCn = getWeekdayChinese(tmrWeekdayEn)
   
   // 1. 检查明天是否是假期
-  const dayStatus = checkDayStatus(tmrMonth, tmrDay)
+  const tmrYear = tomorrow.getFullYear()
+  const dayStatus = checkDayStatus(tmrMonth, tmrDay, tmrYear)
   
   if (dayStatus.isHoliday) {
     return `\n[明日预告] 明天是${tmrWeekdayCn}，${dayStatus.eventInfo.name}（全天休假）。`
@@ -1061,7 +1081,7 @@ export function getMonthEvents(year, month) {
   const daysInMonth = new Date(year, month, 0).getDate()
   
   for (let day = 1; day <= daysInMonth; day++) {
-    const status = checkDayStatus(month, day)
+    const status = checkDayStatus(month, day, year)
     const date = new Date(year, month - 1, day)
     const weekday = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][date.getDay()]
     

@@ -204,7 +204,9 @@ const getDisplayContentWithIndex = (log, index) => {
   }
   
   // 生成缓存键（使用内容哈希 + 索引 + 图片缓存大小）
-  const contentKey = (log.content || '').substring(0, 100)
+  // 加入长度以避免前100字符相同但后续内容（如图片占位符被替换）变化导致的缓存碰撞
+  const contentStr = log.content || ''
+  const contentKey = `${contentStr.length}_${contentStr.substring(0, 100)}`
   const cacheKey = `${index}_${contentKey}_${imageCacheMap.size}`
   
   if (contentRenderCache.has(cacheKey)) {
@@ -963,10 +965,16 @@ const processAIResponse = async (response) => {
     for (const rule of gameStore.settings.customRegexList) {
       if (!rule.enabled) continue
       try {
-        const regex = new RegExp(rule.pattern)
-        const match = regex.exec(cleanResponse)
-        if (match && match[1]) {
-          contentToShow = match[1].trim()
+        const regex = new RegExp(rule.pattern, 'g')
+        const parts = []
+        let match
+        while ((match = regex.exec(cleanResponse)) !== null) {
+          if (match[1]) {
+            parts.push(match[1].trim())
+          }
+        }
+        if (parts.length > 0) {
+          contentToShow = parts.join('\n\n')
           matched = true
           break
         }
@@ -1494,10 +1502,16 @@ const handleEditSubmit = (content) => {
       for (const rule of gameStore.settings.customRegexList) {
         if (!rule.enabled) continue
         try {
-          const regex = new RegExp(rule.pattern)
-          const match = regex.exec(content)
-          if (match && match[1]) {
-            contentToShow = match[1].trim()
+          const regex = new RegExp(rule.pattern, 'g')
+          const parts = []
+          let match
+          while ((match = regex.exec(content)) !== null) {
+            if (match[1]) {
+              parts.push(match[1].trim())
+            }
+          }
+          if (parts.length > 0) {
+            contentToShow = parts.join('\n\n')
             matched = true
             break
           }

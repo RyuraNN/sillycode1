@@ -16,6 +16,81 @@ import { getEmotionalState } from '../data/relationshipData'
 import { getItem, getPartTimeJobInfo } from '../data/mapData'
 import { getElectiveCourses } from '../data/coursePoolData'
 import { getNpcsAtLocation } from './npcScheduleSystem'
+import { generateAcademicWorldbookText } from './academicWorldbook'
+import { SUBJECT_MAP, EXAM_SCHEDULE, getResolvedExamSchedule } from '../data/academicData'
+
+/**
+ * 性别中文映射（校规系统用）
+ */
+const SCHOOL_RULE_GENDER_MAP = {
+  male: '男性',
+  female: '女性'
+}
+
+/**
+ * 角色类型中文映射（校规系统用）
+ */
+const SCHOOL_RULE_ROLE_MAP = {
+  student: '学生',
+  teacher: '教师',
+  staff: '教职人员'
+}
+
+/**
+ * 判断地点是否在校园内
+ * @param {string} locationId 地点ID
+ * @returns {boolean}
+ */
+const isOnCampus = (locationId) => {
+  if (!locationId) return false
+  // 天华高级中学的地点ID均以 'th_' 开头
+  return locationId.startsWith('th_')
+}
+
+/**
+ * 构建校规系统提示词
+ * @param {Object} gameState 游戏状态对象
+ * @returns {string} 校规提示词
+ */
+export const buildSchoolRulePrompt = (gameState) => {
+  const { player } = gameState
+  const rules = player.schoolRules
+
+  if (!rules || rules.length === 0) return ''
+
+  const activeRules = rules.filter(r => r.status === 'active')
+  if (activeRules.length === 0) return ''
+
+  const onCampus = isOnCampus(player.location)
+
+  let prompt = '\n[校园校规]'
+
+  if (!onCampus) {
+    prompt += '\n※ 当前不在校园内，以下校规暂不适用。\n'
+    // 仍然列出，让AI知道有这些校规存在，但标明不生效
+    prompt += `(共${activeRules.length}条生效校规，离开校园后无需遵守)\n`
+    return prompt
+  }
+
+  prompt += '\n以下是天华高级中学当前生效的校规，所有适用对象在校园范围内必须遵守：\n'
+
+  for (const rule of activeRules) {
+    const genderStr = rule.targets.gender.map(g => SCHOOL_RULE_GENDER_MAP[g] || g).join('、')
+    const roleStr = rule.targets.roles.map(r => SCHOOL_RULE_ROLE_MAP[r] || r).join('、')
+
+    prompt += `\n[校规 ${rule.id}] ${rule.title}\n`
+    prompt += `内容：${rule.content}\n`
+    prompt += `适用对象：${genderStr}${roleStr}\n`
+
+    if (rule.isWeird) {
+      prompt += `※ 此校规虽然不太寻常，但已正式生效。角色应以符合自身性格的方式应对——害羞的角色可能感到尴尬但仍遵守，聪明的角色可能在不违规的前提下想办法减轻影响，叛逆的角色可能私下抱怨但公开场合仍需遵守。\n`
+    }
+  }
+
+  prompt += '\n※ 校规仅在校园范围内生效，离开校园后无需遵守。\n'
+
+  return prompt
+}
 
 /**
  * 构建天气相关的提示词
@@ -259,11 +334,23 @@ export const buildTeacherSchedulePrompt = (gameTime, weeklySchedule) => {
     const end = timeToMinutes(classInfo.end)
     
     if (currentMinutes >= start && currentMinutes < end) {
-      currentStatus = `[当前状态] 正在${classInfo.className}讲授${classInfo.subject}课。地点：${classInfo.location}。`
+      let targetName = classInfo.className
+      if (classInfo.isElective) {
+        targetName = `选修课《${classInfo.subject}》`
+      } else {
+        targetName = `${classInfo.className}班`
+      }
+      currentStatus = `[当前状态] 正在给 ${targetName} 上${classInfo.subject}课。地点：${classInfo.location}。`
       break
     } else if (currentMinutes < start) {
       // 找到下一节课
-      currentStatus = `[当前状态] 下一节课是${classInfo.start}在${classInfo.className}讲授${classInfo.subject}。地点：${classInfo.location}。`
+      let targetName = classInfo.className
+      if (classInfo.isElective) {
+        targetName = `选修课《${classInfo.subject}》`
+      } else {
+        targetName = `${classInfo.className}班`
+      }
+      currentStatus = `[当前状态] 下一节课是${classInfo.start}给 ${targetName} 上${classInfo.subject}课。地点：${classInfo.location}。`
       break
     }
   }
@@ -797,6 +884,53 @@ ${player.name}邀请"${targetName}"加入"${clubName}"(社团ID: ${clubId})。
   // 构建兼职状态提示词
   const partTimeJobPrompt = buildPartTimeJobPrompt(gameState)
 
+  // 构建校规提示词
+  const schoolRulePrompt = buildSchoolRulePrompt(gameState)
+
+  // 构建学业系统提示词
+  let academicPrompt = ''
+  if (player.role !== 'teacher') {
+    // 学力值概要
+    if (player.subjects) {
+      const gradeYear = player.gradeYear || 1
+      const difficultyBenchmark = gradeYear === 1 ? 40 : gradeYear === 2 ? 60 : 80
+      const subjectEntries = Object.entries(player.subjects)
+        .filter(([key]) => SUBJECT_MAP[key])
+        .map(([key, val]) => `${SUBJECT_MAP[key]}:${val}`)
+      if (subjectEntries.length > 0) {
+        academicPrompt += `\nSubject Knowledge (benchmark=${difficultyBenchmark}): ${subjectEntries.join(', ')}\n`
+      }
+    }
+    // 最近考试成绩（通过世界书已有注入，此处仅做简要提示）
+    const examText = generateAcademicWorldbookText(gameState)
+    if (examText) {
+      academicPrompt += examText
+    }
+    // 下次考试提醒
+    if (!termInfo.isVacation) {
+      const { year, month, day } = gameTime
+      // 获取经过顺移处理的实际考试日程
+      const actualSchedule = getResolvedExamSchedule(year)
+      
+      // 合并静态考试周（保留 EXAM_SCHEDULE 中非月考的项）
+      const allExams = [
+        ...actualSchedule,
+        ...EXAM_SCHEDULE.filter(e => e.type !== 'monthly').map(e => ({
+          ...e,
+          year // 静态考试每年都有
+        }))
+      ]
+      
+      for (const exam of allExams) {
+        // 只检查当月或下个月的考试
+        if (exam.month === month && exam.day > day && exam.day - day <= 7) {
+          const examTypeNames = { monthly: '月考', midterm: '期中考试', final: '期末考试' }
+          academicPrompt += `[考试预告] ${examTypeNames[exam.type] || exam.label || '考试'}将在${exam.month}月${exam.day}日举行，还有${exam.day - day}天。\n`
+        }
+      }
+    }
+  }
+
   // 构建新游戏引导提示词
   let newGameGuidePrompt = ''
   if (player.newGameGuideTurns > 0 && player.classId) {
@@ -893,7 +1027,7 @@ Money: ${player.money}
 Inventory: ${inventoryStr}
 Stats: IQ=${player.attributes.iq}, EQ=${player.attributes.eq}, PHY=${player.attributes.physique}, FLEX=${player.attributes.flexibility}, CHARM=${player.attributes.charm}, MOOD=${player.attributes.mood}, HEALTH=${player.health}
 ${skillsStr}${knownNpcsStr}
-${npcRelationsStr}${weatherPrompt}${schedulePrompt}${specialDatePrompt}${clubApplicationPrompt}${clubInvitationPrompt}${socialPrompt}${forumPrompt}${eventPrompt}${relationshipPrompt}${partTimeJobPrompt}${newGameGuidePrompt}${teacherGuidePrompt}${electiveReminderPrompt}${pendingCommandsPrompt}
+${npcRelationsStr}${weatherPrompt}${schedulePrompt}${specialDatePrompt}${academicPrompt}${clubApplicationPrompt}${clubInvitationPrompt}${socialPrompt}${forumPrompt}${eventPrompt}${relationshipPrompt}${partTimeJobPrompt}${schoolRulePrompt}${newGameGuidePrompt}${teacherGuidePrompt}${electiveReminderPrompt}${pendingCommandsPrompt}
 [Instructions]
 请根据玩家的行动推动剧情发展。
 - 剧情正文包裹在 <content> 标签中。

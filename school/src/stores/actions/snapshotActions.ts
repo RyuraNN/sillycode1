@@ -4,6 +4,7 @@
 
 import type { ChatLogEntry, SaveSnapshot, GameStateData } from '../gameStoreTypes'
 import { saveSnapshotData, getSnapshotData, removeSnapshotData } from '../../utils/indexedDB'
+import { updateAcademicWorldbookEntry } from '../../utils/academicWorldbook'
 import { 
   computeDelta, 
   applyDelta, 
@@ -30,7 +31,16 @@ export const snapshotActions = {
       allClassData: this.allClassData,
       allClubs: this.allClubs,
       currentRunId: this.currentRunId,
-      currentFloor: this.currentFloor
+      currentFloor: this.currentFloor,
+      examHistory: this.examHistory || [],
+      // 补充遗漏的动态数据
+      electiveAcademicData: this.electiveAcademicData || {},
+      lastExamDate: this.lastExamDate || null,
+      eventChecks: this.eventChecks || { lastDaily: '', lastWeekly: '', lastMonthly: '' },
+      clubApplication: this.clubApplication || null,
+      clubRejection: this.clubRejection || null,
+      clubInvitation: this.clubInvitation || null
+      // 注意：characterNotes, customCoursePool, eventLibrary, eventTriggers 为全局或外部数据，不回溯
     }))
 
     const id = Date.now().toString()
@@ -79,7 +89,16 @@ export const snapshotActions = {
       allClassData: this.allClassData,
       allClubs: this.allClubs,
       currentRunId: this.currentRunId,
-      currentFloor: this.currentFloor
+      currentFloor: this.currentFloor,
+      examHistory: this.examHistory || [],
+      // 补充遗漏的动态数据
+      electiveAcademicData: this.electiveAcademicData || {},
+      lastExamDate: this.lastExamDate || null,
+      eventChecks: this.eventChecks || { lastDaily: '', lastWeekly: '', lastMonthly: '' },
+      clubApplication: this.clubApplication || null,
+      clubRejection: this.clubRejection || null,
+      clubInvitation: this.clubInvitation || null
+      // 注意：characterNotes, customCoursePool, eventLibrary, eventTriggers 为全局或外部数据，不回溯
     }))
 
     const autoSaveId = `autosave_${this.currentRunId}`
@@ -180,6 +199,17 @@ export const snapshotActions = {
     this.graduatedNpcs = state.graduatedNpcs || []
     this.lastAcademicYear = state.lastAcademicYear || 0
     
+    // 恢复考试历史
+    this.examHistory = state.examHistory || []
+    
+    // 恢复其他动态数据
+    this.lastExamDate = (state as any).lastExamDate || null
+    this.electiveAcademicData = (state as any).electiveAcademicData || {}
+    this.eventChecks = (state as any).eventChecks || { lastDaily: '', lastWeekly: '', lastMonthly: '' }
+    this.clubApplication = (state as any).clubApplication || null
+    this.clubRejection = (state as any).clubRejection || null
+    this.clubInvitation = (state as any).clubInvitation || null
+    
     this.currentRunId = state.currentRunId || Date.now().toString(36)
     this.currentFloor = state.currentFloor || 0
     
@@ -191,6 +221,13 @@ export const snapshotActions = {
     // 确保所有 NPC 都被初始化（处理旧存档只有本班 NPC 的情况）
     if (this.initializeAllClassNpcs) {
       this.initializeAllClassNpcs()
+    }
+
+    // 恢复后同步学业世界书条目
+    try {
+      await updateAcademicWorldbookEntry(this)
+    } catch (e) {
+      console.warn('[snapshotActions] Failed to sync academic worldbook after restore:', e)
     }
 
     return fullSnapshot
@@ -235,7 +272,15 @@ export const snapshotActions = {
       allClassData: this.allClassData,
       allClubs: this.allClubs,
       currentRunId: this.currentRunId,
-      currentFloor: this.currentFloor
+      currentFloor: this.currentFloor,
+      examHistory: this.examHistory || [],
+      // 补充遗漏的动态数据
+      electiveAcademicData: this.electiveAcademicData || {},
+      lastExamDate: this.lastExamDate || null,
+      eventChecks: this.eventChecks || { lastDaily: '', lastWeekly: '', lastMonthly: '' },
+      clubApplication: this.clubApplication || null,
+      clubRejection: this.clubRejection || null,
+      clubInvitation: this.clubInvitation || null
     }))
   },
 
@@ -447,6 +492,23 @@ export const snapshotActions = {
     // 恢复学年进级相关数据
     this.graduatedNpcs = data.graduatedNpcs || []
     this.lastAcademicYear = data.lastAcademicYear || 0
+    
+    // 恢复考试历史
+    this.examHistory = data.examHistory || []
+    
+    // 恢复其他动态数据
+    // @ts-ignore
+    this.lastExamDate = data.lastExamDate || null
+    // @ts-ignore
+    this.electiveAcademicData = data.electiveAcademicData || {}
+    // @ts-ignore
+    this.eventChecks = data.eventChecks || { lastDaily: '', lastWeekly: '', lastMonthly: '' }
+    // @ts-ignore
+    this.clubApplication = data.clubApplication || null
+    // @ts-ignore
+    this.clubRejection = data.clubRejection || null
+    // @ts-ignore
+    this.clubInvitation = data.clubInvitation || null
     
     // @ts-ignore
     if (data.currentRunId !== undefined && data.currentRunId !== null) this.currentRunId = data.currentRunId

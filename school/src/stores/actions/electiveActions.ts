@@ -49,6 +49,9 @@ export const electiveActions = {
       }
     }
 
+    // 保存到 Store 状态，以便运行时查询
+    this.npcElectiveSelections = npcSelections
+
     // @ts-ignore
     await updateElectiveWorldbookEntries(this.currentRunId, this.player.selectedElectives, npcSelections, this.player.schedule)
   },

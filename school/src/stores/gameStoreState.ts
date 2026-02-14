@@ -133,6 +133,7 @@ export function createInitialState(): GameState {
       activeEffects: [],
       productStock: {},
       summaries: [],
+      schoolRules: [],
       partTimeJob: {
         currentJob: null,
         isWorking: false,
@@ -208,7 +209,12 @@ export function createInitialState(): GameState {
       lastWeekly: '',
       lastMonthly: ''
     },
+    // 学业系统
+    examHistory: [],
+    electiveAcademicData: {},
+    lastExamDate: null,
     customCoursePool: null,
+    npcElectiveSelections: {},
     worldState: {
       economy: 100,
       weather: {

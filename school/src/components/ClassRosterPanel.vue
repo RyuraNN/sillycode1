@@ -5,6 +5,7 @@ import { useGameStore } from '../stores/gameStore'
 import { updateClassDataInWorldbook } from '../utils/worldbookParser'
 import { ELECTIVE_PREFERENCES } from '../data/coursePoolData'
 import { DEFAULT_TEMPLATES } from '../utils/npcScheduleSystem'
+import { BASE_RANGES, POTENTIAL_MAP, SUBJECT_TRAITS, SUBJECT_DISPLAY_NAMES } from '../data/academicData'
 import {
   RELATIONSHIP_GROUPS,
   RELATIONSHIP_AXES,
@@ -88,8 +89,28 @@ const editForm = ref({
   subject: '', // 仅老师
   electivePreference: 'general', // 仅学生
   scheduleTag: '', // 日程模板
-  personality: { order: 0, altruism: 0, tradition: 0, peace: 50 }
+  personality: { order: 0, altruism: 0, tradition: 0, peace: 50 },
+  academicProfile: { level: 'avg', potential: 'medium', traits: [] }
 })
+
+// 学力选项
+const ACADEMIC_LEVEL_OPTIONS = {
+  top: '🏆 尖子生', above_avg: '📈 中上', avg: '📊 普通', below_avg: '📉 中下', poor: '😓 学渣'
+}
+const ACADEMIC_POTENTIAL_OPTIONS = {
+  very_high: '🚀 极高', high: '⬆️ 高', medium: '➡️ 普通', low: '⬇️ 低'
+}
+const ACADEMIC_TRAIT_OPTIONS = Object.entries(SUBJECT_TRAITS).map(([key, val]) => ({
+  key,
+  label: `${val.bonus > 0 ? '✅' : '❌'} ${SUBJECT_DISPLAY_NAMES[val.subject] || val.subject} ${val.bonus > 0 ? '强' : '弱'}`,
+  bonus: val.bonus
+}))
+const toggleAcademicTrait = (traitKey) => {
+  const traits = editForm.value.academicProfile.traits
+  const idx = traits.indexOf(traitKey)
+  if (idx > -1) traits.splice(idx, 1)
+  else traits.push(traitKey)
+}
 
 // ==================== 关系编辑状态 ====================
 const showRelationEditor = ref(false)
@@ -155,6 +176,12 @@ const startEdit = (role, index, data) => {
   }
   
   formData.personality = personality
+  
+  // 获取学力档案
+  formData.academicProfile = data.academicProfile 
+    ? { ...data.academicProfile, traits: [...(data.academicProfile.traits || [])] }
+    : { level: 'avg', potential: 'medium', traits: [] }
+  
   editForm.value = formData
   showEditor.value = true
 }
@@ -167,7 +194,8 @@ const addStudent = () => {
     origin: '',
     role: 'student',
     classId: props.classId,
-    personality: { order: 0, altruism: 0, tradition: 0, peace: 50 }
+    personality: { order: 0, altruism: 0, tradition: 0, peace: 50 },
+    academicProfile: { level: 'avg', potential: 'medium', traits: [] }
   })
 }
 
@@ -511,6 +539,37 @@ const handleConfirm = async () => {
               {{ tpl.name }}
             </option>
           </select>
+        </div>
+
+        <!-- 学力设置（仅学生） -->
+        <div v-if="editingRole === 'student'" class="section-block">
+          <h4>📚 学力档案</h4>
+          <div class="form-row" style="display:flex;gap:12px;">
+            <div style="flex:1">
+              <label>学力等级：</label>
+              <select v-model="editForm.academicProfile.level" class="input-field">
+                <option v-for="(label, key) in ACADEMIC_LEVEL_OPTIONS" :key="key" :value="key">{{ label }}</option>
+              </select>
+            </div>
+            <div style="flex:1">
+              <label>成长潜力：</label>
+              <select v-model="editForm.academicProfile.potential" class="input-field">
+                <option v-for="(label, key) in ACADEMIC_POTENTIAL_OPTIONS" :key="key" :value="key">{{ label }}</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <label>科目特长/弱项：</label>
+            <div class="academic-traits-grid">
+              <span
+                v-for="trait in ACADEMIC_TRAIT_OPTIONS"
+                :key="trait.key"
+                class="academic-trait-chip"
+                :class="{ active: editForm.academicProfile.traits.includes(trait.key), strong: trait.bonus > 0, weak: trait.bonus < 0 }"
+                @click="toggleAcademicTrait(trait.key)"
+              >{{ trait.label }}</span>
+            </div>
+          </div>
         </div>
 
         <!-- 性格滑条 -->
@@ -1184,5 +1243,42 @@ const handleConfirm = async () => {
 
 .personality-panel .form-row {
   margin-bottom: 10px;
+}
+
+/* 学力特长标签网格 */
+.academic-traits-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.academic-trait-chip {
+  padding: 4px 10px;
+  border: 1px solid #ddd;
+  border-radius: 14px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+  color: #666;
+  background: #fafafa;
+}
+
+.academic-trait-chip:hover {
+  border-color: #999;
+  background: #f0f0f0;
+}
+
+.academic-trait-chip.active.strong {
+  background: #e8f5e9;
+  border-color: #4caf50;
+  color: #2e7d32;
+}
+
+.academic-trait-chip.active.weak {
+  background: #ffebee;
+  border-color: #ef5350;
+  color: #c62828;
 }
 </style>

@@ -830,20 +830,33 @@ export async function parseSocialTags(rawText) {
     const content = forumPostMatch[2].trim()
     
     if (attrs.board && attrs.title && attrs.from) {
-      const newPost = {
-        id: generatePostId(gameStore.player.forum.posts),
-        board: attrs.board,
-        title: attrs.title,
-        author: attrs.from,
-        isPinned: attrs.pinned === 'true',
-        content: content,
-        replies: [],
-        timestamp: Date.now(),
-        floor: gameStore.currentFloor,
-        likes: []
+      // 去重检查：如果最近已存在相同内容的帖子，则跳过
+      const isDuplicate = gameStore.player.forum.posts.some(p => 
+        p.board === attrs.board && 
+        p.title === attrs.title && 
+        p.author === attrs.from && 
+        p.content === content &&
+        (Date.now() - p.timestamp < 300000) // 5分钟内的重复贴视为同一个
+      )
+
+      if (!isDuplicate) {
+        const newPost = {
+          id: generatePostId(gameStore.player.forum.posts),
+          board: attrs.board,
+          title: attrs.title,
+          author: attrs.from,
+          isPinned: attrs.pinned === 'true',
+          content: content,
+          replies: [],
+          timestamp: Date.now(),
+          floor: gameStore.currentFloor,
+          likes: []
+        }
+        gameStore.player.forum.posts.unshift(newPost)
+        await saveForumToWorldbook(gameStore.player.forum.posts, gameStore.currentRunId, gameStore.settings.forumWorldbookLimit)
+      } else {
+        console.log(`[MessageParser] Duplicate forum post detected, skipping: ${attrs.title}`)
       }
-      gameStore.player.forum.posts.unshift(newPost)
-      await saveForumToWorldbook(gameStore.player.forum.posts, gameStore.currentRunId, gameStore.settings.forumWorldbookLimit)
     }
   }
 
@@ -857,12 +870,23 @@ export async function parseSocialTags(rawText) {
       const postId = attrs.post_id
       const post = gameStore.player.forum.posts.find(p => p.id === postId)
       if (post) {
-        post.replies.push({ author: attrs.from, content: content })
-        if (post.author === gameStore.player.name) {
-          const idx = gameStore.player.forum.pendingCommands.findIndex(cmd => cmd.type === 'post' && cmd.post.id === postId)
-          if (idx > -1) gameStore.player.forum.pendingCommands.splice(idx, 1)
+        // 去重检查：该帖子下是否已有完全相同的回复
+        const isDuplicateReply = post.replies && post.replies.some(r => 
+          r.author === attrs.from && r.content === content
+        )
+
+        if (!isDuplicateReply) {
+          if (!post.replies) post.replies = []
+          post.replies.push({ author: attrs.from, content: content })
+          
+          if (post.author === gameStore.player.name) {
+            const idx = gameStore.player.forum.pendingCommands.findIndex(cmd => cmd.type === 'post' && cmd.post.id === postId)
+            if (idx > -1) gameStore.player.forum.pendingCommands.splice(idx, 1)
+          }
+          await saveForumToWorldbook(gameStore.player.forum.posts, gameStore.currentRunId, gameStore.settings.forumWorldbookLimit)
+        } else {
+          console.log(`[MessageParser] Duplicate forum reply detected, skipping`)
         }
-        await saveForumToWorldbook(gameStore.player.forum.posts, gameStore.currentRunId, gameStore.settings.forumWorldbookLimit)
       }
     }
   }
@@ -915,6 +939,20 @@ export async function parseSocialTags(rawText) {
         content: content,
         floor: gameStore.currentFloor
       })
+    }
+  }
+
+  // 20. 教学系统
+  // 格式: <teach target="NPC名或班级ID" subject="科目" quality="perfect|good|normal|bad" />
+  const teachRegex = /<teach\s+([^>]+?)\s*\/?>/g
+  let teachMatch
+  while ((teachMatch = teachRegex.exec(text)) !== null) {
+    const attrs = parseAttributes(teachMatch[1])
+    if (attrs.target && attrs.subject) {
+      // 只有教师身份可以使用
+      if (gameStore.player.role === 'teacher') {
+        gameStore.performTeaching(attrs.target, attrs.subject, attrs.quality || 'normal')
+      }
     }
   }
 }

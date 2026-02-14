@@ -120,7 +120,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { 
   getElectiveCourses, 
@@ -272,6 +272,15 @@ onMounted(() => {
     selectedIds.value = [...gameStore.player.selectedElectives]
   }
 })
+
+// 监听选课数据变化（处理回溯等情况）
+watch(() => gameStore.player.selectedElectives, (newVal) => {
+  if (newVal) {
+    selectedIds.value = [...newVal]
+  } else {
+    selectedIds.value = []
+  }
+}, { deep: true })
 </script>
 
 <style scoped>

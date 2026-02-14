@@ -60,6 +60,9 @@ export interface GameStateData {
   allClubs?: Record<string, ClubData>
   currentRunId?: string
   currentFloor?: number
+  // 学业系统
+  examHistory?: ExamRecord[]
+  lastExamDate?: string | null
 }
 
 // ==================== 物品与装备相关 ====================
@@ -280,6 +283,9 @@ export interface PlayerStats {
     } | null
   }
   
+  // 校规系统
+  schoolRules: SchoolRule[]
+  
   // 教师系统
   role: 'student' | 'teacher'
   teachingClasses: string[]          // 教授的班级ID列表 (1~5个)
@@ -457,6 +463,17 @@ export interface NpcStats {
     locationId: string
     endTime: number // 绝对时间戳 (total hours)
   }
+  // 学业系统
+  motivation?: number                     // 学习动力 0-100 (默认50)
+  studyFocus?: string | null             // 当前专注科目 (可选)
+  subjectGrowth?: Record<string, number> // 各科累积成长值
+  academicProfile?: string               // 学力标签缓存 (从世界书解析)
+  // 学业成长数据 (升级版)
+  academicStats?: {
+    overallPotential: string
+    traits: string[]
+    subjects: Record<string, { level: string; exp: number }>
+  }
 }
 
 /** 社团数据 */
@@ -515,6 +532,34 @@ export interface NpcFullData {
     club: number
   }
   relations: Record<string, RelationshipData>
+}
+
+// ==================== 校规系统相关 ====================
+
+/** 校规条目 */
+export interface SchoolRule {
+  id: string                    // 唯一ID，如 'rule_001'
+  title: string                 // 校规标题
+  content: string               // 校规详细内容
+  status: 'active' | 'paused'   // 生效/暂停
+  targets: {
+    gender: ('male' | 'female')[]           // 性别适用范围
+    roles: ('student' | 'teacher' | 'staff')[]  // 角色类型适用范围
+  }
+  createdAt: number             // 创建时间戳
+  createdFloor: number          // 创建时的聊天楼层
+  isWeird: boolean              // 是否标记为"奇怪校规"
+}
+
+// ==================== 学业系统相关 ====================
+
+/** 考试记录 */
+export interface ExamRecord {
+  examId: string                                    // 如 '2024-05-monthly'
+  examType: 'monthly' | 'midterm' | 'final'
+  examDate: { year: number; month: number; day: number }
+  results: Record<string, Record<string, Record<string, number>>>   // { "1-A": { "NPC名": { literature: 45, math: 37, ... } } }
+  classRankings: Record<string, { avg: number; rank: number }>  // { "1-A": { avg: 68.5, rank: 2 } }
 }
 
 // ==================== 全局游戏状态 ====================
@@ -604,7 +649,12 @@ export interface GameState {
   eventLibrary: Map<string, any>
   eventTriggers: Array<any>
   eventChecks: EventChecks
+  // 学业系统
+  examHistory: ExamRecord[]
+  electiveAcademicData: Record<string, { quality: number }>
+  lastExamDate: string | null  // 上次考试日期 'YYYY-MM-DD'，防止重复触发
   customCoursePool: any | null
+  npcElectiveSelections?: Record<string, string[]> // NPC选课记录 { NPC名: [课程ID] }
   worldState: {
     economy: number
     weather: {

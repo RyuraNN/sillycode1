@@ -2,13 +2,15 @@
 <script setup>
 import { ref, onMounted, computed, watch, toRaw } from 'vue'
 import { useGameStore } from '../stores/gameStore'
-import { updateClassDataInWorldbook, deleteClassDataFromWorldbook, createDefaultRosterBackupWorldbook, restoreFromBackupWorldbook, hasBackupWorldbook, fetchMapDataFromWorldbook, ensureClubExistsInWorldbook, createClubInWorldbook, syncClubWorldbookState, updateStaffRosterInWorldbook } from '../utils/worldbookParser'
+import { updateClassDataInWorldbook, deleteClassDataFromWorldbook, createDefaultRosterBackupWorldbook, restoreFromBackupWorldbook, hasBackupWorldbook, fetchMapDataFromWorldbook, ensureClubExistsInWorldbook, createClubInWorldbook, syncClubWorldbookState, updateStaffRosterInWorldbook, fetchAcademicDataFromWorldbook, updateAcademicDataInWorldbook } from '../utils/worldbookParser'
 import { saveRosterBackup, getRosterBackup, saveFullCharacterPool, getFullCharacterPool, saveRosterPresets, getRosterPresets } from '../utils/indexedDB'
 import { ELECTIVE_PREFERENCES } from '../data/coursePoolData'
 import { DEFAULT_TEMPLATES } from '../utils/npcScheduleSystem'
 import { PERSONALITY_AXES } from '../data/relationshipData'
-import { removeCharacter } from '../utils/relationshipManager'
+import { BASE_RANGES, POTENTIAL_MAP, SUBJECT_TRAITS, SUBJECT_DISPLAY_NAMES } from '../data/academicData'
+import { removeCharacter, setRelationship, getRelationship } from '../utils/relationshipManager'
 import { saveImpressionDataImmediate } from '../utils/impressionWorldbook'
+import { saveSocialData, fetchSocialData } from '../utils/socialRelationshipsWorldbook'
 import MapEditorPanel from './MapEditorPanel.vue'
 
 const emit = defineEmits(['close'])
@@ -61,6 +63,7 @@ const newClassForm = ref({ id: '', name: '' })
 const composerMobileView = ref('class') // 'class' | 'pool'
 const composerWorkFilter = ref('') // 按作品筛选
 const composerShowUnassigned = ref(false) // 仅显示未分配角色
+const composerSourceFilter = ref([]) // 多选来源筛选: 'checked' | 'custom'
 const composerGroupView = ref(true) // 按作品分组显示
 const showConflictModal = ref(false)
 const conflictCharacters = ref([])
@@ -87,10 +90,12 @@ const characterEditForm = ref({
   workplace: '', // 职工专属
   isPending: false, // 待入学新生
   notes: '', // 玩家备注
-  personality: { order: 0, altruism: 0, tradition: 0, peace: 50 }
+  personality: { order: 0, altruism: 0, tradition: 0, peace: 50 },
+  academicProfile: { level: 'avg', potential: 'medium', traits: [] }
 })
 const charEditorSearchQuery = ref('')
 const charEditorRoleFilter = ref('all') // 'all' | 'student' | 'teacher' | 'staff' | 'pending'
+const charEditorWorkFilter = ref('') // 按作品筛选
 const showMapEditorForWorkplace = ref(false) // 职工工作地点选择
 
 // ==================== AI角色导入状态 ====================
@@ -101,6 +106,337 @@ const aiImportError = ref('') // 错误信息
 const aiImportEntries = ref([{ work: '', character: '' }]) // 输入条目
 const aiImportResults = ref({ found: [], notFound: [], workResults: [] }) // 查询结果
 const aiImportStreamText = ref('') // 流式输出文本（用于显示进度）
+
+// ==================== 批量补全功能 ====================
+const showBatchCompleteModal = ref(false)
+const batchProcessing = ref(false)
+const batchProgress = ref({ current: 0, total: 0, status: '' })
+const batchResults = ref([]) // { name, original, updated, changes: [] }
+const batchResumeIndex = ref(0) // 记录断点位置（chunk 索引）
+const batchChunksCache = ref([]) // 缓存分块数据，用于断点续传
+const batchCandidatesCache = ref([]) // 缓存候选角色列表
+const batchSelection = ref({
+  mode: 'missing_academic', // 'class', 'missing_academic', 'missing_personality', 'all', 'manual'
+  targetClass: '',
+  options: {
+    academic: true,
+    personality: true,
+    relationships: true,
+    overwrite: false // 是否覆盖已有数据
+  }
+})
+
+// 打开批量补全模态框
+const openBatchComplete = () => {
+  // 默认选中第一个班级
+  if (!batchSelection.value.targetClass && Object.keys(fullRosterSnapshot.value).length > 0) {
+    batchSelection.value.targetClass = Object.keys(fullRosterSnapshot.value)[0]
+  }
+  batchResults.value = []
+  batchProgress.value = { current: 0, total: 0, status: '' }
+  showBatchCompleteModal.value = true
+}
+
+// 获取符合当前筛选条件的待处理角色列表
+const getBatchCandidates = () => {
+  let candidates = []
+  const { mode, targetClass } = batchSelection.value
+
+  if (mode === 'class' && targetClass) {
+    const classInfo = fullRosterSnapshot.value[targetClass]
+    if (classInfo) {
+      if (classInfo.headTeacher?.name) candidates.push(classInfo.headTeacher)
+      if (Array.isArray(classInfo.teachers)) candidates.push(...classInfo.teachers)
+      if (Array.isArray(classInfo.students)) candidates.push(...classInfo.students)
+    }
+  } else if (mode === 'missing_academic') {
+    candidates = characterPool.value.filter(c => 
+      c.role === 'student' && 
+      (!c.academicProfile || c.academicProfile.level === 'avg' && c.academicProfile.potential === 'medium' && (!c.academicProfile.traits || c.academicProfile.traits.length === 0))
+    )
+  } else if (mode === 'missing_personality') {
+    candidates = characterPool.value.filter(c => 
+      !c.personality || (c.personality.order === 0 && c.personality.altruism === 0 && c.personality.tradition === 0 && c.personality.peace === 50)
+    )
+  } else if (mode === 'all') {
+    candidates = [...characterPool.value]
+  }
+
+  // 去重（以防万一）
+  const unique = new Map()
+  candidates.forEach(c => {
+    if (c.name) unique.set(c.name, c)
+  })
+  return Array.from(unique.values())
+}
+
+// 构建批量补全Prompt
+const buildBatchPrompt = (chars, options) => {
+  const academicLevelKeys = Object.keys(BASE_RANGES).join(', ')
+  const academicPotentialKeys = Object.keys(POTENTIAL_MAP).join(', ')
+  const traitKeys = Object.keys(SUBJECT_TRAITS).join(', ')
+  
+  let requestDesc = '请根据角色的原作设定，补充以下缺失信息：\n'
+  if (options.academic) requestDesc += `- 学业能力评估 (level/potential/traits)\n`
+  if (options.personality) requestDesc += `- 性格四维倾向 (order/altruism/tradition/peace)\n`
+  if (options.relationships) requestDesc += `- 与其他角色的关系 (relationships)\n`
+  
+  let charListStr = chars.map(c => `- ${c.name} (${c.origin || '未知作品'}) [身份: ${c.role === 'teacher' ? '教师' : '学生'}]`).join('\n')
+  
+  return `你是一个角色数据补全助手。请根据提供的角色列表，基于其原作设定补充详细属性。
+
+任务目标：
+${requestDesc}
+
+角色列表：
+${charListStr}
+
+核心规则：
+1. 只返回结构化的XML指令，不要输出任何叙事文本。
+2. 即使角色信息不全，也请根据名字和原作进行合理推断。
+3. 性格四维轴：order(秩序感,-100混乱~100守序), altruism(利他性,-100利己~100利他), tradition(传统性,-100革新~100传统), peace(和平性,-100好斗~100温和)
+4. 学力评估：level(${academicLevelKeys}), potential(${academicPotentialKeys}), traits(${traitKeys}，可多选)
+5. 关系：仅列出与列表中其他角色或知名原作角色的重要关系。
+
+返回格式：
+<roster_update>
+  <char name="角色名">
+    <personality order="数值" altruism="数值" tradition="数值" peace="数值" />
+    <academic level="等级" potential="潜力" traits="特长1,特长2" />
+    <relationships>
+      <rel target="对象名" intimacy="0-100" trust="0-100" />
+    </relationships>
+  </char>
+</roster_update>`
+}
+
+// 解析批量补全响应
+const parseBatchResponse = (text, originalChars) => {
+  const updates = []
+  const charRegex = /<char\s+name="([^"]+)">([\s\S]*?)<\/char>/g
+  let match
+  
+  while ((match = charRegex.exec(text)) !== null) {
+    const name = match[1]
+    const body = match[2]
+    const original = originalChars.find(c => c.name === name)
+    if (!original) continue
+    
+    const updated = deepClone(original)
+    const changes = []
+    
+    // 解析性格
+    const pMatch = body.match(/<personality\s+([^/]+)\/>/)
+    if (pMatch) {
+      const pa = parseAttributes(pMatch[1])
+      const newPersonality = {
+        order: clampValue(parseInt(pa.order) || 0, -100, 100),
+        altruism: clampValue(parseInt(pa.altruism) || 0, -100, 100),
+        tradition: clampValue(parseInt(pa.tradition) || 0, -100, 100),
+        peace: clampValue(parseInt(pa.peace) || 50, -100, 100)
+      }
+      
+      // 简单比较是否变化
+      if (JSON.stringify(original.personality) !== JSON.stringify(newPersonality)) {
+        updated.personality = newPersonality
+        changes.push('性格倾向')
+      }
+    }
+    
+    // 解析学力
+    const aMatch = body.match(/<academic\s+([^/]+)\/>/)
+    if (aMatch) {
+      const aa = parseAttributes(aMatch[1])
+      const newAcademic = {
+        level: BASE_RANGES[aa.level] ? aa.level : 'avg',
+        potential: POTENTIAL_MAP[aa.potential] ? aa.potential : 'medium',
+        traits: aa.traits ? aa.traits.split(/[,，]/).map(t => t.trim()).filter(t => t && SUBJECT_TRAITS[t]) : []
+      }
+      
+      if (!original.academicProfile || 
+          original.academicProfile.level !== newAcademic.level || 
+          original.academicProfile.potential !== newAcademic.potential ||
+          (original.academicProfile.traits || []).join(',') !== newAcademic.traits.join(',')) {
+        updated.academicProfile = newAcademic
+        changes.push('学力档案')
+      }
+    }
+    
+    // 解析关系 (暂存，后续处理)
+    const rels = []
+    const relRegex = /<rel\s+([^/]+)\/>/g
+    let relMatch
+    while ((relMatch = relRegex.exec(body)) !== null) {
+      const ra = parseAttributes(relMatch[1])
+      rels.push({
+        target: ra.target,
+        intimacy: clampValue(parseInt(ra.intimacy) || 0, 0, 100),
+        trust: clampValue(parseInt(ra.trust) || 0, 0, 100)
+      })
+    }
+    if (rels.length > 0) {
+      updated._tempRelationships = rels
+      changes.push(`关系(${rels.length})`)
+    }
+    
+    if (changes.length > 0) {
+      updates.push({ name, original, updated, changes })
+    }
+  }
+  return updates
+}
+
+// 开始批量处理（支持从指定 chunk 索引继续）
+const startBatchProcess = async (startFromChunk = 0) => {
+  // 修复：如果由点击事件触发，startFromChunk 会是事件对象，需重置为 0
+  if (typeof startFromChunk !== 'number') startFromChunk = 0
+  
+  let candidates, chunks
+  
+  if (startFromChunk > 0 && batchChunksCache.value.length > 0) {
+    // 断点续传模式：使用缓存的 chunks 和 candidates
+    candidates = batchCandidatesCache.value
+    chunks = batchChunksCache.value
+  } else {
+    // 全新开始
+    candidates = getBatchCandidates()
+    if (candidates.length === 0) {
+      alert('未找到符合条件的角色')
+      return
+    }
+    
+    const CHUNK_SIZE = 10
+    chunks = []
+    for (let i = 0; i < candidates.length; i += CHUNK_SIZE) {
+      chunks.push(candidates.slice(i, i + CHUNK_SIZE))
+    }
+    
+    // 缓存数据
+    batchCandidatesCache.value = candidates
+    batchChunksCache.value = chunks
+    
+    // 全新开始时清空结果
+    if (startFromChunk === 0) {
+      batchResults.value = []
+    }
+  }
+  
+  if (!window.generate) {
+    alert('AI生成接口不可用')
+    return
+  }
+  
+  batchProcessing.value = true
+  batchProgress.value = { current: startFromChunk * 10, total: candidates.length, status: '准备中...' }
+  
+  try {
+    for (let i = startFromChunk; i < chunks.length; i++) {
+      const chunk = chunks[i]
+      batchProgress.value = { 
+        current: i * 10, 
+        total: candidates.length, 
+        status: `正在处理第 ${i+1}/${chunks.length} 批 (${chunk.length}人)...` 
+      }
+      
+      // 保存当前进度索引（用于断点续传）
+      batchResumeIndex.value = i
+      
+      const prompt = buildBatchPrompt(chunk, batchSelection.value.options)
+      
+      const result = await window.generateRaw({
+        user_input: prompt,
+        ordered_prompts: [
+          { role: 'system', content: '你是角色数据补全助手。只返回结构化XML数据。' },
+          'user_input',
+        ],
+        should_stream: false
+      })
+      
+      if (result && result !== '__ERROR__') {
+        const updates = parseBatchResponse(result, chunk)
+        batchResults.value.push(...updates)
+      }
+      
+      // 简单的延迟防止请求过快
+      await new Promise(r => setTimeout(r, 500))
+    }
+    
+    batchProgress.value = { 
+      current: candidates.length, 
+      total: candidates.length, 
+      status: '处理完成！请确认变更。' 
+    }
+    // 处理完成，重置断点
+    batchResumeIndex.value = 0
+  } catch (e) {
+    console.error('Batch process error:', e)
+    // 记录失败的 chunk 索引（下次从这里继续）
+    batchProgress.value.status = `第 ${batchResumeIndex.value + 1}/${chunks.length} 批处理时发生错误: ${e.message}`
+  } finally {
+    batchProcessing.value = false
+  }
+}
+
+// 从断点继续处理
+const resumeBatchProcess = () => {
+  startBatchProcess(batchResumeIndex.value)
+}
+
+// 应用批量变更
+const applyBatchChanges = async () => {
+  if (batchResults.value.length === 0) return
+  
+  let appliedCount = 0
+  
+  // 1. 更新 characterPool
+  for (const item of batchResults.value) {
+    const idx = characterPool.value.findIndex(c => c.name === item.name)
+    if (idx !== -1) {
+      // 仅更新选定的字段
+      const target = characterPool.value[idx]
+      if (item.changes.includes('性格倾向')) target.personality = item.updated.personality
+      if (item.changes.includes('学力档案')) target.academicProfile = item.updated.academicProfile
+      
+      // 处理关系更新
+      if (item.updated._tempRelationships && item.updated._tempRelationships.length > 0) {
+        // 确保勾选了更新关系
+        if (batchSelection.value.options.relationships) {
+          for (const rel of item.updated._tempRelationships) {
+             // 检查是否需要覆盖
+             const existing = getRelationship(item.name, rel.target)
+             if (existing && !batchSelection.value.options.overwrite) {
+               continue // 不覆盖
+             }
+             
+             setRelationship(item.name, rel.target, {
+               intimacy: rel.intimacy,
+               trust: rel.trust,
+               passion: 0,
+               hostility: 0,
+               tags: []
+             })
+          }
+        }
+      }
+
+      appliedCount++
+    }
+  }
+  
+  // 2. 同步到 fullRosterSnapshot (因为班级数据中也包含学生属性副本)
+  syncCharacterPoolToSnapshot()
+  
+  // 3. 保存
+  await saveFullCharacterPool(deepClone(characterPool.value))
+  await saveRosterBackup(deepClone(fullRosterSnapshot.value))
+  
+  // 4. 触发世界书更新 (模拟点击“确认并同步”)
+  // 这里我们直接调用 handleSave 的逻辑子集
+  await handleSave()
+  
+  showBatchCompleteModal.value = false
+  alert(`已成功更新 ${appliedCount} 个角色的数据并同步到世界书！`)
+}
 
 // ==================== AI角色导入功能 ====================
 
@@ -122,10 +458,47 @@ const removeAIImportEntry = (index) => {
   }
 }
 
+// 学力等级选项
+const ACADEMIC_LEVEL_OPTIONS = {
+  top: '🏆 尖子生',
+  above_avg: '📈 中上',
+  avg: '📊 普通',
+  below_avg: '📉 中下',
+  poor: '😓 学渣'
+}
+
+const ACADEMIC_POTENTIAL_OPTIONS = {
+  very_high: '🚀 极高',
+  high: '⬆️ 高',
+  medium: '➡️ 普通',
+  low: '⬇️ 低'
+}
+
+const ACADEMIC_TRAIT_OPTIONS = Object.entries(SUBJECT_TRAITS).map(([key, val]) => ({
+  key,
+  label: `${val.bonus > 0 ? '✅' : '❌'} ${SUBJECT_DISPLAY_NAMES[val.subject] || val.subject} ${val.bonus > 0 ? '强' : '弱'} (${val.bonus > 0 ? '+' : ''}${val.bonus})`,
+  subject: val.subject,
+  bonus: val.bonus
+}))
+
+// 切换学力特长标签
+const toggleAcademicTrait = (traitKey) => {
+  const traits = characterEditForm.value.academicProfile.traits
+  const idx = traits.indexOf(traitKey)
+  if (idx > -1) {
+    traits.splice(idx, 1)
+  } else {
+    traits.push(traitKey)
+  }
+}
+
 // 构建AI导入提示词
 const buildAIImportPrompt = () => {
   const templateKeys = Object.keys(DEFAULT_TEMPLATES).join(', ')
   const prefKeys = Object.keys(ELECTIVE_PREFERENCES).join(', ')
+  const academicLevelKeys = Object.keys(BASE_RANGES).join(', ')
+  const academicPotentialKeys = Object.keys(POTENTIAL_MAP).join(', ')
+  const traitKeys = Object.keys(SUBJECT_TRAITS).join(', ')
 
   const entries = aiImportEntries.value.filter(e => e.work.trim())
   let querySection = ''
@@ -156,11 +529,17 @@ const buildAIImportPrompt = () => {
    - teacher: 教师、教授、导师
    - staff: 校医、护士、管理员、警卫、后勤人员等非教学职工
    - uncertain: 不确定或不适合放入校园环境
+9. 学力评估：请根据角色在原作中表现出的学业水平、智力、学习态度推断以下信息：
+   - level: 学力等级，可选值：${academicLevelKeys}
+   - potential: 成长潜力，可选值：${academicPotentialKeys}
+   - traits: 科目特长/弱项标签（逗号分隔），可选值：${traitKeys}
+   - 例如一个数学天才但文科差的角色: level="top" potential="high" traits="math_strong,literature_weak"
 
 [返回格式 - 查询特定角色]
 对每个查询的角色返回：
 <roster_character name="角色名" work="作品名" found="true" gender="male或female" role_suggestion="student/teacher/staff/uncertain" role_reason="理由">
   <personality order="数值" altruism="数值" tradition="数值" peace="数值" />
+  <academic level="等级" potential="潜力" traits="特长标签,逗号分隔" />
   <elective_preference>类型</elective_preference>
   <schedule_tag>模板ID</schedule_tag>
   <relationships>
@@ -229,6 +608,18 @@ const parseAIImportResponse = (text) => {
       }
     }
 
+    // 解析学力评估
+    const academicMatch = body.match(/<academic\s+([^/]+)\/>/)
+    let academicProfile = { level: 'avg', potential: 'medium', traits: [] }
+    if (academicMatch) {
+      const aa = parseAttributes(academicMatch[1])
+      academicProfile = {
+        level: BASE_RANGES[aa.level] ? aa.level : 'avg',
+        potential: POTENTIAL_MAP[aa.potential] ? aa.potential : 'medium',
+        traits: aa.traits ? aa.traits.split(/[,，]/).map(t => t.trim()).filter(t => t && SUBJECT_TRAITS[t]) : []
+      }
+    }
+
     // 解析选课倾向
     const prefMatch = body.match(/<elective_preference>(.*?)<\/elective_preference>/)
     let electivePreference = 'general'
@@ -265,7 +656,7 @@ const parseAIImportResponse = (text) => {
       gender: attrs.gender || 'female',
       roleSuggestion: attrs.role_suggestion || 'student',
       roleReason: attrs.role_reason || '',
-      personality, electivePreference, scheduleTag, relationships,
+      personality, academicProfile, electivePreference, scheduleTag, relationships,
       selected: true
     })
   }
@@ -445,7 +836,8 @@ const confirmAIImport = async () => {
       isHeadTeacher: false,
       electivePreference: char.electivePreference || 'general',
       scheduleTag: char.scheduleTag || '',
-      personality: char.personality || { order: 0, altruism: 0, tradition: 0, peace: 50 }
+      personality: char.personality || { order: 0, altruism: 0, tradition: 0, peace: 50 },
+      academicProfile: char.academicProfile || { level: 'avg', potential: 'medium', traits: [] }
     })
     addedCount++
   }
@@ -502,6 +894,21 @@ const loadData = async (forceUpdate = false) => {
     if (!gameStore.allClassData || Object.keys(gameStore.allClassData).length === 0) {
       console.log('[RosterFilter] Class data not loaded, loading now...')
       await gameStore.loadClassData()
+    }
+
+    // 加载并合并学力数据（从独立数据库）
+    const academicMap = await fetchAcademicDataFromWorldbook()
+    if (academicMap && Object.keys(academicMap).length > 0) {
+      console.log('[RosterFilter] Merging academic data from worldbook database...')
+      for (const classInfo of Object.values(gameStore.allClassData)) {
+        if (Array.isArray(classInfo.students)) {
+          classInfo.students.forEach(s => {
+            if (academicMap[s.name]) {
+              s.academicProfile = academicMap[s.name]
+            }
+          })
+        }
+      }
     }
     
     let backupData = await getRosterBackup()
@@ -666,7 +1073,7 @@ const loadData = async (forceUpdate = false) => {
   }
 }
 
-// 加载角色池（从快照构建，合并已保存的自定义角色）
+    // 加载角色池（从快照构建，合并已保存的自定义角色）
 const loadCharacterPool = async () => {
   try {
     console.log('[RosterFilter] Loading character pool...')
@@ -678,6 +1085,9 @@ const loadCharacterPool = async () => {
       savedPool = []
     }
     const savedMap = new Map(savedPool.map(c => [c.name, c]))
+
+    // 1.5 从世界书获取社交数据（用于覆盖性格等信息）
+    const socialData = await fetchSocialData()
     
     // 2. 从快照构建基础角色池
     const currentPool = []
@@ -769,11 +1179,26 @@ const loadCharacterPool = async () => {
             isHeadTeacher: false,
             electivePreference: s.electivePreference || 'general',
             scheduleTag: s.scheduleTag || '',
-            personality: { order: 0, altruism: 0, tradition: 0, peace: 50 }
+            personality: s.personality || { order: 0, altruism: 0, tradition: 0, peace: 50 },
+            academicProfile: s.academicProfile || { level: 'avg', potential: 'medium', traits: [] }
           }
+          
+          // 优先使用世界书中的性格数据
+          if (socialData && socialData[char.name] && socialData[char.name].personality) {
+            char.personality = socialData[char.name].personality
+          }
+
           if (savedMap.has(char.name)) {
             const saved = savedMap.get(char.name)
-            char.personality = saved.personality || char.personality
+            // 如果世界书没有数据，才使用 savedMap 的数据（向后兼容）
+            if (!socialData || !socialData[char.name]) {
+               char.personality = saved.personality || char.personality
+            }
+            
+            // 修复：合并学力档案
+            if (saved.academicProfile) {
+              char.academicProfile = saved.academicProfile
+            }
             // 保留已保存的选课倾向（如果当前没有）
             if (!s.electivePreference && saved.electivePreference) {
               char.electivePreference = saved.electivePreference
@@ -797,10 +1222,17 @@ const loadCharacterPool = async () => {
         subjects: undefined // 清理临时 Set
       }
       
+      // 优先使用世界书中的性格数据
+      if (socialData && socialData[char.name] && socialData[char.name].personality) {
+        char.personality = socialData[char.name].personality
+      }
+      
       // 合并已保存的自定义属性
       if (savedMap.has(char.name)) {
         const saved = savedMap.get(char.name)
-        char.personality = saved.personality || char.personality
+        if (!socialData || !socialData[char.name]) {
+           char.personality = saved.personality || char.personality
+        }
         savedMap.delete(char.name)
       }
       
@@ -814,6 +1246,11 @@ const loadCharacterPool = async () => {
     // 3. 添加剩余的自定义角色（不在班级中的，同样去重）
     for (const [name, char] of savedMap) {
       if (!addedNames.has(name)) {
+        // 同样应用世界书数据
+        if (socialData && socialData[name] && socialData[name].personality) {
+          char.personality = socialData[name].personality
+        }
+        
         char.classId = char.classId || ''
         currentPool.push(char)
         addedNames.add(name)
@@ -1367,6 +1804,46 @@ watch(selectedPreset, () => {
   loadComposerClassData()
 })
 
+// 筛选名册中已勾选的角色名集合
+const rosterCheckedNames = computed(() => {
+  const names = new Set()
+  for (const [classId, studentStateMap] of Object.entries(currentRosterState.value)) {
+    for (const [name, checked] of Object.entries(studentStateMap)) {
+      if (checked) names.add(name)
+    }
+  }
+  // 也包含教师（教师在筛选名册中始终视为"已勾选"）
+  for (const classInfo of Object.values(fullRosterSnapshot.value)) {
+    if (classInfo.headTeacher?.name) names.add(classInfo.headTeacher.name)
+    const teachers = Array.isArray(classInfo.teachers) ? classInfo.teachers : []
+    teachers.forEach(t => { if (t.name) names.add(t.name) })
+  }
+  return names
+})
+
+// 用户在角色编辑器中自建的角色名集合（不存在于原始快照任何班级中的角色）
+const customAddedNames = computed(() => {
+  const snapshotNames = new Set()
+  for (const classInfo of Object.values(fullRosterSnapshot.value)) {
+    if (classInfo.headTeacher?.name) snapshotNames.add(classInfo.headTeacher.name)
+    const teachers = Array.isArray(classInfo.teachers) ? classInfo.teachers : []
+    teachers.forEach(t => { if (t.name) snapshotNames.add(t.name) })
+    const students = Array.isArray(classInfo.students) ? classInfo.students : []
+    students.forEach(s => { if (s.name) snapshotNames.add(s.name) })
+  }
+  return new Set(characterPool.value.filter(c => !snapshotNames.has(c.name)).map(c => c.name))
+})
+
+// 切换来源筛选
+const toggleComposerSourceFilter = (filterType) => {
+  const idx = composerSourceFilter.value.indexOf(filterType)
+  if (idx > -1) {
+    composerSourceFilter.value.splice(idx, 1)
+  } else {
+    composerSourceFilter.value.push(filterType)
+  }
+}
+
 // 过滤可用角色
 const filteredAvailableCharacters = computed(() => {
   let result = availableCharacters.value
@@ -1389,6 +1866,27 @@ const filteredAvailableCharacters = computed(() => {
   // 仅显示未分配角色
   if (composerShowUnassigned.value) {
     result = result.filter(c => !c.isAssigned)
+  }
+  
+  // 来源筛选（多选，满足任一条件即显示）
+  if (composerSourceFilter.value.length > 0) {
+    const filters = new Set(composerSourceFilter.value)
+    const showChecked = filters.has('checked')
+    const showCustom = filters.has('custom')
+    
+    // 提前获取集合引用，避免在循环中重复访问响应式对象
+    const checkedSet = rosterCheckedNames.value
+    const customSet = customAddedNames.value
+    
+    result = result.filter(c => {
+      // 逻辑：只要满足勾选的任意一个条件，就保留
+      // 如果勾选了"仅已勾选"，且角色在 rosterCheckedNames 中 -> 通过
+      if (showChecked && checkedSet.has(c.name)) return true
+      // 如果勾选了"仅自建"，且角色在 customAddedNames 中 -> 通过
+      if (showCustom && customSet.has(c.name)) return true
+      
+      return false
+    })
   }
   
   // 搜索筛选
@@ -1703,12 +2201,30 @@ const deleteClass = async () => {
 }
 
 // ==================== 角色编辑器 ====================
+// 角色编辑器的作品列表（用于筛选下拉菜单）
+const charEditorAvailableWorks = computed(() => {
+  const works = new Map()
+  characterPool.value.forEach(c => {
+    const work = getCleanOrigin(c.origin)
+    if (!works.has(work)) works.set(work, 0)
+    works.set(work, works.get(work) + 1)
+  })
+  return Array.from(works.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, count]) => ({ name, count }))
+})
+
 const filteredCharacterPool = computed(() => {
   let result = characterPool.value
   
   // 角色类型筛选
   if (charEditorRoleFilter.value !== 'all') {
     result = result.filter(c => c.role === charEditorRoleFilter.value)
+  }
+  
+  // 按作品筛选
+  if (charEditorWorkFilter.value) {
+    result = result.filter(c => getCleanOrigin(c.origin) === charEditorWorkFilter.value)
   }
   
   // 搜索筛选
@@ -1735,6 +2251,9 @@ const charPoolStats = computed(() => {
 
 const startEditCharacter = (char) => {
   editingCharacter.value = char
+  
+  // 加载学力档案
+  const savedAcademicProfile = char.academicProfile || { level: 'avg', potential: 'medium', traits: [] }
   
   // 为教师构建 assignments 数组
   let assignments = []
@@ -1803,7 +2322,8 @@ const startEditCharacter = (char) => {
     electivePreference: char.electivePreference || 'general',
     scheduleTag: char.scheduleTag || '',
     notes: char.notes || gameStore.characterNotes?.[char.name] || '',
-    personality: char.personality ? { ...char.personality } : { order: 0, altruism: 0, tradition: 0, peace: 50 }
+    personality: char.personality ? { ...char.personality } : { order: 0, altruism: 0, tradition: 0, peace: 50 },
+    academicProfile: { ...savedAcademicProfile, traits: [...(savedAcademicProfile.traits || [])] }
   }
   showCharacterEditor.value = true
 }
@@ -1822,7 +2342,8 @@ const addNewCharacter = () => {
     electivePreference: 'general',
     scheduleTag: '',
     notes: '',
-    personality: { order: 0, altruism: 0, tradition: 0, peace: 50 }
+    personality: { order: 0, altruism: 0, tradition: 0, peace: 50 },
+    academicProfile: { level: 'avg', potential: 'medium', traits: [] }
   }
   showCharacterEditor.value = true
 }
@@ -1923,7 +2444,8 @@ const saveCharacterEdit = async () => {
       assignments: form.assignments.filter(a => a.classId), // 保留 assignments
       electivePreference: 'general',
       scheduleTag: '',
-      personality: { ...form.personality }
+      personality: { ...form.personality },
+      academicProfile: { ...(form.academicProfile || { level: 'avg', potential: 'medium', traits: [] }), traits: [...((form.academicProfile || {}).traits || [])] }
     }
     
     if (editingCharacter.value) {
@@ -1947,12 +2469,15 @@ const saveCharacterEdit = async () => {
       origin: form.origin,
       classId: form.classId,
       role: form.role,
+      staffTitle: form.role === 'staff' ? form.staffTitle : '',
+      workplace: form.role === 'staff' ? form.workplace : '',
       subject: form.role === 'teacher' ? form.subject : '',
       isHeadTeacher: form.role === 'teacher' ? form.isHeadTeacher : false,
       electivePreference: form.role === 'student' ? form.electivePreference : 'general',
       scheduleTag: form.role === 'student' ? form.scheduleTag : '',
       notes: form.notes,
-      personality: { ...form.personality }
+      personality: { ...form.personality },
+      academicProfile: { ...(form.academicProfile || { level: 'avg', potential: 'medium', traits: [] }), traits: [...((form.academicProfile || {}).traits || [])] }
     }
     
     if (editingCharacter.value) {
@@ -2021,6 +2546,14 @@ const syncCharacterPoolToSnapshot = () => {
           if (updated.scheduleTag) {
             student.scheduleTag = updated.scheduleTag
           }
+          // 同步学力档案
+          if (updated.academicProfile) {
+            student.academicProfile = updated.academicProfile
+          }
+          // 同步性格倾向
+          if (updated.personality) {
+            student.personality = updated.personality
+          }
         }
       })
     }
@@ -2029,15 +2562,42 @@ const syncCharacterPoolToSnapshot = () => {
     if (Array.isArray(classInfo.teachers)) {
       classInfo.teachers.forEach(teacher => {
         const updated = poolMap.get(teacher.name)
-        if (updated && updated.subject) {
-          teacher.subject = updated.subject
+        if (updated) {
+          // 修复：根据班级ID获取对应的科目，避免使用合并后的科目字符串
+          let classSubject = null
+          
+          // 1. 优先查找 assignments (编辑后生成)
+          if (Array.isArray(updated.assignments)) {
+            const assign = updated.assignments.find(a => a.classId === classId)
+            if (assign && assign.subject) {
+              classSubject = assign.subject
+            }
+          }
+          
+          // 2. 其次查找 subjectsByClass (加载时生成)
+          if (!classSubject && updated.subjectsByClass && updated.subjectsByClass[classId]) {
+            classSubject = updated.subjectsByClass[classId]
+          }
+          
+          // 3. 只有找到特定班级的科目才更新
+          if (classSubject) {
+            teacher.subject = classSubject
+          }
+
+          // 同步性格倾向
+          if (updated.personality) {
+            teacher.personality = updated.personality
+          }
         }
       })
     }
     
     // 同步班主任
     if (classInfo.headTeacher?.name) {
-      // 班主任属性通常较少变动，暂不特别处理，除非有具体需求
+      const updated = poolMap.get(classInfo.headTeacher.name)
+      if (updated && updated.personality) {
+        classInfo.headTeacher.personality = updated.personality
+      }
     }
   }
 }
@@ -2048,6 +2608,66 @@ const handleSave = async () => {
   try {
     // 关键修复：保存前先同步角色池的最新修改到快照
     syncCharacterPoolToSnapshot()
+
+    // --- 保存学力数据到独立条目 ---
+    const allStudentsForAcademic = []
+    // 收集所有在快照中的学生（包括未选中的，只要数据存在）
+    for (const classInfo of Object.values(fullRosterSnapshot.value)) {
+      if (Array.isArray(classInfo.students)) {
+        allStudentsForAcademic.push(...classInfo.students)
+      }
+    }
+    // 也加上角色池中未分配的学生（如果有）
+    const snapshotNames = new Set(allStudentsForAcademic.map(s => s.name))
+    characterPool.value.forEach(c => {
+      if (c.role === 'student' && !snapshotNames.has(c.name)) {
+        allStudentsForAcademic.push(c)
+      }
+    })
+    
+    await updateAcademicDataInWorldbook(allStudentsForAcademic)
+    
+    // --- 保存社交/性格数据到世界书 ---
+    // 读取现有数据以保留未加载角色的数据
+    const existingSocialData = (await fetchSocialData()) || {}
+    
+    // 更新当前角色池中的数据
+    characterPool.value.forEach(c => {
+      if (!existingSocialData[c.name]) {
+        existingSocialData[c.name] = {
+          personality: { order: 0, altruism: 0, tradition: 0, peace: 50 },
+          relationships: {},
+          goals: { immediate: '', shortTerm: '', longTerm: '' },
+          priorities: { academics: 50, social: 50, hobbies: 50, survival: 50, club: 50 }
+        }
+      }
+      // 更新性格
+      if (c.personality) {
+        existingSocialData[c.name].personality = c.personality
+      }
+      
+      // 关键修复：从 gameStore.npcRelationships 中同步最新的关系数据
+      // 避免因为这里只保存了空关系而覆盖了 AI 补全或其他地方生成的关系
+      if (gameStore.npcRelationships && gameStore.npcRelationships[c.name]) {
+        const runtimeData = gameStore.npcRelationships[c.name];
+        
+        // 如果内存中有关系数据，更新到世界书对象中
+        if (runtimeData.relations && Object.keys(runtimeData.relations).length > 0) {
+          existingSocialData[c.name].relationships = JSON.parse(JSON.stringify(runtimeData.relations));
+        }
+        
+        // 同时也同步目标和优先级
+        if (runtimeData.goals) {
+          existingSocialData[c.name].goals = JSON.parse(JSON.stringify(runtimeData.goals));
+        }
+        if (runtimeData.priorities) {
+          existingSocialData[c.name].priorities = JSON.parse(JSON.stringify(runtimeData.priorities));
+        }
+      }
+    })
+    
+    await saveSocialData(existingSocialData)
+    // ----------------------------
     
     const changes = []
     
@@ -2068,7 +2688,9 @@ const handleSave = async () => {
           role: 'student',
           classId: classId,
           electivePreference: s.electivePreference || 'general',
-          scheduleTag: s.scheduleTag || ''
+          scheduleTag: s.scheduleTag || '',
+          academicProfile: s.academicProfile || undefined,
+          personality: s.personality || undefined
         }))
       
       if (gameStore.allClassData[classId]) {
@@ -2087,7 +2709,8 @@ const handleSave = async () => {
     console.log('[RosterFilter] Syncing changes to Worldbook for classes:', changes)
     let successCount = 0
     for (const classId of changes) {
-      const success = await updateClassDataInWorldbook(classId, gameStore.allClassData[classId])
+      // 传入 true 以排除学力标签（因为已经保存到独立数据库了）
+      const success = await updateClassDataInWorldbook(classId, gameStore.allClassData[classId], true)
       if (success) successCount++
     }
 
@@ -2117,7 +2740,9 @@ const handleSave = async () => {
             role: 'student',
             classId: classId,
             electivePreference: s.electivePreference || 'general',
-            scheduleTag: s.scheduleTag || ''
+            scheduleTag: s.scheduleTag || '',
+            academicProfile: s.academicProfile || undefined,
+            personality: s.personality || undefined
           }))
         
         // 修复：使用 Array.isArray 确保是数组
@@ -3200,6 +3825,14 @@ watch(activeTab, async (newTab) => {
                     <input type="checkbox" v-model="composerShowUnassigned" />
                     <span>仅未分配</span>
                   </label>
+                  <label class="pool-checkbox-label" title="仅显示筛选名册中打勾的角色">
+                    <input type="checkbox" :checked="composerSourceFilter.includes('checked')" @change="toggleComposerSourceFilter('checked')" />
+                    <span>仅已勾选</span>
+                  </label>
+                  <label class="pool-checkbox-label" title="仅显示在角色编辑器中手动添加的角色">
+                    <input type="checkbox" :checked="composerSourceFilter.includes('custom')" @change="toggleComposerSourceFilter('custom')" />
+                    <span>仅自建</span>
+                  </label>
                   <label class="pool-checkbox-label" title="按作品分组显示">
                     <input type="checkbox" v-model="composerGroupView" />
                     <span>分组</span>
@@ -3299,8 +3932,15 @@ watch(activeTab, async (newTab) => {
                 <option value="teacher">教师</option>
                 <option value="pending">待入学(新生)</option>
               </select>
+              <select v-model="charEditorWorkFilter" class="pool-work-filter">
+                <option value="">全部作品</option>
+                <option v-for="w in charEditorAvailableWorks" :key="w.name" :value="w.name">
+                  {{ w.name }} ({{ w.count }})
+                </option>
+              </select>
               <button class="add-btn" @click="addNewCharacter">+ 新增角色</button>
               <button class="add-btn ai-import-btn" @click="openAIImport">🤖 AI导入</button>
+              <button class="add-btn batch-btn-tool" @click="openBatchComplete">✨ 批量补全</button>
             </div>
             
             <div class="char-editor-stats">
@@ -3632,6 +4272,37 @@ watch(activeTab, async (newTab) => {
               ></textarea>
             </div>
             
+            <!-- 学力设置 -->
+            <div v-if="characterEditForm.role === 'student'" class="personality-section">
+              <h4>📚 学力档案</h4>
+              <div class="form-row half">
+                <div class="col">
+                  <label>学力等级：</label>
+                  <select v-model="characterEditForm.academicProfile.level" class="input-field">
+                    <option v-for="(label, key) in ACADEMIC_LEVEL_OPTIONS" :key="key" :value="key">{{ label }}</option>
+                  </select>
+                </div>
+                <div class="col">
+                  <label>成长潜力：</label>
+                  <select v-model="characterEditForm.academicProfile.potential" class="input-field">
+                    <option v-for="(label, key) in ACADEMIC_POTENTIAL_OPTIONS" :key="key" :value="key">{{ label }}</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row">
+                <label>科目特长/弱项：</label>
+                <div class="academic-traits-grid">
+                  <span
+                    v-for="trait in ACADEMIC_TRAIT_OPTIONS"
+                    :key="trait.key"
+                    class="academic-trait-chip"
+                    :class="{ active: characterEditForm.academicProfile.traits.includes(trait.key), strong: trait.bonus > 0, weak: trait.bonus < 0 }"
+                    @click="toggleAcademicTrait(trait.key)"
+                  >{{ trait.label }}</span>
+                </div>
+              </div>
+            </div>
+
             <!-- 性格滑条 -->
             <div class="personality-section">
               <h4>性格倾向</h4>
@@ -3945,6 +4616,129 @@ watch(activeTab, async (newTab) => {
           </div>
         </div>
 
+        <!-- 批量补全模态框 -->
+        <div v-if="showBatchCompleteModal" class="modal-overlay" @click.self="!batchProcessing && (showBatchCompleteModal = false)">
+          <div class="modal large-modal batch-modal">
+            <div class="modal-header">
+              <h3>✨ 角色数据批量补全</h3>
+              <button v-if="!batchProcessing" class="close-btn small" @click="showBatchCompleteModal = false">×</button>
+            </div>
+            
+            <div class="modal-body-scroll">
+              <!-- 设置区域 -->
+              <div v-if="batchResults.length === 0 && !batchProcessing" class="batch-settings">
+                <div class="form-section">
+                  <h4>1. 选择补全对象</h4>
+                  <div class="form-row">
+                    <label>筛选模式：</label>
+                    <select v-model="batchSelection.mode" class="input-field">
+                      <option value="missing_academic">缺失学力数据的学生</option>
+                      <option value="missing_personality">缺失性格数据的角色</option>
+                      <option value="class">指定班级</option>
+                      <option value="all">所有角色 (慎用)</option>
+                    </select>
+                  </div>
+                  <div v-if="batchSelection.mode === 'class'" class="form-row">
+                    <label>目标班级：</label>
+                    <select v-model="batchSelection.targetClass" class="input-field">
+                      <option v-for="(classInfo, classId) in fullRosterSnapshot" :key="classId" :value="classId">
+                        {{ classInfo.name || classId }}
+                      </option>
+                    </select>
+                  </div>
+                  <div class="candidate-count">
+                    预计处理角色数: <strong>{{ getBatchCandidates().length }}</strong>
+                  </div>
+                </div>
+                
+                <div class="form-section">
+                  <h4>2. 补全内容</h4>
+                  <div class="checkbox-group">
+                    <label class="checkbox-label">
+                      <input type="checkbox" v-model="batchSelection.options.academic" />
+                      学力档案 (等级/潜力/特长)
+                    </label>
+                    <label class="checkbox-label">
+                      <input type="checkbox" v-model="batchSelection.options.personality" />
+                      性格倾向 (四维属性)
+                    </label>
+                    <label class="checkbox-label">
+                      <input type="checkbox" v-model="batchSelection.options.relationships" />
+                      人际关系 (推断)
+                    </label>
+                  </div>
+                </div>
+                
+                <div class="modal-actions center">
+                  <button class="action-btn primary large" @click="startBatchProcess" :disabled="getBatchCandidates().length === 0">
+                    🚀 开始AI补全
+                  </button>
+                </div>
+              </div>
+              
+              <!-- 进度/结果区域 -->
+              <div v-else class="batch-results">
+                <div class="progress-bar-container">
+                  <div class="progress-info">
+                    <span>{{ batchProgress.status }}</span>
+                    <span>{{ Math.round((batchProgress.current / (batchProgress.total || 1)) * 100) }}%</span>
+                  </div>
+                  <div class="progress-track">
+                    <div 
+                      class="progress-fill" 
+                      :style="{ width: `${(batchProgress.current / (batchProgress.total || 1)) * 100}%` }"
+                    ></div>
+                  </div>
+                </div>
+                
+                <div v-if="batchResults.length > 0" class="results-list">
+                  <h4>变更预览 ({{ batchResults.length }})</h4>
+                  <div v-for="(item, idx) in batchResults" :key="idx" class="result-item">
+                    <div class="result-header">
+                      <span class="result-name">{{ item.name }}</span>
+                      <span class="result-changes">更新: {{ item.changes.join(', ') }}</span>
+                    </div>
+                    <div class="result-details">
+                      <div v-if="item.changes.includes('学力档案')" class="detail-row">
+                        <span class="label">学力:</span>
+                        <span class="old">{{ item.original.academicProfile?.level || '无' }}</span>
+                        <span class="arrow">➜</span>
+                        <span class="new">{{ item.updated.academicProfile?.level }} ({{ item.updated.academicProfile?.potential }})</span>
+                      </div>
+                      <div v-if="item.changes.includes('性格倾向')" class="detail-row">
+                        <span class="label">性格:</span>
+                        <span class="new">
+                          O:{{ item.updated.personality.order }} 
+                          A:{{ item.updated.personality.altruism }} 
+                          T:{{ item.updated.personality.tradition }} 
+                          P:{{ item.updated.personality.peace }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <div v-if="!batchProcessing && (batchResults.length > 0 || batchProgress.status.includes('错误'))" class="modal-actions batch-actions-row">
+                  <button v-if="batchResults.length > 0" class="action-btn primary" @click="applyBatchChanges">
+                    💾 确认并应用 (更新世界书)
+                  </button>
+                  <button 
+                    v-if="batchProgress.status.includes('错误')" 
+                    class="action-btn warning" 
+                    @click="resumeBatchProcess"
+                    title="从失败位置继续处理剩余角色"
+                  >
+                    🔄 继续处理 (从第{{ batchResumeIndex + 1 }}批)
+                  </button>
+                  <button class="action-btn secondary" @click="batchResults = []; batchResumeIndex = 0; batchChunksCache = []; batchCandidatesCache = []">
+                    🔙 返回重选
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- AI导入结果面板 -->
         <div v-if="showAIImportResult" class="modal-overlay" @click.self="closeAIImport">
           <div class="modal ai-result-modal">
@@ -4035,6 +4829,16 @@ watch(activeTab, async (newTab) => {
                       <span class="ai-detail-label">性格:</span>
                       <span class="ai-personality-values">
                         秩序{{ char.personality.order }} 利他{{ char.personality.altruism }} 传统{{ char.personality.tradition }} 和平{{ char.personality.peace }}
+                      </span>
+                    </div>
+                    <div v-if="char.academicProfile" class="ai-card-row">
+                      <span class="ai-detail-label">学力:</span>
+                      <span class="ai-academic-values">
+                        {{ ACADEMIC_LEVEL_OPTIONS[char.academicProfile.level] || char.academicProfile.level }}
+                        / {{ ACADEMIC_POTENTIAL_OPTIONS[char.academicProfile.potential] || char.academicProfile.potential }}
+                        <span v-if="char.academicProfile.traits && char.academicProfile.traits.length > 0" class="ai-academic-traits">
+                          {{ char.academicProfile.traits.join(', ') }}
+                        </span>
                       </span>
                     </div>
                     <div v-if="char.relationships && char.relationships.length > 0" class="ai-card-row">
@@ -6230,6 +7034,16 @@ watch(activeTab, async (newTab) => {
   transform: translateY(-1px);
 }
 
+.batch-btn-tool {
+  background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%) !important;
+  box-shadow: 0 2px 8px rgba(255, 152, 0, 0.3);
+}
+
+.batch-btn-tool:hover {
+  box-shadow: 0 4px 12px rgba(255, 152, 0, 0.5);
+  transform: translateY(-1px);
+}
+
 .ai-import-modal {
   width: 550px;
 }
@@ -6606,6 +7420,55 @@ watch(activeTab, async (newTab) => {
   padding: 1px 8px;
   border-radius: 10px;
   font-size: 0.8rem;
+}
+
+.ai-academic-values {
+  color: #555;
+  font-size: 0.8rem;
+}
+
+.ai-academic-traits {
+  display: inline-block;
+  margin-left: 6px;
+  color: #888;
+  font-size: 0.75rem;
+}
+
+/* 学力特长标签网格 */
+.academic-traits-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.academic-trait-chip {
+  padding: 4px 10px;
+  border: 1px solid #ddd;
+  border-radius: 14px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+  color: #666;
+  background: #fafafa;
+}
+
+.academic-trait-chip:hover {
+  border-color: #999;
+  background: #f0f0f0;
+}
+
+.academic-trait-chip.active.strong {
+  background: #e8f5e9;
+  border-color: #4caf50;
+  color: #2e7d32;
+}
+
+.academic-trait-chip.active.weak {
+  background: #ffebee;
+  border-color: #ef5350;
+  color: #c62828;
 }
 
 /* 未识别角色列表 */
@@ -7080,6 +7943,103 @@ watch(activeTab, async (newTab) => {
     flex-wrap: wrap;
   }
 }
+
+/* 批量补全样式 */
+.batch-modal {
+  height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.candidate-count {
+  margin-top: 10px;
+  font-size: 0.9rem;
+  color: #666;
+  background: #f5f5f5;
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+
+.candidate-count strong {
+  color: var(--primary-color);
+  font-size: 1.1rem;
+}
+
+.checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.modal-actions.center {
+  justify-content: center;
+  margin-top: 32px;
+}
+
+.action-btn.large {
+  padding: 12px 48px;
+  font-size: 1.1rem;
+}
+
+.progress-bar-container {
+  margin-bottom: 20px;
+}
+
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 0.9rem;
+  color: #555;
+}
+
+.progress-track {
+  height: 10px;
+  background: #e0e0e0;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.results-list {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fafafa;
+}
+
+.result-item {
+  background: white;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 8px;
+}
+
+.result-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  border-bottom: 1px dashed #eee;
+  padding-bottom: 4px;
+}
+
+.result-name { font-weight: 600; color: #333; }
+.result-changes { font-size: 0.8rem; color: var(--success-color); }
+
+.detail-row {
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #666;
+}
+
+.detail-row .label { width: 40px; }
+.detail-row .old { text-decoration: line-through; color: #999; }
+.detail-row .arrow { color: #ccc; }
+.detail-row .new { color: #333; font-weight: 500; }
 
 /* 桌面端隐藏移动端控件 */
 @media (min-width: 769px) {

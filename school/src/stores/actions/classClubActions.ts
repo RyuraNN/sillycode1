@@ -197,7 +197,18 @@ export const classClubActions = {
       this.player.schedule = generateWeeklySchedule(classId, classInfo, weekNumber)
       console.log('[GameStore] Generated schedule for class:', classId, this.player.schedule)
 
-      await this.joinClassGroup(classId, classInfo)
+      // 如果是教师，加入所有执教班级的群聊
+      if (this.player.role === 'teacher' && this.player.teachingClasses && this.player.teachingClasses.length > 0) {
+        for (const teachingClassId of this.player.teachingClasses) {
+          const teachingClassInfo = this.allClassData[teachingClassId]
+          if (teachingClassInfo) {
+            await this.joinClassGroup(teachingClassId, teachingClassInfo)
+          }
+        }
+      } else {
+        // 学生只加入自己班级的群聊
+        await this.joinClassGroup(classId, classInfo)
+      }
       
       this.saveToStorage()
     }
@@ -209,7 +220,11 @@ export const classClubActions = {
   async joinClassGroup(this: any, classId: string, classInfo: any) {
     const groupId = `group_${classId}`
     
-    this.player.social.groups = this.player.social.groups.filter((g: Group) => !g.id.startsWith('group_'))
+    // 如果是教师，不要清除旧的班级群，允许加入多个
+    // 如果是学生，清除旧的班级群（模拟转班）
+    if (this.player.role !== 'teacher') {
+      this.player.social.groups = this.player.social.groups.filter((g: Group) => !g.id.startsWith('group_'))
+    }
     
     if (this.player.social.groups.some((g: Group) => g.id === groupId)) return
 

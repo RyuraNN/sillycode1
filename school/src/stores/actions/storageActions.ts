@@ -556,6 +556,11 @@ export const storageActions = {
             if (details.gameState.player) {
               this.player = details.gameState.player
             }
+            
+            // 预加载考试历史
+            if (details.gameState.examHistory) {
+              this.examHistory = details.gameState.examHistory
+            }
           }
         }
       }

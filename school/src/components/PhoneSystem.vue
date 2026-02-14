@@ -14,6 +14,7 @@ import DeliveryApp from './DeliveryApp.vue'
 import PartTimeJobApp from './PartTimeJobApp.vue'
 import RosterApp from './RosterApp.vue'
 import OriginApp from './OriginApp.vue'
+import SchoolRuleApp from './SchoolRuleApp.vue'
 
 const emit = defineEmits(['close', 'open-app', 'variable-modified'])
 const gameStore = useGameStore()
@@ -134,6 +135,7 @@ const allApps = [
   { id: 'parttime', name: '兼职', icon: '💼', color: 'linear-gradient(135deg, #ff9500 0%, #ff7f00 100%)' },
   { id: 'roster', name: '天华名录', icon: '📇', color: 'linear-gradient(135deg, #1976D2 0%, #2196F3 100%)' },
   { id: 'origin', name: '本源', icon: '🔮', color: 'linear-gradient(135deg, #6B46C1 0%, #9F7AEA 100%)' },
+  { id: 'schoolrule', name: '校园公告', icon: '📋', color: 'linear-gradient(135deg, #c62828 0%, #e53935 100%)' },
   { id: 'schedule', name: '天华通', icon: '🏫', color: 'linear-gradient(135deg, #1e3c72 0%, #2a5298 100%)' },
   { id: 'map', name: '地图', icon: '🗺️', color: 'linear-gradient(135deg, #34c759 0%, #30b94d 100%)' },
   { id: 'save', name: '存档', icon: '💾', color: 'linear-gradient(135deg, #5ac8fa 0%, #32ade6 100%)' },
@@ -148,6 +150,10 @@ const apps = computed(() => {
   return allApps.filter(app => {
     // 教师模式隐藏兼职APP
     if (gameStore.player.role === 'teacher' && app.id === 'parttime') {
+      return false
+    }
+    // 校园公告APP仅教师可见
+    if (app.id === 'schoolrule' && gameStore.player.role !== 'teacher') {
       return false
     }
     return true
@@ -185,6 +191,8 @@ const handleAppClick = (appId) => {
     currentApp.value = 'roster'
   } else if (appId === 'origin') {
     currentApp.value = 'origin'
+  } else if (appId === 'schoolrule') {
+    currentApp.value = 'schoolrule'
   } else if (appId === 'schedule') {
     currentApp.value = 'schedule'
   } else if (appId === 'settings') {
@@ -332,6 +340,9 @@ const handleHomeClick = () => {
                 </div>
                 <div v-else-if="currentApp === 'roster'" class="app-container roster-app-container">
                   <RosterApp @close="currentApp = null" />
+                </div>
+                <div v-else-if="currentApp === 'schoolrule'" class="app-container schoolrule-app-container">
+                  <SchoolRuleApp @close="currentApp = null" />
                 </div>
                 <div v-else-if="currentApp === 'origin'" class="app-container origin-app-container">
                   <OriginApp @close="currentApp = null" @variable-modified="(changes) => $emit('variable-modified', changes)" />

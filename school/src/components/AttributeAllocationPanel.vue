@@ -185,8 +185,8 @@ const getTotal = (category, key) => {
           </div>
         </div>
         
-        <!-- 潜力仅学生显示，教师潜力默认足够高 -->
-        <div v-if="playerRole === 'student'" class="attr-sub">
+        <!-- 潜力 (教师也可以加) -->
+        <div class="attr-sub">
           <div class="sub-label">潜力</div>
           <div class="attr-controls small">
             <button 

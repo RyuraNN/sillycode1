@@ -73,6 +73,10 @@
         <span>休假日</span>
       </div>
       <div class="legend-item">
+        <span class="dot exam-dot"></span>
+        <span>考试日</span>
+      </div>
+      <div class="legend-item">
         <span class="dot special-dot"></span>
         <span>特殊活动</span>
       </div>
@@ -208,7 +212,7 @@ const calendarCells = computed(() => {
     const weekdayIndex = date.getDay()
     const weekday = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][weekdayIndex]
     const isWeekendDay = weekdayIndex === 0 || weekdayIndex === 6
-    const dayStatus = checkDayStatus(month, day)
+    const dayStatus = checkDayStatus(month, day, year)
     
     // 检查是否有自定义事件
     const customEvents = gameStore.getCustomEventsForDate(year, month, day)
@@ -680,6 +684,10 @@ function deleteCustomEvent(eventId) {
   width: 8px;
   height: 8px;
   border-radius: 50%;
+}
+
+.exam-dot {
+  background: #9b59b6;
 }
 
 .custom-dot {
