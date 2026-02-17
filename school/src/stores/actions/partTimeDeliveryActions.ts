@@ -187,9 +187,20 @@ export const partTimeDeliveryActions = {
     }
 
     // 兼容多种工资字段名：hourlyWage, wage, salary
-    const hourlyWage = jobData?.hourlyWage || jobData?.wage || jobData?.salary || 15
+    let hourlyWage = jobData?.hourlyWage || jobData?.wage || jobData?.salary || 15
+    // 确保转换为数字
+    if (typeof hourlyWage === 'string') {
+      hourlyWage = parseFloat(hourlyWage.replace(/[^\d.]/g, ''))
+    }
+    if (isNaN(hourlyWage)) hourlyWage = 15
+
     const earnings = Math.floor((duration / 60) * hourlyWage)
 
+    // 确保当前金钱是数字
+    if (typeof this.player.money !== 'number' || isNaN(this.player.money)) {
+      this.player.money = 0
+    }
+    
     this.player.money += earnings
     this.player.partTimeJob.totalEarnings += earnings
 

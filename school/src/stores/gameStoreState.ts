@@ -170,9 +170,10 @@ export function createInitialState(): GameState {
       socialHistoryLimit: 50,
       forumWorldbookLimit: 20,
       customRegexList: [
-        { id: 'default_content', pattern: '<content>([\\s\\S]*?)<\\/content>', enabled: true }
+        { id: 'default_content', pattern: '<content>([\\s\\S]*?)<\\/content>', enabled: true },
+        { id: 'response_content', pattern: '<response>([\\s\\S]*?)<\\/response>', enabled: true }
       ],
-      customContentTags: ['content', '正文', 'gametxt', 'game'],
+      customContentTags: ['content', '正文', 'gametxt', 'game', 'response'],
       assistantAI: {
         enabled: false,
         apiUrl: '',

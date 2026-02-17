@@ -171,7 +171,12 @@ const formatWorkTime = (minutes) => {
 
 // 格式化时薪
 const formatWage = (wage) => {
-  return `¥${wage}/小时`
+  let value = wage
+  if (typeof wage === 'string') {
+    value = parseFloat(wage.replace(/[^\d.]/g, ''))
+  }
+  if (isNaN(value)) value = 0
+  return `¥${value}/小时`
 }
 
 // 获取位置名称

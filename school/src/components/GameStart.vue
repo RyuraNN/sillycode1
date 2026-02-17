@@ -12,14 +12,15 @@ import NpcScheduleEditorPanel from './NpcScheduleEditorPanel.vue'
 import DataTransferPanel from './DataTransferPanel.vue'
 import { setPlayerClass, setupTeacherClassEntries } from '../utils/worldbookParser'
 import { DEFAULT_FORUM_POSTS, saveForumToWorldbook } from '../utils/forumWorldbook'
-import { getCoursePoolState, getElectiveCourses, getRequiredCourses, UNIVERSAL_ELECTIVES, GRADE_1_COURSES, GRADE_2_COURSES, GRADE_3_COURSES, registerCustomCourse, ELECTIVE_PREFERENCES } from '../data/coursePoolData'
-import { generateTeacherSchedule, getTermInfo } from '../utils/scheduleGenerator'
+import { getCoursePoolState, getElectiveCourses, getRequiredCourses, UNIVERSAL_ELECTIVES, GRADE_1_COURSES, GRADE_2_COURSES, GRADE_3_COURSES, registerCustomCourse, saveCoursePoolToWorldbook, ELECTIVE_PREFERENCES } from '../data/coursePoolData'
+import { generateIndependentTeacherSchedule, getTermInfo, LOCATION_NAMES } from '../utils/scheduleGenerator'
 
 const emit = defineEmits(['back', 'startGame'])
 const gameStore = useGameStore()
 
 onMounted(async () => {
   await gameStore.loadClassData()
+  loadPresetsFromStorage()
 })
 
 const showProfile = ref(false)
@@ -62,17 +63,114 @@ const teacherData = ref({
   customCourses: []         // 自定义课程列表
 })
 
+// 预设相关状态
+const showPresetModal = ref(false)
+const presets = ref([])
+const newPresetName = ref('')
+const isLoadingPreset = ref(false)
+
+const loadPresetsFromStorage = () => {
+  try {
+    const stored = localStorage.getItem('school_game_start_presets')
+    if (stored) {
+      presets.value = JSON.parse(stored)
+    }
+  } catch (e) {
+    console.error('Failed to load presets', e)
+  }
+}
+
+const saveCurrentPreset = () => {
+  if (!newPresetName.value.trim()) {
+    alert('请输入预设名称')
+    return
+  }
+  
+  const preset = {
+    name: newPresetName.value.trim(),
+    timestamp: Date.now(),
+    data: {
+      playerRole: playerRole.value,
+      formData: JSON.parse(JSON.stringify(formData.value)),
+      teacherData: JSON.parse(JSON.stringify(teacherData.value)),
+      customData: {
+        ...JSON.parse(JSON.stringify(customData.value)),
+        classRoster: null // 不保存班级名册的修改
+      }
+    }
+  }
+  
+  presets.value.push(preset)
+  localStorage.setItem('school_game_start_presets', JSON.stringify(presets.value))
+  newPresetName.value = ''
+  alert('预设保存成功！')
+}
+
+const applyPreset = async (preset) => {
+  if (!confirm(`确定要读取预设 "${preset.name}" 吗？当前未保存的设置将会丢失。`)) return
+
+  isLoadingPreset.value = true
+  
+  try {
+    const data = preset.data
+    
+    // 先恢复角色类型
+    playerRole.value = data.playerRole
+    
+    // 等待 Vue 响应系统处理
+    await nextTick()
+    
+    // 恢复表单数据
+    formData.value = JSON.parse(JSON.stringify(data.formData))
+    
+    // 恢复教师数据
+    teacherData.value = JSON.parse(JSON.stringify(data.teacherData))
+    
+    // 恢复自定义数据
+    const restoredCustom = JSON.parse(JSON.stringify(data.customData))
+    restoredCustom.classRoster = null
+    customData.value = restoredCustom
+    
+    // 如果有班级ID，刷新一下名册引用
+    if (formData.value.classId && gameStore.allClassData[formData.value.classId]) {
+      customData.value.classRoster = JSON.parse(JSON.stringify(gameStore.allClassData[formData.value.classId]))
+    }
+
+    showPresetModal.value = false
+    // alert(`预设 "${preset.name}" 读取成功！`)
+  } catch (e) {
+    console.error('Failed to load preset', e)
+    alert('读取预设失败')
+  } finally {
+    // 延迟关闭标志位，确保 watch 不会被触发
+    setTimeout(() => {
+      isLoadingPreset.value = false
+    }, 100)
+  }
+}
+
+const removePreset = (index) => {
+  if (!confirm('确定要删除这个预设吗？')) return
+  presets.value.splice(index, 1)
+  localStorage.setItem('school_game_start_presets', JSON.stringify(presets.value))
+}
+
+const formatDate = (timestamp) => {
+  return new Date(timestamp).toLocaleString()
+}
+
 // 自定义课程相关状态
 const showAddCourseModal = ref(false)
 const newCourseForm = ref({
   name: '',
   type: 'elective',
   grade: 'universal',
-  preference: 'general'
+  preference: 'general',
+  location: 'classroom'
 })
 
 const openAddCourseModal = () => {
-  newCourseForm.value = { name: '', type: 'elective', grade: 'universal', preference: 'general' }
+  newCourseForm.value = { name: '', type: 'elective', grade: 'universal', preference: 'general', location: 'classroom' }
   showAddCourseModal.value = true
 }
 
@@ -163,6 +261,8 @@ const toggleTeachingElective = (id) => {
 
 // 当角色类型切换时，重置不需要的数据
 watch(playerRole, (newRole) => {
+  if (isLoadingPreset.value) return // 如果正在加载预设，跳过重置逻辑
+
   // 重置属性分配，防止跨模式残留
   formData.value.allocatedAttributes = {
     attributes: {},
@@ -615,18 +715,33 @@ const confirmSignature = async () => {
           runId: gameStore.currentRunId
         })
       })
+      // 保存到世界书
+      await saveCoursePoolToWorldbook()
     }
     
-    // 生成教师课表
-    const termInfo = getTermInfo(gameStore.gameTime.year, gameStore.gameTime.month, gameStore.gameTime.day)
-    gameStore.player.schedule = generateTeacherSchedule(
-      teacherData.value.teachingClasses,
-      teacherData.value.teachingSubjects,
-      teacherData.value.teachingElectives,
-      gameStore.allClassData,
-      termInfo.weekNumber
+    // 生成教师课表 (使用独立排课系统)
+    // const termInfo = getTermInfo(gameStore.gameTime.year, gameStore.gameTime.month, gameStore.gameTime.day)
+    const currentDate = {
+      year: gameStore.gameTime.year,
+      month: gameStore.gameTime.month,
+      day: gameStore.gameTime.day
+    }
+    
+    // 构造完整的教师信息对象
+    const fullTeacherInfo = {
+      teachingClasses: teacherData.value.teachingClasses,
+      homeroomClassId: teacherData.value.homeroomClassId,
+      teachingSubjects: teacherData.value.teachingSubjects,
+      teachingElectives: teacherData.value.teachingElectives,
+      customCourses: teacherData.value.customCourses
+    }
+    
+    gameStore.player.schedule = generateIndependentTeacherSchedule(
+      fullTeacherInfo,
+      currentDate,
+      gameStore.allClassData
     )
-    console.log('[GameStart] Generated teacher schedule:', gameStore.player.schedule)
+    console.log('[GameStart] Generated independent teacher schedule:', gameStore.player.schedule)
     
     // 调用世界书更新函数
     await setupTeacherClassEntries(
@@ -1190,6 +1305,7 @@ const confirmSignature = async () => {
             :disabled="currentPoints < 0"
             :title="currentPoints < 0 ? '点数不足，无法入学' : ''"
           >确认入学</button>
+          <button class="action-btn secondary" @click="showPresetModal = true">预设管理</button>
           <button class="action-btn secondary" @click="$emit('back')">返回</button>
         </div>
       </div>
@@ -1244,6 +1360,46 @@ const confirmSignature = async () => {
       @close="showTransferPanel = false"
     />
 
+    <!-- 预设管理弹窗 -->
+    <div v-if="showPresetModal" class="modal-overlay" @click.self="showPresetModal = false">
+      <div class="modal-content preset-modal">
+        <h3>预设管理</h3>
+        
+        <div class="preset-create-section">
+          <input 
+            v-model="newPresetName" 
+            placeholder="输入当前配置的名称..." 
+            class="input-field"
+            @keyup.enter="saveCurrentPreset"
+          />
+          <button class="action-btn small" @click="saveCurrentPreset">保存当前配置</button>
+        </div>
+
+        <div class="preset-list">
+          <div v-if="presets.length === 0" class="no-presets">
+            暂无保存的预设
+          </div>
+          <div v-else v-for="(preset, index) in presets" :key="index" class="preset-item">
+            <div class="preset-info">
+              <span class="preset-name">{{ preset.name }}</span>
+              <span class="preset-role-badge" :class="preset.data.playerRole">
+                {{ preset.data.playerRole === 'student' ? '学生' : '老师' }}
+              </span>
+              <span class="preset-time">{{ formatDate(preset.timestamp) }}</span>
+            </div>
+            <div class="preset-actions">
+              <button class="action-btn small highlight" @click="applyPreset(preset)">读取</button>
+              <button class="action-btn small secondary" @click="removePreset(index)">删除</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="action-btn secondary" @click="showPresetModal = false">关闭</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 添加自定义课程弹窗 -->
     <div v-if="showAddCourseModal" class="modal-overlay" @click.self="showAddCourseModal = false">
       <div class="modal-content custom-course-modal">
@@ -1281,6 +1437,16 @@ const confirmSignature = async () => {
           </select>
         </div>
 
+        <div class="form-row">
+          <label>上课地点：</label>
+          <select v-model="newCourseForm.location" class="input-field">
+            <option value="classroom">普通教室</option>
+            <option v-for="(name, id) in LOCATION_NAMES" :key="id" :value="id">
+              {{ name }}
+            </option>
+          </select>
+        </div>
+
         <div class="modal-actions">
           <button class="action-btn secondary" @click="showAddCourseModal = false">取消</button>
           <button class="action-btn" @click="addCustomCourse" :disabled="!newCourseForm.name">确认添加</button>
@@ -1314,13 +1480,104 @@ const confirmSignature = async () => {
   box-shadow: 0 4px 20px rgba(0,0,0,0.3);
 }
 
-.custom-course-modal h3 {
+.custom-course-modal h3, .preset-modal h3 {
   margin-top: 0;
   color: #d32f2f;
   border-bottom: 1px solid #d32f2f;
   padding-bottom: 10px;
   margin-bottom: 20px;
   font-family: 'Ma Shan Zheng', cursive;
+}
+
+.preset-modal {
+  background: #fdfbf3;
+  padding: 20px;
+  border-radius: 8px;
+  width: 500px;
+  max-width: 90%;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+
+.preset-create-section {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 1px dashed #ccc;
+}
+
+.preset-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 200px;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.5);
+  padding: 10px;
+}
+
+.no-presets {
+  text-align: center;
+  color: #888;
+  padding: 20px;
+  font-style: italic;
+}
+
+.preset-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+  background: white;
+  margin-bottom: 5px;
+  border-radius: 4px;
+}
+
+.preset-item:last-child {
+  border-bottom: none;
+}
+
+.preset-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.preset-name {
+  font-weight: bold;
+  font-size: 1.1rem;
+}
+
+.preset-role-badge {
+  display: inline-block;
+  font-size: 0.8rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  width: fit-content;
+}
+
+.preset-role-badge.student {
+  background-color: #e3f2fd;
+  color: #1565c0;
+}
+
+.preset-role-badge.teacher {
+  background-color: #fce4ec;
+  color: #c2185b;
+}
+
+.preset-time {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.preset-actions {
+  display: flex;
+  gap: 5px;
 }
 
 .modal-actions {

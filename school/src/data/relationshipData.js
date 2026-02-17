@@ -1510,15 +1510,18 @@ export function calculateRelationshipScore(relationship) {
  * @param {string} targetGender - 目标角色性别 ('male' | 'female')
  * @returns {Object} { text: string, class: string }
  */
-export function getEmotionalState(relationship, playerGender = 'male', targetGender = 'female') {
+export function getEmotionalState(relationship, playerGender = 'unknown', targetGender = 'unknown') {
   if (!relationship) return { text: '陌生人', class: 'level-stranger' }
   
   const { intimacy = 0, trust = 0, passion = 0, hostility = 0 } = relationship
   const score = calculateRelationshipScore(relationship)
   
   // 检查是否允许浪漫关系
-  // 如果玩家是男性，且目标也是男性，则不显示浪漫相关的状态
-  const isRomanceBlocked = (playerGender === 'male' && targetGender === 'male')
+  // 如果双方均为男性，则不显示浪漫相关的状态
+  // 当性别为 unknown 时，保守处理：不阻止浪漫（因为无法确定）
+  const pGender = String(playerGender || 'unknown').toLowerCase().trim()
+  const tGender = String(targetGender || 'unknown').toLowerCase().trim()
+  const isRomanceBlocked = (pGender === 'male' && tGender === 'male')
 
   // 特殊状态判断 (优先级高)
   if (hostility >= 80) return { text: '死敌', class: 'level-hostile-extreme' }
@@ -1572,10 +1575,12 @@ export function shouldBeSocialFriend(relationship, isPlayerInvolved = false) {
 /**
  * 获取关系描述文本 (已废弃，建议使用 getEmotionalState)
  * @param {Object} relationship - 关系数据
+ * @param {string} playerGender - 玩家性别 ('male' | 'female')
+ * @param {string} targetGender - 目标角色性别 ('male' | 'female')
  * @returns {string}
  */
-export function getRelationshipDescription(relationship) {
-  return getEmotionalState(relationship).text
+export function getRelationshipDescription(relationship, playerGender = 'male', targetGender = 'female') {
+  return getEmotionalState(relationship, playerGender, targetGender).text
 }
 
 /**

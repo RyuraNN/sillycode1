@@ -181,10 +181,21 @@ export const playerActions = {
   },
 
   /**
-   * 添加 NPC
+   * 添加 NPC（带查重）
    */
   addNpc(this: any, npc: NpcStats) {
-    this.npcs.push(npc)
+    // 先按 id 查重，再按 name 查重
+    let existing = npc.id ? this.npcs.find((n: NpcStats) => n.id === npc.id) : null
+    if (!existing && npc.name) {
+      existing = this.npcs.find((n: NpcStats) => n.name === npc.name)
+    }
+    if (existing) {
+      // 已存在则更新
+      Object.assign(existing, npc)
+      console.log('[GameStore] addNpc: updated existing NPC:', npc.name || npc.id)
+    } else {
+      this.npcs.push(npc)
+    }
   },
 
   /**
@@ -270,9 +281,11 @@ export const playerActions = {
       data.npcs.forEach((newNpc: NpcStats) => {
         let existingNpc = null
         
+        // 先按 id 查找，找不到再按 name 查找，避免重复添加
         if (newNpc.id) {
           existingNpc = this.npcs.find((n: NpcStats) => n.id === newNpc.id)
-        } else if (newNpc.name) {
+        }
+        if (!existingNpc && newNpc.name) {
           existingNpc = this.npcs.find((n: NpcStats) => n.name === newNpc.name)
         }
 

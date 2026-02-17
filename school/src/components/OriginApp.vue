@@ -15,7 +15,6 @@ const gameStore = useGameStore()
 const editData = reactive({
   // 基础属性
   money: 0,
-  gold: 0,
   hp: 0,
   maxHp: 0,
   mp: 0,
@@ -96,7 +95,6 @@ const expandedGroups = reactive({
 // 中文标签映射
 const labels = {
   money: '金钱',
-  gold: '金币',
   hp: '生命值',
   maxHp: '生命上限',
   mp: '精力值',
@@ -156,7 +154,6 @@ const loadCurrentState = () => {
   const t = gameStore.gameTime
 
   editData.money = p.money
-  editData.gold = p.gold
   editData.hp = p.hp
   editData.maxHp = p.maxHp
   editData.mp = p.mp
@@ -212,7 +209,7 @@ const applyChanges = () => {
   const t = gameStore.gameTime
 
   // 基础属性
-  const basicFields = ['money', 'gold', 'hp', 'maxHp', 'mp', 'maxMp', 'health', 'level', 'exp', 'freePoints']
+  const basicFields = ['money', 'hp', 'maxHp', 'mp', 'maxMp', 'health', 'level', 'exp', 'freePoints']
   basicFields.forEach(field => {
     const newVal = Number(editData[field])
     if (!isNaN(newVal) && newVal !== p[field]) {
@@ -329,7 +326,7 @@ const getWeekdayLabel = (value) => {
           <span class="group-arrow" :class="{ expanded: expandedGroups.basic }">▶</span>
         </div>
         <div v-if="expandedGroups.basic" class="group-body">
-          <div class="var-row" v-for="field in ['money', 'gold', 'hp', 'maxHp', 'mp', 'maxMp', 'health', 'level', 'exp', 'freePoints']" :key="field">
+          <div class="var-row" v-for="field in ['money', 'hp', 'maxHp', 'mp', 'maxMp', 'health', 'level', 'exp', 'freePoints']" :key="field">
             <label class="var-label">{{ labels[field] }}</label>
             <input 
               type="number" 

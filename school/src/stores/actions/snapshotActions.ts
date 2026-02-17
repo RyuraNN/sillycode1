@@ -5,6 +5,7 @@
 import type { ChatLogEntry, SaveSnapshot, GameStateData } from '../gameStoreTypes'
 import { saveSnapshotData, getSnapshotData, removeSnapshotData } from '../../utils/indexedDB'
 import { updateAcademicWorldbookEntry } from '../../utils/academicWorldbook'
+import { createInitialState } from '../gameStoreState'
 import { 
   computeDelta, 
   applyDelta, 
@@ -26,7 +27,7 @@ export const snapshotActions = {
       graduatedNpcs: this.graduatedNpcs || [],
       lastAcademicYear: this.lastAcademicYear || 0,
       gameTime: this.gameTime,
-      settings: this.settings,
+      // settings: this.settings, // Settings are global and should not be part of the snapshot
       worldState: this.worldState,
       allClassData: this.allClassData,
       allClubs: this.allClubs,
@@ -84,7 +85,7 @@ export const snapshotActions = {
       graduatedNpcs: this.graduatedNpcs || [],
       lastAcademicYear: this.lastAcademicYear || 0,
       gameTime: this.gameTime,
-      settings: this.settings,
+      // settings: this.settings, // Settings are global and should not be part of the snapshot
       worldState: this.worldState,
       allClassData: this.allClassData,
       allClubs: this.allClubs,
@@ -171,7 +172,33 @@ export const snapshotActions = {
     }
 
     const state = JSON.parse(JSON.stringify(fullSnapshot.gameState))
-    this.player = state.player
+    
+    // 【修复】状态合并：确保旧存档缺失的字段被默认值填充
+    const defaultPlayer = createInitialState().player
+    
+    // 基础合并
+    this.player = { ...defaultPlayer, ...state.player }
+    
+    // 深度合并关键对象
+    if (state.player.partTimeJob) {
+      this.player.partTimeJob = { ...defaultPlayer.partTimeJob, ...state.player.partTimeJob }
+    }
+    if (state.player.forum) {
+      this.player.forum = { ...defaultPlayer.forum, ...state.player.forum }
+    }
+    if (state.player.social) {
+      this.player.social = { ...defaultPlayer.social, ...state.player.social }
+    }
+    if (state.player.settings) {
+      // 这里的 settings 应该是 gameStore.settings，player 下通常没有 settings
+      // 但为了保险起见，如果 player 下有自定义设置...
+    }
+    
+    // 确保 role 存在
+    if (!this.player.role) {
+      this.player.role = defaultPlayer.role
+    }
+
     if (!this.player.summaries) {
       this.player.summaries = []
     }
@@ -267,7 +294,7 @@ export const snapshotActions = {
       graduatedNpcs: this.graduatedNpcs || [],
       lastAcademicYear: this.lastAcademicYear || 0,
       gameTime: this.gameTime,
-      settings: this.settings,
+      // settings: this.settings, // Settings are global and should not be part of the snapshot
       worldState: this.worldState,
       allClassData: this.allClassData,
       allClubs: this.allClubs,
@@ -471,11 +498,82 @@ export const snapshotActions = {
   },
 
   /**
+   * 更新现有消息的快照（保持增量快照链的完整性）
+   * @param existingSnapshot 现有的快照
+   * @param chatLog 聊天日志（用于查找基准快照）
+   * @returns 更新后的快照
+   */
+  updateMessageSnapshot(this: any, existingSnapshot: any, chatLog?: any[]): any {
+    const mode = this.settings.snapshotMode || 'delta'
+    const currentState = this.getGameState()
+    
+    // 完整模式：直接返回完整状态
+    if (mode === 'full') {
+      return currentState
+    }
+    
+    // 如果没有现有快照，创建完整快照
+    if (!existingSnapshot) {
+      return currentState
+    }
+    
+    // 如果现有快照是基准快照，更新后仍然保持为基准快照
+    if (existingSnapshot._isBase) {
+      return {
+        ...currentState,
+        _isBase: true,
+        _floor: existingSnapshot._floor
+      }
+    }
+    
+    // 如果现有快照是增量快照，需要重新计算增量
+    if (isDeltaSnapshot(existingSnapshot)) {
+      const baseFloor = existingSnapshot._baseFloor
+      let baseSnapshot = null
+      
+      // 在聊天日志中查找基准快照
+      if (chatLog) {
+        for (let i = 0; i < chatLog.length; i++) {
+          const log = chatLog[i]
+          if (log.snapshot && (log.snapshot as any)._isBase && (log.snapshot as any)._floor === baseFloor) {
+            baseSnapshot = log.snapshot
+            break
+          }
+        }
+      }
+      
+      // 重新计算增量
+      return computeDelta(baseSnapshot, currentState, baseFloor)
+    }
+    
+    // 普通完整快照：直接返回完整状态
+    return currentState
+  },
+
+  /**
    * 恢复指定的游戏状态
    */
   restoreGameState(this: any, state: GameStateData) {
     const data = JSON.parse(JSON.stringify(state))
-    this.player = data.player
+    
+    // 【修复】状态合并
+    const defaultPlayer = createInitialState().player
+    this.player = { ...defaultPlayer, ...data.player }
+    
+    // 深度合并关键对象
+    if (data.player && data.player.partTimeJob) {
+      this.player.partTimeJob = { ...defaultPlayer.partTimeJob, ...data.player.partTimeJob }
+    }
+    if (data.player && data.player.forum) {
+      this.player.forum = { ...defaultPlayer.forum, ...data.player.forum }
+    }
+    if (data.player && data.player.social) {
+      this.player.social = { ...defaultPlayer.social, ...data.player.social }
+    }
+    if (!this.player.role) {
+      this.player.role = defaultPlayer.role
+    }
+
     this.npcs = data.npcs
     this.gameTime = data.gameTime
     

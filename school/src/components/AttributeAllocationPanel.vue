@@ -281,6 +281,7 @@ const getTotal = (category, key) => {
   text-align: left;
   border-top: 1px dashed #d32f2f;
   padding-top: 20px;
+  padding-bottom: 80px; /* 避免被底部输入栏遮挡 */
 }
 
 .header-row {

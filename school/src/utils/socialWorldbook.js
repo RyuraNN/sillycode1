@@ -659,7 +659,7 @@ export async function switchSaveSlot() {
  * 从 Store 恢复世界书（回溯机制）
  * 读取 Store 中的完整历史，过滤掉当前楼层之后的消息，然后覆盖写入世界书
  * 也会创建在世界书中缺失但 Store 中存在的条目
- * [性能优化版] 合并所有操作为一次 Worldbook Update
+ * [性能优化版] 使用 Map 预处理数据，避免在回调中进行 O(N*M) 的全量遍历
  */
 export async function restoreWorldbookFromStore() {
   const bookName = getCurrentBookName()
@@ -674,156 +674,133 @@ export async function restoreWorldbookFromStore() {
   console.log(`[SocialWorldbook] Restoring worldbook from store (Floor: ${currentFloor})`)
 
   try {
+    // 1. 预处理 Store 数据，构建查找表 (Map)
+    // Key: entryName (预测的世界书条目名称), Value: { type, data, item }
+    const storeDataMap = new Map()
+
+    // 预处理好友
+    for (const friend of gameStore.player.social.friends) {
+      const entryName = `${chatPrefix}${friend.id}] ${friend.name}`
+      storeDataMap.set(entryName, { type: 'chat', item: friend, isGroup: false })
+    }
+
+    // 预处理群组
+    for (const group of gameStore.player.social.groups) {
+      const entryName = `${chatPrefix}${group.id}] ${group.name}`
+      storeDataMap.set(entryName, { type: 'chat', item: group, isGroup: true })
+    }
+
+    // 预处理朋友圈
+    if (gameStore.player.social.moments) {
+      for (const moment of gameStore.player.social.moments) {
+        const entryName = `${momentPrefix}${moment.id}] ${moment.name}`
+        storeDataMap.set(entryName, { type: 'moment', item: moment })
+      }
+    }
+
+    // 2. 批量更新世界书
     await window.updateWorldbookWith(bookName, (entries) => {
-      // 1. 处理现有条目 & 收集已存在的名称
-      const processedEntries = entries.map(entry => {
-        // 处理聊天记录回溯
-        if (entry.name.startsWith(chatPrefix)) {
-          const idPart = entry.name.split(']')[0]
-          const parts = idPart.split(':')
-          if (parts.length >= 3) {
-            const id = parts[2]
+      const processedEntries = []
+      
+      // 遍历现有条目，利用 Map 快速查找并更新
+      for (const entry of entries) {
+        // 检查是否是当前 runId 的社交条目
+        if (entry.name.startsWith(chatPrefix) || entry.name.startsWith(momentPrefix)) {
+          const storeData = storeDataMap.get(entry.name)
+          
+          if (storeData) {
+            // Store 中存在该数据，更新条目内容
+            const { type, item, isGroup } = storeData
             
-            const isFriend = gameStore.player.social.friends.find(f => f.id === id)
-            const isGroup = gameStore.player.social.groups.find(g => g.id === id)
-            const storeItem = isFriend || isGroup
-
-            if (storeItem) {
-              if (storeItem.messages) {
-                // 过滤掉未来楼层的消息
-                const validMessages = storeItem.messages.filter(m => !m.floor || m.floor <= currentFloor)
-                
-                // 如果有消息被回溯了，更新 store 中的数据以保持一致
-                if (validMessages.length !== storeItem.messages.length) {
-                  // console.log(`[SocialWorldbook] Backtracking ${id}: ${storeItem.messages.length} -> ${validMessages.length}`)
-                  storeItem.messages = validMessages
-                  // 更新元数据
-                  if (validMessages.length > 0) {
-                    const last = validMessages[validMessages.length - 1]
-                    storeItem.lastMessage = last.content
-                    storeItem.lastMessageTime = last.time
-                  } else {
-                    storeItem.lastMessage = ''
-                    storeItem.lastMessageTime = ''
-                  }
-                }
-
-                // 构造新的世界书内容
-                const newData = {
-                  unreadCount: storeItem.unreadCount,
-                  messages: validMessages
-                }
-
-                // 确保策略为 constant
-                const newStrategy = {
-                  ...entry.strategy,
-                  type: 'constant'
-                }
-                
-                // 更新成员列表（如果是群组）
-                let memberNames = null
-                if (isGroup && storeItem.members) {
-                  memberNames = storeItem.members.map(memberId => {
-                    if (memberId === 'player') return gameStore.player.name
-                    const friend = gameStore.player.social.friends.find(f => f.id === memberId)
-                    if (friend) return friend.name
-                    const npc = gameStore.npcs.find(n => n.id === memberId)
-                    if (npc) return npc.name
-                    return null
-                  }).filter(n => n)
-                }
-                
-                return {
-                  ...entry,
-                  enabled: true, // 确保启用
-                  content: formatEntryContent(newData, storeItem.name, memberNames),
-                  strategy: newStrategy
+            if (type === 'chat') {
+              // 过滤掉未来楼层的消息
+              const validMessages = item.messages ? item.messages.filter(m => !m.floor || m.floor <= currentFloor) : []
+              
+              // 如果有消息被回溯了，更新 store 中的数据以保持一致
+              if (item.messages && validMessages.length !== item.messages.length) {
+                item.messages = validMessages
+                // 更新元数据
+                if (validMessages.length > 0) {
+                  const last = validMessages[validMessages.length - 1]
+                  item.lastMessage = last.content
+                  item.lastMessageTime = last.time
+                } else {
+                  item.lastMessage = ''
+                  item.lastMessageTime = ''
                 }
               }
-            } else {
-              // Store 中不存在该会话，禁用条目
-              return { ...entry, enabled: false }
-            }
-          }
-        } 
-        // 处理朋友圈回溯
-        else if (entry.name.startsWith(momentPrefix)) {
-          const idPart = entry.name.split(']')[0]
-          const parts = idPart.split(':')
-          if (parts.length >= 3) {
-            const momentId = parts[2]
-            const moment = gameStore.player.social.moments && gameStore.player.social.moments.find(m => m.id === momentId)
-            
-            if (moment) {
-              return {
+
+              const newData = {
+                unreadCount: item.unreadCount,
+                messages: validMessages
+              }
+
+              // 获取群成员名称
+              let memberNames = null
+              if (isGroup && item.members) {
+                memberNames = item.members.map(memberId => {
+                  if (memberId === 'player') return gameStore.player.name
+                  const friend = gameStore.player.social.friends.find(f => f.id === memberId)
+                  if (friend) return friend.name
+                  const npc = gameStore.npcs.find(n => n.id === memberId)
+                  if (npc) return npc.name
+                  return null
+                }).filter(n => n)
+              }
+
+              processedEntries.push({
                 ...entry,
                 enabled: true,
-                content: formatMomentContent(moment)
-              }
-            } else {
-              return { ...entry, enabled: false }
+                content: formatEntryContent(newData, item.name, memberNames),
+                strategy: { ...entry.strategy, type: 'constant' }
+              })
+            } else if (type === 'moment') {
+              processedEntries.push({
+                ...entry,
+                enabled: true,
+                content: formatMomentContent(item)
+              })
             }
+            
+            // 从 Map 中移除已处理的条目，剩下的就是需要新增的
+            storeDataMap.delete(entry.name)
+          } else {
+            // Store 中不存在该条目（可能已被删除），禁用它
+            // 注意：这里只处理当前 runId 的条目，其他 runId 的条目保持原样
+            processedEntries.push({ ...entry, enabled: false })
           }
+        } else {
+          // 非当前 runId 的社交条目，或其他类型的条目，保持原样
+          processedEntries.push(entry)
         }
-        return entry
-      })
+      }
 
-      const existingNames = new Set(processedEntries.map(e => e.name))
+      // 3. 处理 Map 中剩余的数据（即 entries 中不存在的新数据）
       const newEntries = []
-
-      // 2. 创建缺失的好友条目
-      for (const friend of gameStore.player.social.friends) {
-        const entryName = `${chatPrefix}${friend.id}] ${friend.name}`
-        if (!existingNames.has(entryName)) {
-          // console.log(`[SocialWorldbook] Creating missing entry for ${friend.name}`)
-          const validMessages = friend.messages ? friend.messages.filter(m => !m.floor || m.floor <= currentFloor) : []
-          const content = formatEntryContent({
-            messages: validMessages,
-            unreadCount: friend.unreadCount
-          }, friend.name)
-
-          const uniqueKeys = [friend.name]
-
-          newEntries.push({
-            name: entryName,
-            content: content,
-            enabled: true,
-            strategy: {
-              type: 'constant',
-              keys: uniqueKeys,
-              keys_secondary: { logic: 'not_all', keys: [] },
-              scan_depth: 'same_as_global'
-            },
-            position: { type: 'after_character_definition', order: 5 },
-            probability: 100,
-            recursion: { prevent_incoming: false, prevent_outgoing: false, delay_until: null },
-            effect: { sticky: null, cooldown: null, delay: null }
-          })
-        }
-      }
-
-      // 3. 创建缺失的群组条目
-      for (const group of gameStore.player.social.groups) {
-        const entryName = `${chatPrefix}${group.id}] ${group.name}`
-        if (!existingNames.has(entryName)) {
-          // console.log(`[SocialWorldbook] Creating missing entry for group ${group.name}`)
-          const validMessages = group.messages ? group.messages.filter(m => !m.floor || m.floor <= currentFloor) : []
+      
+      for (const [entryName, { type, item, isGroup }] of storeDataMap.entries()) {
+        if (type === 'chat') {
+          const validMessages = item.messages ? item.messages.filter(m => !m.floor || m.floor <= currentFloor) : []
           
-          const memberNames = group.members.map(memberId => {
-              if (memberId === 'player') return gameStore.player.name
-              const friend = gameStore.player.social.friends.find(f => f.id === memberId)
-              if (friend) return friend.name
-              const npc = gameStore.npcs.find(n => n.id === memberId)
-              if (npc) return npc.name
-              return null
-          }).filter(n => n)
+          let memberNames = null
+          let uniqueKeys = [item.name]
+          
+          if (isGroup && item.members) {
+            memberNames = item.members.map(memberId => {
+                if (memberId === 'player') return gameStore.player.name
+                const friend = gameStore.player.social.friends.find(f => f.id === memberId)
+                if (friend) return friend.name
+                const npc = gameStore.npcs.find(n => n.id === memberId)
+                if (npc) return npc.name
+                return null
+            }).filter(n => n)
+            uniqueKeys = [...new Set([...memberNames, item.name])]
+          }
 
           const content = formatEntryContent({
             messages: validMessages,
-            unreadCount: group.unreadCount
-          }, group.name, memberNames)
-
-          const uniqueKeys = [...new Set([...memberNames, group.name])]
+            unreadCount: item.unreadCount
+          }, item.name, memberNames)
 
           newEntries.push({
             name: entryName,
@@ -840,40 +817,31 @@ export async function restoreWorldbookFromStore() {
             recursion: { prevent_incoming: false, prevent_outgoing: false, delay_until: null },
             effect: { sticky: null, cooldown: null, delay: null }
           })
-        }
-      }
+        } else if (type === 'moment') {
+          const content = formatMomentContent(item)
+          const uniqueKeys = [item.name]
 
-      // 4. 创建缺失的朋友圈条目
-      if (gameStore.player.social.moments) {
-        for (const moment of gameStore.player.social.moments) {
-          const entryName = `${momentPrefix}${moment.id}] ${moment.name}`
-          if (!existingNames.has(entryName)) {
-            // console.log(`[SocialWorldbook] Creating missing entry for moment ${moment.id}`)
-            const content = formatMomentContent(moment)
-            const uniqueKeys = [moment.name]
-
-            newEntries.push({
-              name: entryName,
-              content: content,
-              enabled: true,
-              strategy: {
-                type: 'selective',
-                keys: uniqueKeys,
-                keys_secondary: { logic: 'not_all', keys: [] },
-                scan_depth: 'same_as_global'
-              },
-              position: { type: 'after_character_definition', order: 5 },
-              probability: 100,
-              recursion: { prevent_incoming: false, prevent_outgoing: false, delay_until: null },
-              effect: { sticky: null, cooldown: null, delay: null }
-            })
-          }
+          newEntries.push({
+            name: entryName,
+            content: content,
+            enabled: true,
+            strategy: {
+              type: 'selective',
+              keys: uniqueKeys,
+              keys_secondary: { logic: 'not_all', keys: [] },
+              scan_depth: 'same_as_global'
+            },
+            position: { type: 'after_character_definition', order: 5 },
+            probability: 100,
+            recursion: { prevent_incoming: false, prevent_outgoing: false, delay_until: null },
+            effect: { sticky: null, cooldown: null, delay: null }
+          })
         }
       }
 
       return [...processedEntries, ...newEntries]
     })
-    console.log('[SocialWorldbook] Restore completed successfully in one batch.')
+    console.log('[SocialWorldbook] Restore completed successfully with optimized map lookup.')
 
   } catch (e) {
     console.error('[SocialWorldbook] Error restoring worldbook:', e)

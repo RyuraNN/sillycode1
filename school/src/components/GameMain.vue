@@ -136,6 +136,11 @@ const completedImages = new Map()
 // Visual Viewport 处理
 const inputBarOffset = ref(0)
 
+// 输入栏高度自适应
+const inputBarRef = ref(null)
+const inputBarHeight = ref(90)
+let inputBarObserver = null
+
 // ==================== 方法 ====================
 
 const checkMobile = () => {
@@ -1152,7 +1157,8 @@ const processAIResponse = async (response) => {
     if (result.success) {
       const lastLogItem = gameLog.value[gameLog.value.length - 1]
       if (lastLogItem?.type === 'ai') {
-        lastLogItem.snapshot = gameStore.getGameState()
+        // 使用 updateMessageSnapshot 保持增量快照链的完整性
+        lastLogItem.snapshot = gameStore.updateMessageSnapshot(lastLogItem.snapshot, gameLog.value)
       }
     }
     
@@ -1390,8 +1396,8 @@ const handleAssistantReroll = async () => {
     const changes = applyGameData(finalData)
     showDanmaku(changes)
     
-    // 更新日志快照
-    lastLog.snapshot = gameStore.getGameState()
+    // 更新日志快照（保持增量快照链的完整性）
+    lastLog.snapshot = gameStore.updateMessageSnapshot(lastLog.snapshot, gameLog.value)
     
     // 生成详细的变量变化列表
     lastRoundChanges.value = generateDetailedChanges(preRerollSnapshot, lastLog.snapshot)
@@ -1418,7 +1424,8 @@ const handleSummarySubmit = async (content) => {
     if (result.success) {
       const lastLog = gameLog.value[gameLog.value.length - 1]
       if (lastLog?.type === 'ai') {
-        lastLog.snapshot = gameStore.getGameState()
+        // 使用 updateMessageSnapshot 保持增量快照链的完整性
+        lastLog.snapshot = gameStore.updateMessageSnapshot(lastLog.snapshot, gameLog.value)
       }
     }
   }
@@ -1680,6 +1687,17 @@ onMounted(async () => {
   window.addEventListener('resize', checkMobile)
   setupVisualViewport()
 
+  // 监听输入栏高度变化
+  if (inputBarRef.value) {
+    inputBarObserver = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        // 加上安全距离
+        inputBarHeight.value = entry.contentRect.height + 20
+      }
+    })
+    inputBarObserver.observe(inputBarRef.value)
+  }
+
   await initializeGameWorld()
 
   if (gameStore.pendingRestoreLog) {
@@ -1700,6 +1718,9 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)
   document.removeEventListener('click', closeMenu)
+  if (inputBarObserver) {
+    inputBarObserver.disconnect()
+  }
   cleanupImageCache()
   // 清理内容缓存
   contentRenderCache.clear()
@@ -1800,6 +1821,7 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
         <div 
           class="content-area" 
           ref="contentAreaRef"
+          :style="{ paddingBottom: inputBarHeight + 'px' }"
           @wheel="handleScrollEvent"
           @touchmove="handleScrollEvent"
         >
@@ -1852,7 +1874,7 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
       </div>
 
       <!-- 底部输入栏 -->
-      <div class="input-bar-container" :style="{ bottom: inputBarOffset + 'px' }">
+      <div class="input-bar-container" ref="inputBarRef" :style="{ bottom: inputBarOffset + 'px' }">
         <!-- 建议回复面板 -->
         <SuggestionsPanel 
           v-if="gameStore.settings.suggestedReplies"

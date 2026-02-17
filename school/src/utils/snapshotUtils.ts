@@ -178,7 +178,18 @@ export function computeDelta(
     'npcRelationships',
     'worldState',
     'allClassData',
-    'allClubs'
+    'allClubs',
+    'graduatedNpcs',
+    'lastAcademicYear',
+    'currentRunId',
+    'currentFloor',
+    'examHistory',
+    'electiveAcademicData',
+    'lastExamDate',
+    'eventChecks',
+    'clubApplication',
+    'clubRejection',
+    'clubInvitation'
   ]
   
   for (const field of keyFields) {

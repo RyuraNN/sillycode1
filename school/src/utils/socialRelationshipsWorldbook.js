@@ -101,8 +101,40 @@ export async function fetchSocialData() {
 }
 
 /**
- * 保存社交数据到世界书
- * @param {Object} data 完整的社交数据对象
+ * 深度合并两个对象（source 合并到 target，source 优先）
+ * @param {Object} target 目标对象
+ * @param {Object} source 源对象（优先）
+ * @returns {Object} 合并后的对象
+ */
+function deepMergeSocialData(target, source) {
+  if (!target) return source
+  if (!source) return target
+  
+  const result = { ...target }
+  
+  for (const key of Object.keys(source)) {
+    const sourceVal = source[key]
+    const targetVal = result[key]
+    
+    if (sourceVal === null || sourceVal === undefined) continue
+    
+    if (typeof sourceVal === 'object' && !Array.isArray(sourceVal) && sourceVal !== null
+        && typeof targetVal === 'object' && !Array.isArray(targetVal) && targetVal !== null) {
+      // 递归合并嵌套对象
+      result[key] = deepMergeSocialData(targetVal, sourceVal)
+    } else {
+      // 直接覆盖（包括数组、基本类型）
+      result[key] = sourceVal
+    }
+  }
+  
+  return result
+}
+
+/**
+ * 保存社交数据到世界书（增量合并模式）
+ * 不会覆盖世界书中已有的其他角色数据，只合并传入的变更
+ * @param {Object} data 要合并的社交数据对象（可以是部分数据）
  * @returns {Promise<boolean>}
  */
 export async function saveSocialData(data) {
@@ -119,10 +151,23 @@ export async function saveSocialData(data) {
       return false
     }
 
-    const content = JSON.stringify(data, null, 2)
-
     await window.updateWorldbookWith(bookName, (entries) => {
       const index = entries.findIndex(e => e.name === ENTRY_NAME)
+      
+      // 读取现有数据
+      let existingData = {}
+      if (index !== -1 && entries[index].content) {
+        try {
+          existingData = JSON.parse(entries[index].content)
+        } catch (e) {
+          console.warn('[SocialWorldbook] Failed to parse existing data during save, starting fresh')
+          existingData = {}
+        }
+      }
+      
+      // 增量合并：将传入的 data 合并到现有数据上
+      const mergedData = deepMergeSocialData(existingData, data)
+      const content = JSON.stringify(mergedData, null, 2)
       
       const newEntry = {
         name: ENTRY_NAME,
@@ -145,7 +190,7 @@ export async function saveSocialData(data) {
       return entries
     })
     
-    console.log('[SocialWorldbook] Data saved successfully')
+    console.log('[SocialWorldbook] Data saved (incremental merge) successfully')
     return true
   } catch (e) {
     console.error('[SocialWorldbook] Error saving data:', e)

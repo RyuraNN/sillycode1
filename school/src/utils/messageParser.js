@@ -8,9 +8,26 @@ function getGameTimeString() {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
 import { saveForumToWorldbook, generatePostId } from './forumWorldbook'
-import { updateRelationshipDelta, addRelationshipEvent, getRelationship, setRelationship } from './relationshipManager'
+import { updateRelationshipDelta, addRelationshipEvent, getRelationship, setRelationship, lookupGender } from './relationshipManager'
 import { getItemType } from './deliveryWorldbook'
 import { generateCharId } from '../data/relationshipData'
+
+// 玩家别名列表，AI 有时会用这些泛称代替实际玩家名
+const PLAYER_ALIASES = ['玩家', 'player', 'Player', '主角', '主人公', 'MC', 'mc']
+
+/**
+ * 将玩家别名解析为实际玩家名
+ * @param {string} name 角色名（可能是别名）
+ * @param {Object} gameStore
+ * @returns {string} 解析后的名称
+ */
+function resolvePlayerAlias(name, gameStore) {
+  if (!name) return name
+  if (PLAYER_ALIASES.includes(name.trim())) {
+    return gameStore.player.name || name
+  }
+  return name
+}
 
 /**
  * 规范化文本，将全角字符转换为半角，去除首尾空白
@@ -313,6 +330,7 @@ export async function parseSocialTags(rawText) {
             gameStore.addNpc({
                 id,
                 name,
+                gender: lookupGender(name, gameStore) || 'unknown',
                 relationship: 0,
                 isAlive: true,
                 location: 'unknown',
@@ -401,9 +419,12 @@ export async function parseSocialTags(rawText) {
   let impressionMatch
   while ((impressionMatch = impressionRegex.exec(text)) !== null) {
     const attrs = parseAttributes(impressionMatch[1])
-    const npcName = attrs.name || attrs.target
+    let npcName = attrs.name || attrs.target
     // 如果没有指定 name，无法更新
     if (!npcName) continue
+
+    // 将玩家别名映射为实际玩家名
+    npcName = resolvePlayerAlias(npcName, gameStore)
 
     // 默认更新 NPC -> Player 的关系
     const sourceName = npcName
@@ -713,6 +734,7 @@ export async function parseSocialTags(rawText) {
             gameStore.addNpc({
                 id: newId,
                 name: name,
+                gender: lookupGender(name, gameStore) || 'unknown',
                 relationship: 0,
                 isAlive: true,
                 location: 'unknown',
@@ -1094,13 +1116,19 @@ export function processNpcRelationshipUpdate(data) {
     ? data.npc_relationship 
     : [data.npc_relationship]
 
+  const gameStore = useGameStore()
+
   updates.forEach(update => {
-    const { source, target, delta, add_tags, add_groups, event } = update
+    let { source, target, delta, add_tags, add_groups, event } = update
 
     if (!source || !target) {
       console.warn('[MessageParser] Invalid npc_relationship update: missing source or target', update)
       return
     }
+
+    // 将玩家别名映射为实际玩家名
+    source = resolvePlayerAlias(source, gameStore)
+    target = resolvePlayerAlias(target, gameStore)
 
     console.log(`[MessageParser] Updating relationship: ${source} -> ${target}`)
 

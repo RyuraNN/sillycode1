@@ -371,10 +371,11 @@ export const storageActions = {
     }
     
     // Step 4: 重建世界书状态（有整体超时保护）
+    // 增加超时时间，因为现在内部增加了延时以减轻主线程压力
     const rebuildOk = await safeExec(
       () => this.rebuildWorldbookState(),
       'rebuildWorldbookState',
-      60000 // 世界书重建最多 60 秒
+      90000 // 世界书重建最多 90 秒
     )
     
     if (!rebuildOk) {
@@ -390,7 +391,9 @@ export const storageActions = {
     
     // Step 6: 检查配送通知
     try {
-      this.checkAndNotifyDeliveries()
+      if (typeof this.checkAndNotifyDeliveries === 'function') {
+        this.checkAndNotifyDeliveries()
+      }
     } catch (e) {
       console.warn('[GameStore] Failed to check deliveries:', e)
     }
@@ -554,7 +557,34 @@ export const storageActions = {
               this.currentRunId = details.gameState.currentRunId
             }
             if (details.gameState.player) {
-              this.player = details.gameState.player
+              // 【修复】状态合并：确保旧存档缺失的字段被默认值填充
+              // 使用 createInitialState().player 作为基础模板
+              const defaultPlayer = createInitialState().player
+              
+              // 递归合并对象（这里简单实现一层深拷贝，针对关键嵌套对象）
+              // 对于深层嵌套如 attributes, skills 等，如果存档中有，就用存档的，否则用默认的
+              // 注意：这里假设存档中的对象结构如果是旧的，至少第一层是匹配的
+              
+              // 简单的合并策略：
+              this.player = { ...defaultPlayer, ...details.gameState.player }
+              
+              // 针对特定的嵌套对象进行深度合并
+              if (details.gameState.player.partTimeJob) {
+                this.player.partTimeJob = { ...defaultPlayer.partTimeJob, ...details.gameState.player.partTimeJob }
+              }
+              if (details.gameState.player.forum) {
+                this.player.forum = { ...defaultPlayer.forum, ...details.gameState.player.forum }
+              }
+              if (details.gameState.player.social) {
+                this.player.social = { ...defaultPlayer.social, ...details.gameState.player.social }
+              }
+              // 教师相关字段
+              if (details.gameState.player.role) {
+                // 如果存档中有 role，保留相关字段
+              } else {
+                // 如果没有，确保使用默认值
+                this.player.role = defaultPlayer.role
+              }
             }
             
             // 预加载考试历史

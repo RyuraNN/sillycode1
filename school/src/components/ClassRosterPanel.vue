@@ -24,7 +24,8 @@ import {
   updatePersonality,
   updateGoals,
   updatePriorities,
-  getCharacterRelationsList
+  getCharacterRelationsList,
+  flushPendingSocialData
 } from '../utils/relationshipManager'
 
 const gameStore = useGameStore()
@@ -217,12 +218,24 @@ const saveEdit = () => {
     newClassData.headTeacher = { ...newClassData.headTeacher, ...formData }
   } else if (editingRole.value === 'teacher') {
     if (editingIndex.value === -1) {
+      // 检查教师重名
+      const dupTeacher = newClassData.teachers.find((t, i) => t.name === formData.name)
+      if (dupTeacher) {
+        alert(`教师"${formData.name}"已存在，请勿重复添加`)
+        return
+      }
       newClassData.teachers.push({ ...formData, role: 'teacher', classId: props.classId })
     } else {
       newClassData.teachers[editingIndex.value] = { ...newClassData.teachers[editingIndex.value], ...formData }
     }
   } else if (editingRole.value === 'student') {
     if (editingIndex.value === -1) {
+      // 检查学生重名
+      const dupStudent = newClassData.students.find((s, i) => s.name === formData.name)
+      if (dupStudent) {
+        alert(`学生"${formData.name}"已存在，请勿重复添加`)
+        return
+      }
       newClassData.students.push({ ...formData, role: 'student', classId: props.classId })
     } else {
       newClassData.students[editingIndex.value] = { ...newClassData.students[editingIndex.value], ...formData }
@@ -384,9 +397,11 @@ const savePersonality = () => {
 }
 
 // 关闭关系编辑器
-const closeRelationEditor = () => {
+const closeRelationEditor = async () => {
   // 保存性格设置
   savePersonality()
+  // 确保防抖缓冲区中的数据立即写入世界书
+  await flushPendingSocialData()
   showRelationEditor.value = false
 }
 
@@ -396,6 +411,9 @@ const handleConfirm = async () => {
   
   isSaving.value = true
   try {
+    // 0. 先刷新防抖缓冲区，确保关系数据不丢失
+    await flushPendingSocialData()
+
     // 1. 同步到内存 Store
     if (gameStore.allClassData[props.classId]) {
       // 使用 JSON 序列化确保数据纯净，移除可能的 Proxy 引用
@@ -416,6 +434,14 @@ const handleConfirm = async () => {
   } finally {
     isSaving.value = false
   }
+}
+
+// 获取角色性别
+const getGender = (name) => {
+  if (!name) return 'female'
+  if (name === gameStore.player.name) return gameStore.player.gender || 'male'
+  const data = getCharacterData(name)
+  return data?.gender || 'female'
 }
 </script>
 
@@ -613,7 +639,7 @@ const handleConfirm = async () => {
                 <div v-for="rel in characterRelations" :key="rel.targetName" class="relation-item">
                   <div class="relation-info">
                     <span class="target-name">{{ rel.targetName }}</span>
-                    <span class="relation-desc">{{ getRelationshipDescription(rel) }}</span>
+                    <span class="relation-desc">{{ getRelationshipDescription(rel, getGender(editingCharName), getGender(rel.targetName)) }}</span>
                     <span class="relation-values">
                       亲密:{{ rel.intimacy }} 信赖:{{ rel.trust }} 激情:{{ rel.passion }} 敌意:{{ rel.hostility }}
                     </span>

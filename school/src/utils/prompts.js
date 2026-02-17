@@ -11,7 +11,7 @@ import {
   SPECIAL_EVENTS
 } from './scheduleGenerator'
 import { calculateTotalDays } from './eventSystem'
-import { exportRelationshipsForWorldbook } from './relationshipManager'
+import { exportRelationshipsForWorldbook, lookupGender } from './relationshipManager'
 import { getEmotionalState } from '../data/relationshipData'
 import { getItem, getPartTimeJobInfo } from '../data/mapData'
 import { getElectiveCourses } from '../data/coursePoolData'
@@ -297,9 +297,10 @@ AI可以使用以下标签来操作论坛（天华通APP）：
  * 构建教师课表相关的提示词
  * @param {Object} gameTime 游戏时间
  * @param {Object} weeklySchedule 教师周课表
+ * @param {Object} [gameState] 游戏状态（可选，用于查询选修课学生名单）
  * @returns {string} 教师课表提示词
  */
-export const buildTeacherSchedulePrompt = (gameTime, weeklySchedule) => {
+export const buildTeacherSchedulePrompt = (gameTime, weeklySchedule, gameState) => {
   if (!weeklySchedule || Object.keys(weeklySchedule).length === 0) {
     return ''
   }
@@ -333,23 +334,42 @@ export const buildTeacherSchedulePrompt = (gameTime, weeklySchedule) => {
     const start = timeToMinutes(classInfo.start)
     const end = timeToMinutes(classInfo.end)
     
-    if (currentMinutes >= start && currentMinutes < end) {
-      let targetName = classInfo.className
-      if (classInfo.isElective) {
-        targetName = `选修课《${classInfo.subject}》`
+    // 辅助函数：生成目标名称（含选修课学生名单）
+    const getTargetName = (info) => {
+      if (info.isElective) {
+        let name = `选修课《${info.subject}》`
+        // 查找学生名单
+        if (gameState && gameState.npcElectiveSelections) {
+          const students = []
+          for (const [npcName, selections] of Object.entries(gameState.npcElectiveSelections)) {
+            // 检查是否选择了该课程（匹配课程ID或课程名）
+            // @ts-ignore
+            if (Array.isArray(selections) && (
+              selections.includes(info.subject) || 
+              (info.courseId && selections.includes(info.courseId))
+            )) {
+              students.push(npcName)
+            }
+          }
+          if (students.length > 0) {
+            name += ` (学生名单: ${students.join('、')})`
+          } else {
+            name += ` (暂无学生报名)`
+          }
+        }
+        return name
       } else {
-        targetName = `${classInfo.className}班`
+        return `${info.className}班`
       }
+    }
+    
+    if (currentMinutes >= start && currentMinutes < end) {
+      const targetName = getTargetName(classInfo)
       currentStatus = `[当前状态] 正在给 ${targetName} 上${classInfo.subject}课。地点：${classInfo.location}。`
       break
     } else if (currentMinutes < start) {
       // 找到下一节课
-      let targetName = classInfo.className
-      if (classInfo.isElective) {
-        targetName = `选修课《${classInfo.subject}》`
-      } else {
-        targetName = `${classInfo.className}班`
-      }
+      const targetName = getTargetName(classInfo)
       currentStatus = `[当前状态] 下一节课是${classInfo.start}给 ${targetName} 上${classInfo.subject}课。地点：${classInfo.location}。`
       break
     }
@@ -720,7 +740,8 @@ export const buildSystemPromptContent = (gameState) => {
         const npcData = npcRelationships[npc.name]
         let details = `\n[NPC Status: ${npc.name}]\n`
         details += `Status: Alive\n`
-        details += `Gender: ${npcData?.gender || npc.gender || 'Unknown'}\n`
+        const resolvedNpcGender = npcData?.gender || npc.gender || lookupGender(npc.name, gameState) || 'unknown'
+        details += `Gender: ${resolvedNpcGender}\n`
         
         // 四维属性
         if (npcData && npcData.personality) {
@@ -782,8 +803,8 @@ export const buildSystemPromptContent = (gameState) => {
           // 对玩家的关系
           if (npcData.relations[player.name]) {
             const rel = npcData.relations[player.name]
-            const playerGender = player.gender || 'male'
-            const npcGender = npcData.gender || npc.gender || 'female'
+            const playerGender = player.gender || 'unknown'
+            const npcGender = resolvedNpcGender
             const emotion = getEmotionalState(rel, playerGender, npcGender)
             let relStr = `- To ${player.name}: [${emotion.text}] Intimacy(${rel.intimacy}), Trust(${rel.trust}), Passion(${rel.passion}), Hostility(${rel.hostility})`
             if (rel.tags && rel.tags.length > 0) {
@@ -796,9 +817,9 @@ export const buildSystemPromptContent = (gameState) => {
           for (const otherNpc of presentNpcs) {
             if (otherNpc.id !== npc.id && npcData.relations[otherNpc.name]) {
               const rel = npcData.relations[otherNpc.name]
-              const npcGender = npcData.gender || npc.gender || 'female'
+              const npcGender = resolvedNpcGender
               const otherNpcData = npcRelationships[otherNpc.name]
-              const otherNpcGender = otherNpcData?.gender || otherNpc.gender || 'female'
+              const otherNpcGender = otherNpcData?.gender || otherNpc.gender || lookupGender(otherNpc.name, gameState) || 'unknown'
               const emotion = getEmotionalState(rel, npcGender, otherNpcGender)
               relations.push(`- To ${otherNpc.name}: [${emotion.text}] Intimacy(${rel.intimacy}), Trust(${rel.trust}), Passion(${rel.passion}), Hostility(${rel.hostility})`)
             }
@@ -822,7 +843,7 @@ export const buildSystemPromptContent = (gameState) => {
   let schedulePrompt = ''
   if (!termInfo.isVacation && player.schedule) {
     if (player.role === 'teacher') {
-      schedulePrompt = buildTeacherSchedulePrompt(gameTime, player.schedule)
+      schedulePrompt = buildTeacherSchedulePrompt(gameTime, player.schedule, gameState)
     } else {
       schedulePrompt = buildSchedulePrompt(gameTime, player.schedule)
     }

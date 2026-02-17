@@ -23,6 +23,8 @@ const activeTab = ref('filter') // 'filter' | 'composer' | 'characterEditor'
 const loading = ref(true)
 const saving = ref(false)
 const isLocked = ref(false)
+const showMessageModal = ref(false)
+const messageContent = ref('')
 const fullRosterSnapshot = ref({})
 const currentRosterState = ref({})
 const originGroups = ref({})
@@ -106,6 +108,7 @@ const aiImportError = ref('') // 错误信息
 const aiImportEntries = ref([{ work: '', character: '' }]) // 输入条目
 const aiImportResults = ref({ found: [], notFound: [], workResults: [] }) // 查询结果
 const aiImportStreamText = ref('') // 流式输出文本（用于显示进度）
+const importAllAsPending = ref(false) // 是否将全部角色设为待入学
 
 // ==================== 批量补全功能 ====================
 const showBatchCompleteModal = ref(false)
@@ -125,6 +128,12 @@ const batchSelection = ref({
     overwrite: false // 是否覆盖已有数据
   }
 })
+
+// 显示提示消息（替代原生alert以防止退出全屏）
+const showMessage = (msg) => {
+  messageContent.value = msg
+  showMessageModal.value = true
+}
 
 // 打开批量补全模态框
 const openBatchComplete = () => {
@@ -301,7 +310,7 @@ const startBatchProcess = async (startFromChunk = 0) => {
     // 全新开始
     candidates = getBatchCandidates()
     if (candidates.length === 0) {
-      alert('未找到符合条件的角色')
+      showMessage('未找到符合条件的角色')
       return
     }
     
@@ -322,7 +331,7 @@ const startBatchProcess = async (startFromChunk = 0) => {
   }
   
   if (!window.generate) {
-    alert('AI生成接口不可用')
+    showMessage('AI生成接口不可用')
     return
   }
   
@@ -435,7 +444,7 @@ const applyBatchChanges = async () => {
   await handleSave()
   
   showBatchCompleteModal.value = false
-  alert(`已成功更新 ${appliedCount} 个角色的数据并同步到世界书！`)
+  showMessage(`已成功更新 ${appliedCount} 个角色的数据并同步到世界书！`)
 }
 
 // ==================== AI角色导入功能 ====================
@@ -814,6 +823,7 @@ const confirmAIImport = async () => {
     let role = 'student'
     let staffTitle = ''
     let workplace = ''
+    let grade = undefined
     
     // 如果用户手动修改了建议，这里应该使用修改后的值（需要 UI 支持修改）
     // 目前简单处理：如果是 staff，自动设置 staffTitle
@@ -822,6 +832,11 @@ const confirmAIImport = async () => {
       staffTitle = '职工' // 默认值，用户后续可编辑
     } else if (char.roleSuggestion === 'teacher') {
       role = 'teacher'
+    }
+
+    // 处理全部待入学选项
+    if (importAllAsPending.value && role === 'student') {
+      grade = 0
     }
 
     characterPool.value.push({
@@ -834,6 +849,7 @@ const confirmAIImport = async () => {
       workplace: workplace,
       subject: '',
       isHeadTeacher: false,
+      grade: grade,
       electivePreference: char.electivePreference || 'general',
       scheduleTag: char.scheduleTag || '',
       personality: char.personality || { order: 0, altruism: 0, tradition: 0, peace: 50 },
@@ -846,7 +862,7 @@ const confirmAIImport = async () => {
   showAIImportResult.value = false
   aiImportResults.value = { found: [], notFound: [], workResults: [] }
   const msg = `已导入 ${addedCount} 个角色` + (skippedCount > 0 ? `，跳过 ${skippedCount} 个已存在角色` : '')
-  alert(msg)
+  showMessage(msg)
 }
 
 // 切换角色建议类型
@@ -1307,7 +1323,8 @@ const getStudentClubs = (studentName) => {
 
 // ==================== 筛选逻辑 ====================
 const getWorkStats = (workName) => {
-  const students = originGroups.value[workName] || []
+  // 修复：使用 filteredGroups 而不是 originGroups，确保统计只反映当前筛选结果
+  const students = filteredGroups.value[workName] || []
   const total = students.length
   const selected = students.reduce((sum, s) => {
     return sum + (currentRosterState.value[s.classId]?.[s.name] ? 1 : 0)
@@ -1315,11 +1332,22 @@ const getWorkStats = (workName) => {
   return { total, selected, all: total > 0 && total === selected, none: selected === 0 }
 }
 
+// 全局统计（不受筛选器影响，始终基于 originGroups）
+const getWorkStatsGlobal = (workName) => {
+  const students = originGroups.value[workName] || []
+  const total = students.length
+  const selected = students.reduce((sum, s) => {
+    return sum + (currentRosterState.value[s.classId]?.[s.name] ? 1 : 0)
+  }, 0)
+  return { total, selected }
+}
+
 const toggleWork = (workName) => {
   const stats = getWorkStats(workName)
   const targetState = !stats.all
   
-  const students = originGroups.value[workName] || []
+  // 修复：仅操作当前筛选后可见的学生
+  const students = filteredGroups.value[workName] || []
   students.forEach(s => {
     if (!currentRosterState.value[s.classId]) currentRosterState.value[s.classId] = {}
     currentRosterState.value[s.classId][s.name] = targetState
@@ -1397,13 +1425,13 @@ const filteredGroups = computed(() => {
   return result
 })
 
-// 总统计
+// 总统计（始终基于全局数据，不受筛选器影响）
 const totalStats = computed(() => {
   let totalStudents = 0
   let selectedStudents = 0
   
   for (const [workName] of Object.entries(originGroups.value)) {
-    const stats = getWorkStats(workName)
+    const stats = getWorkStatsGlobal(workName)
     totalStudents += stats.total
     selectedStudents += stats.selected
   }
@@ -1570,7 +1598,7 @@ const addNewTeacher = () => {
 const saveTeacherEdit = () => {
   const form = teacherEditForm.value
   if (!form.name || !form.classId) {
-    alert('请填写姓名和班级')
+    showMessage('请填写姓名和班级')
     return
   }
 
@@ -2119,15 +2147,15 @@ const applyComposerChanges = async () => {
     const success = await updateClassDataInWorldbook(composerTargetClass.value, composerClassData.value)
     
     if (success) {
-      alert('班级名册已更新！')
+      showMessage('班级名册已更新！')
       await loadData()
       await loadCharacterPool()
     } else {
-      alert('保存失败，请检查控制台')
+      showMessage('保存失败，请检查控制台')
     }
   } catch (e) {
     console.error('[RosterFilter] Error applying composer changes:', e)
-    alert('保存出错')
+    showMessage('保存出错')
   } finally {
     saving.value = false
   }
@@ -2142,12 +2170,12 @@ const openAddClassModal = () => {
 const addClass = async () => {
   const { id, name } = newClassForm.value
   if (!id || !name) {
-    alert('请填写班级ID和名称')
+    showMessage('请填写班级ID和名称')
     return
   }
   
   if (fullRosterSnapshot.value[id]) {
-    alert('该班级ID已存在')
+    showMessage('该班级ID已存在')
     return
   }
   
@@ -2168,7 +2196,7 @@ const addClass = async () => {
   showAddClassModal.value = false
   composerTargetClass.value = id
   
-  alert(`班级 "${name}" 已创建`)
+  showMessage(`班级 "${name}" 已创建`)
 }
 
 const deleteClass = async () => {
@@ -2197,7 +2225,7 @@ const deleteClass = async () => {
     composerClassData.value = {}
   }
   
-  alert(`班级 "${className}" 已删除`)
+  showMessage(`班级 "${className}" 已删除`)
 }
 
 // ==================== 角色编辑器 ====================
@@ -2219,7 +2247,14 @@ const filteredCharacterPool = computed(() => {
   
   // 角色类型筛选
   if (charEditorRoleFilter.value !== 'all') {
-    result = result.filter(c => c.role === charEditorRoleFilter.value)
+    if (charEditorRoleFilter.value === 'pending') {
+      // 待入学：role=student 且 grade=0 (或无classId且无grade)
+      result = result.filter(c => c.role === 'student' && (c.grade === 0 || (!c.classId && !c.grade)))
+    } else if (charEditorRoleFilter.value === 'staff') {
+      result = result.filter(c => c.role === 'staff')
+    } else {
+      result = result.filter(c => c.role === charEditorRoleFilter.value)
+    }
   }
   
   // 按作品筛选
@@ -2245,7 +2280,8 @@ const charPoolStats = computed(() => {
   return {
     total: pool.length,
     students: pool.filter(c => c.role === 'student').length,
-    teachers: pool.filter(c => c.role === 'teacher').length
+    teachers: pool.filter(c => c.role === 'teacher').length,
+    staff: pool.filter(c => c.role === 'staff').length
   }
 })
 
@@ -2366,7 +2402,7 @@ const removeAssignment = (index) => {
 const saveCharacterEdit = async () => {
   const form = characterEditForm.value
   if (!form.name) {
-    alert('请填写角色姓名')
+    showMessage('请填写角色姓名')
     return
   }
   
@@ -2455,7 +2491,7 @@ const saveCharacterEdit = async () => {
       }
     } else {
       if (characterPool.value.find(c => c.name === form.name)) {
-        alert('已存在同名角色')
+        showMessage('已存在同名角色')
         return
       }
       characterPool.value.push(charData)
@@ -2463,6 +2499,78 @@ const saveCharacterEdit = async () => {
     
   } else {
     // 学生或无 assignments 的教师（兼容旧逻辑）
+
+    // 如果是学生且修改了班级，需要更新 fullRosterSnapshot
+    if (form.role === 'student' && editingCharacter.value) {
+      const oldClassId = editingCharacter.value.classId
+      const newClassId = form.classId
+      
+      if (oldClassId && newClassId && oldClassId !== newClassId) {
+        // 1. 从旧班级移除
+        const oldClass = fullRosterSnapshot.value[oldClassId]
+        if (oldClass && Array.isArray(oldClass.students)) {
+          const sIdx = oldClass.students.findIndex(s => s.name === form.name)
+          if (sIdx !== -1) {
+            oldClass.students.splice(sIdx, 1)
+          }
+        }
+        
+        // 2. 添加到新班级
+        const newClass = fullRosterSnapshot.value[newClassId]
+        if (newClass) {
+          if (!newClass.students) newClass.students = []
+          // 检查是否已存在
+          if (!newClass.students.find(s => s.name === form.name)) {
+            newClass.students.push({
+              name: form.name,
+              gender: form.gender,
+              origin: form.origin,
+              role: 'student',
+              classId: newClassId,
+              electivePreference: form.electivePreference,
+              scheduleTag: form.scheduleTag,
+              academicProfile: form.academicProfile,
+              personality: form.personality
+            })
+          }
+        }
+        
+        // 3. 同步 currentRosterState：从旧班级移除，在新班级标记为选中
+        if (currentRosterState.value[oldClassId]) {
+          delete currentRosterState.value[oldClassId][form.name]
+        }
+        if (!currentRosterState.value[newClassId]) {
+          currentRosterState.value[newClassId] = {}
+        }
+        currentRosterState.value[newClassId][form.name] = true
+      } else if (!oldClassId && newClassId) {
+        // 从无班级（如待入学）分配到班级
+        const newClass = fullRosterSnapshot.value[newClassId]
+        if (newClass) {
+          if (!newClass.students) newClass.students = []
+          if (!newClass.students.find(s => s.name === form.name)) {
+            newClass.students.push({
+              name: form.name,
+              gender: form.gender,
+              origin: form.origin,
+              role: 'student',
+              classId: newClassId,
+              electivePreference: form.electivePreference,
+              scheduleTag: form.scheduleTag,
+              academicProfile: form.academicProfile,
+              personality: form.personality
+            })
+          }
+        }
+        
+        // 同步 currentRosterState：在新班级标记为选中
+        if (!currentRosterState.value[newClassId]) {
+          currentRosterState.value[newClassId] = {}
+        }
+        currentRosterState.value[newClassId][form.name] = true
+      }
+    }
+
     const charData = {
       name: form.name,
       gender: form.gender,
@@ -2475,6 +2583,7 @@ const saveCharacterEdit = async () => {
       isHeadTeacher: form.role === 'teacher' ? form.isHeadTeacher : false,
       electivePreference: form.role === 'student' ? form.electivePreference : 'general',
       scheduleTag: form.role === 'student' ? form.scheduleTag : '',
+      grade: form.isPending ? 0 : undefined, // 待入学标志
       notes: form.notes,
       personality: { ...form.personality },
       academicProfile: { ...(form.academicProfile || { level: 'avg', potential: 'medium', traits: [] }), traits: [...((form.academicProfile || {}).traits || [])] }
@@ -2487,7 +2596,7 @@ const saveCharacterEdit = async () => {
       }
     } else {
       if (characterPool.value.find(c => c.name === form.name)) {
-        alert('已存在同名角色')
+        showMessage('已存在同名角色')
         return
       }
       characterPool.value.push(charData)
@@ -2511,7 +2620,7 @@ const saveCharacterEdit = async () => {
   updateAvailableCharacters()
   
   // 提示用户需要手动同步到世界书
-  alert('角色信息已保存到本地！\n\n如需同步到世界书，请点击底部的「确认并同步」按钮。')
+  showMessage('角色信息已保存到本地！\n\n如需同步到世界书，请点击底部的「确认并同步」按钮。')
 }
 
 const deleteCharacter = async (char) => {
@@ -2520,8 +2629,38 @@ const deleteCharacter = async (char) => {
   const idx = characterPool.value.findIndex(c => c.name === char.name)
   if (idx !== -1) {
     characterPool.value.splice(idx, 1)
-    // 修复：保存时使用深拷贝避免 Proxy 问题
+    
+    // Bug 4 修复：同时从 fullRosterSnapshot 中移除该角色
+    for (const [classId, classInfo] of Object.entries(fullRosterSnapshot.value)) {
+      // 从学生列表移除
+      if (Array.isArray(classInfo.students)) {
+        const sIdx = classInfo.students.findIndex(s => s.name === char.name)
+        if (sIdx !== -1) {
+          classInfo.students.splice(sIdx, 1)
+          // 同步 currentRosterState
+          if (currentRosterState.value[classId]) {
+            delete currentRosterState.value[classId][char.name]
+          }
+        }
+      }
+      
+      // 从教师列表移除
+      if (Array.isArray(classInfo.teachers)) {
+        const tIdx = classInfo.teachers.findIndex(t => t.name === char.name)
+        if (tIdx !== -1) {
+          classInfo.teachers.splice(tIdx, 1)
+        }
+      }
+      
+      // 从班主任移除
+      if (classInfo.headTeacher?.name === char.name) {
+        classInfo.headTeacher = { name: '', gender: 'female', origin: '', role: 'teacher' }
+      }
+    }
+    
+    // 保存更新
     await saveFullCharacterPool(deepClone(characterPool.value))
+    await saveRosterBackup(deepClone(fullRosterSnapshot.value))
     updateAvailableCharacters()
   }
 }
@@ -2820,12 +2959,13 @@ const handleSave = async () => {
       }
     }
     
-    alert(`已更新 ${successCount} 个班级的世界书条目！` + (!isLocked.value ? '\n(已同步更新备份)' : ''))
-    emit('close')
+    showMessage(`已更新 ${successCount} 个班级的世界书条目！` + (!isLocked.value ? '\n(已同步更新备份)' : ''))
+    // 等待用户确认后再关闭（可选，这里直接关闭）
+    setTimeout(() => emit('close'), 1500)
     
   } catch (e) {
     console.error('[RosterFilter] Error saving:', e)
-    alert('保存失败，请检查控制台')
+    showMessage('保存失败，请检查控制台')
   } finally {
     saving.value = false
   }
@@ -2843,7 +2983,7 @@ const handleReset = () => {
 
 const refreshData = async () => {
   if (isLocked.value) {
-    alert('当前名册为锁定状态，请先解锁后再读取新名册')
+    showMessage('当前名册为锁定状态，请先解锁后再读取新名册')
     return
   }
   
@@ -2854,10 +2994,10 @@ const refreshData = async () => {
       // 关键修复：传入 true 强制使用世界书数据覆盖本地备份
       await loadData(true)
       await loadCharacterPool()
-      alert('名册数据已更新')
+      showMessage('名册数据已更新')
     } catch (e) {
       console.error('[RosterFilter] Error refreshing data:', e)
-      alert('更新失败')
+      showMessage('更新失败')
     } finally {
       loading.value = false
     }
@@ -2906,13 +3046,13 @@ const restoreFromBackup = async () => {
       
       await loadData()
       await loadCharacterPool()
-      alert(`已从备份恢复所有角色数据 (包含 ${unassigned.length} 个未分配角色)`)
+      showMessage(`已从备份恢复所有角色数据 (包含 ${unassigned.length} 个未分配角色)`)
     } else {
-      alert('未找到备份数据')
+      showMessage('未找到备份数据')
     }
   } catch (e) {
     console.error('[RosterFilter] Error restoring from backup:', e)
-    alert('恢复失败')
+    showMessage('恢复失败')
   } finally {
     loading.value = false
   }
@@ -2942,10 +3082,10 @@ const createBackup = async () => {
     
     // 修复：传递时使用深拷贝避免 Proxy 问题
     await createDefaultRosterBackupWorldbook(deepClone(fullRosterSnapshot.value), deepClone(unassignedCharacters))
-    alert('备份世界书已创建/更新')
+    showMessage('备份世界书已创建/更新')
   } catch (e) {
     console.error('[RosterFilter] Error creating backup:', e)
-    alert('创建备份失败')
+    showMessage('创建备份失败')
   } finally {
     loading.value = false
   }
@@ -3249,7 +3389,7 @@ const handleClubLocationSelected = (location) => {
 const saveClubEdit = async () => {
   const form = clubEditForm.value
   if (!form.name) {
-    alert('请填写社团名称')
+    showMessage('请填写社团名称')
     return
   }
 
@@ -3295,11 +3435,11 @@ const saveClubEdit = async () => {
     }
 
     showClubEditor.value = false
-    alert(`社团"${form.name}"已保存！`)
+    showMessage(`社团"${form.name}"已保存！`)
     console.log('[ClubEditor] Club saved:', form.id, form.name)
   } catch (e) {
     console.error('[ClubEditor] Error saving club:', e)
-    alert('保存失败，请检查控制台')
+    showMessage('保存失败，请检查控制台')
   } finally {
     clubEditorSaving.value = false
   }
@@ -3332,11 +3472,11 @@ const deleteClub = async (club) => {
       gameStore.saveToStorage(true)
     }
 
-    alert(`社团"${club.name}"已删除`)
+    showMessage(`社团"${club.name}"已删除`)
     console.log('[ClubEditor] Club deleted:', clubId)
   } catch (e) {
     console.error('[ClubEditor] Error deleting club:', e)
-    alert('删除失败')
+    showMessage('删除失败')
   } finally {
     clubEditorSaving.value = false
   }
@@ -3930,6 +4070,7 @@ watch(activeTab, async (newTab) => {
                 <option value="all">全部</option>
                 <option value="student">学生</option>
                 <option value="teacher">教师</option>
+                <option value="staff">职工</option>
                 <option value="pending">待入学(新生)</option>
               </select>
               <select v-model="charEditorWorkFilter" class="pool-work-filter">
@@ -3947,6 +4088,7 @@ watch(activeTab, async (newTab) => {
               <span>总计 {{ charPoolStats.total }} 个角色</span>
               <span>学生 {{ charPoolStats.students }} 人</span>
               <span>教师 {{ charPoolStats.teachers }} 人</span>
+              <span v-if="charPoolStats.staff > 0">职工 {{ charPoolStats.staff }} 人</span>
             </div>
             
             <div class="char-editor-hint">
@@ -3972,6 +4114,7 @@ watch(activeTab, async (newTab) => {
                   <span class="char-gender">{{ char.gender === 'female' ? '♀' : '♂' }}</span>
                   <span class="char-role" :class="char.role">{{ char.role === 'teacher' ? '教师' : '学生' }}</span>
                   <span v-if="char.isHeadTeacher" class="head-teacher-badge">班主任</span>
+                  <span v-if="char.role === 'student' && (char.grade === 0 || (!char.classId && !char.grade))" class="pending-badge">🆕 待入学</span>
                   <span v-if="char.role === 'teacher' && getTeacherAssignmentCount(char) > 1" class="multi-class-badge">
                     {{ getTeacherAssignmentCount(char) }}班
                   </span>
@@ -4739,6 +4882,19 @@ watch(activeTab, async (newTab) => {
           </div>
         </div>
 
+        <!-- 通用消息提示框 -->
+        <div v-if="showMessageModal" class="modal-overlay" @click.self="showMessageModal = false">
+          <div class="modal message-modal">
+            <div class="message-content">
+              <span class="message-icon">ℹ️</span>
+              <p class="message-text">{{ messageContent }}</p>
+            </div>
+            <div class="modal-actions center">
+              <button class="action-btn primary" @click="showMessageModal = false">确定</button>
+            </div>
+          </div>
+        </div>
+
         <!-- AI导入结果面板 -->
         <div v-if="showAIImportResult" class="modal-overlay" @click.self="closeAIImport">
           <div class="modal ai-result-modal">
@@ -4876,6 +5032,12 @@ watch(activeTab, async (newTab) => {
             
             <!-- 底部操作 -->
             <div v-if="aiImportResults.found.length > 0" class="modal-actions">
+              <div class="import-options">
+                <label class="checkbox-label">
+                  <input type="checkbox" v-model="importAllAsPending" />
+                  <span>全部设为待入学 (不分配班级)</span>
+                </label>
+              </div>
               <button class="action-btn primary" @click="confirmAIImport">
                 ✅ 导入选中角色 ({{ aiImportResults.found.filter(c => c.selected).length }})
               </button>
@@ -6290,6 +6452,15 @@ watch(activeTab, async (newTab) => {
   border-radius: 4px;
 }
 
+.pending-badge {
+  font-size: 0.7rem;
+  background: #80cbc4;
+  color: #004d40;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #4db6ac;
+}
+
 .char-meta {
   display: flex;
   gap: 12px;
@@ -6503,6 +6674,30 @@ watch(activeTab, async (newTab) => {
 }
 
 .modal.large-modal { width: 550px; }
+
+.message-modal {
+  width: 300px;
+  text-align: center;
+}
+
+.message-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 0;
+}
+
+.message-icon {
+  font-size: 2.5rem;
+}
+
+.message-text {
+  font-size: 1.1rem;
+  color: #333;
+  line-height: 1.5;
+  white-space: pre-line;
+}
 
 .modal h3 {
   margin: 0 0 20px 0;
@@ -7204,6 +7399,10 @@ watch(activeTab, async (newTab) => {
   font-size: 0.9rem;
   margin-bottom: 12px;
   border-left: 4px solid #ef5350;
+}
+
+.import-options {
+  margin-right: auto;
 }
 
 /* AI结果面板 */

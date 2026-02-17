@@ -189,6 +189,12 @@ export const classClubActions = {
    */
   async setPlayerClass(this: any, classId: string) {
     this.player.classId = classId
+
+    // 自动更新年级 (例如 "2-d" -> 2)
+    const grade = parseInt(classId.charAt(0))
+    if (!isNaN(grade)) {
+      this.player.gradeYear = grade
+    }
     
     const classInfo = this.allClassData[classId]
     if (classInfo) {
@@ -781,12 +787,16 @@ export const classClubActions = {
       await safeRebuildStep(() => this.loadClassData(), 'loadClassData', 15000)
     }
     
+    await new Promise(r => setTimeout(r, 50)) // Yield
+
     await safeRebuildStep(() => this.loadClubData(), 'loadClubData', 15000)
     
     // 【调试】检查加载后的社团状态
     const allClubIdsAfter = this.allClubs ? Object.keys(this.allClubs) : []
     console.log('[GameStore] After loadClubData - allClubs:', allClubIdsAfter)
     
+    await new Promise(r => setTimeout(r, 50)) // Yield
+
     // === Phase 2: 同步世界书条目状态 ===
     
     // 如果是教师模式，恢复教师班级条目
@@ -815,6 +825,8 @@ export const classClubActions = {
       }
     }
 
+    await new Promise(r => setTimeout(r, 100)) // Yield
+
     // 同步社团世界书条目
     await safeRebuildStep(async () => {
       const joinedClubsSet = new Set(this.player.joinedClubs)
@@ -828,11 +840,15 @@ export const classClubActions = {
         } else {
           await removePlayerFromClubInWorldbook(clubId, this.player.name, clubData, this.currentRunId)
         }
+        // 每处理一个社团，稍微让出一点时间，防止大量社团导致卡顿
+        await new Promise(r => setTimeout(r, 10)) 
       }
 
       await syncClubWorldbookState(this.currentRunId)
-    }, 'syncClubWorldbook', 20000)
+    }, 'syncClubWorldbook', 30000) // 增加超时
     
+    await new Promise(r => setTimeout(r, 100)) // Yield
+
     // === Phase 3: 同步选修课 ===
     
     await safeRebuildStep(async () => {
@@ -865,30 +881,46 @@ export const classClubActions = {
         const { clearElectiveEntries } = await import('../../utils/electiveWorldbook.js')
         await clearElectiveEntries(this.currentRunId)
       }
-    }, 'syncElectives', 15000)
+    }, 'syncElectives', 20000)
     
+    await new Promise(r => setTimeout(r, 100)) // Yield
+
     // === Phase 4: 同步社交、论坛、兼职、印象等 ===
     
+    // 分拆社交同步步骤，减轻单次操作压力
     await safeRebuildStep(async () => {
       await restoreWorldbookFromStore()
+    }, 'syncSocial_restore', 20000) // 增加超时
+
+    await new Promise(r => setTimeout(r, 50)) // Yield
+
+    await safeRebuildStep(async () => {
       await saveSocialRelationshipOverview()
       await switchSaveSlot()
-    }, 'syncSocial', 10000)
+    }, 'syncSocial_overview', 10000)
     
+    await new Promise(r => setTimeout(r, 50)) // Yield
+
     await safeRebuildStep(async () => {
       await saveForumToWorldbook(this.player.forum.posts, this.currentRunId, this.settings.forumWorldbookLimit)
       await switchForumSlot(this.currentRunId)
-    }, 'syncForum', 10000)
+    }, 'syncForum', 15000)
     
+    await new Promise(r => setTimeout(r, 50)) // Yield
+
     await safeRebuildStep(
       () => restorePartTimeWorldbookFromStore(),
-      'syncPartTime', 8000
+      'syncPartTime', 10000
     )
     
+    await new Promise(r => setTimeout(r, 50)) // Yield
+
     await safeRebuildStep(
       () => restoreImpressionWorldbookFromStore(),
-      'syncImpression', 8000
+      'syncImpression', 10000
     )
+
+    await new Promise(r => setTimeout(r, 50)) // Yield
 
     // === Phase 5: 其他初始化 ===
     

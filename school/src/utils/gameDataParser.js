@@ -223,6 +223,23 @@ export const mergeGameData = (mainDataList, assistantDataList) => {
 export const applyGameData = (data) => {
   const gameStore = useGameStore()
   
+  // 兼容性处理：将 gold (金币) 映射到 money (金钱)
+  if (data.delta && data.delta.gold) {
+    data.delta.money = (data.delta.money || 0) + data.delta.gold
+    delete data.delta.gold
+  }
+  if (data.set && data.set.gold !== undefined) {
+    data.set.money = data.set.gold
+    delete data.set.gold
+  }
+  // 处理 stats 中的 gold
+  if (data.stats) {
+    if (data.stats.gold) {
+      if (!data.stats.money) data.stats.money = data.stats.gold
+      delete data.stats.gold
+    }
+  }
+
   // Reset all NPCs to absent by default for each turn
   if (gameStore.npcs.length > 0) {
     gameStore.npcs.forEach(npc => {
@@ -304,7 +321,6 @@ export const generateDetailedChanges = (oldState, newState) => {
   // 玩家基础属性对比
   const playerPaths = [
     { path: 'player.money', label: '金钱' },
-    { path: 'player.gold', label: '金币' },
     { path: 'player.hp', label: '生命' },
     { path: 'player.maxHp', label: '生命上限' },
     { path: 'player.mp', label: '精力' },

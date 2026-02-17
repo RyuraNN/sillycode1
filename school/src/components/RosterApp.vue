@@ -59,7 +59,15 @@ const hasPlayerRelation = (charName) => {
 
 // 角色列表数据 (仅显示与玩家有关系的角色)
 const charList = computed(() => {
-  return gameStore.npcs
+  // 先按 name 去重（保留第一个出现的），防止底层数据有重复 NPC
+  const seen = new Set()
+  const uniqueNpcs = gameStore.npcs.filter(npc => {
+    if (seen.has(npc.name)) return false
+    seen.add(npc.name)
+    return true
+  })
+  
+  return uniqueNpcs
     .filter(npc => hasPlayerRelation(npc.name))
     .map(npc => {
         // 尝试获取更多详细信息

@@ -41,15 +41,17 @@ function parsePersonInfo(text, defaultRole = 'student') {
   text = text.replace(/^\d+\.\s*/, '').trim()
   
   // 1. 提取基本信息： 姓名 性别 (来源)
-  // 性别可能是：男/女/♂/♀
+  // 性别可能是：男/女/♂/♀/Male/Female/M/F
   // 来源可能是：(来源) 或 （来源） 或 《来源》
-  const baseRegex = /^(.+?)\s+([男女♂♀])\s*[（(《](.+?)[)）》]/
+  const baseRegex = /^(.+?)\s+([男女♂♀]|Male|Female|M|F)\s*[（(《](.+?)[)）》]/i
   const match = text.match(baseRegex)
   
   if (match) {
     let gender = match[2]
-    if (gender === '男' || gender === '♂') gender = 'male'
-    else if (gender === '女' || gender === '♀') gender = 'female'
+    const gLower = gender.toLowerCase()
+    
+    if (gLower === '男' || gLower === '♂' || gLower === 'male' || gLower === 'm') gender = 'male'
+    else if (gLower === '女' || gLower === '♀' || gLower === 'female' || gLower === 'f') gender = 'female'
     else gender = 'unknown'
 
     const person = {

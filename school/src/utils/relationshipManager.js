@@ -13,6 +13,103 @@ import {
 import { saveImpressionData, saveImpressionDataImmediate } from './impressionWorldbook'
 import { ensureSocialDataWorldbook, fetchSocialData, saveSocialData } from './socialRelationshipsWorldbook'
 
+// ========== 防抖写入世界书 ==========
+let _pendingSocialData = null
+let _debounceSaveTimer = null
+const DEBOUNCE_DELAY = 500 // ms
+
+/**
+ * 防抖保存社交数据到世界书
+ * 将短时间内的多次写入合并为一次
+ * @param {Object} partialData 要合并的部分数据
+ */
+function debounceSaveSocialData(partialData) {
+  // 合并到待写入缓冲区
+  if (!_pendingSocialData) {
+    _pendingSocialData = {}
+  }
+  // 简单深度合并
+  for (const key of Object.keys(partialData)) {
+    if (!_pendingSocialData[key]) {
+      _pendingSocialData[key] = {}
+    }
+    Object.assign(_pendingSocialData[key], partialData[key])
+  }
+  
+  // 重置定时器
+  if (_debounceSaveTimer) {
+    clearTimeout(_debounceSaveTimer)
+  }
+  _debounceSaveTimer = setTimeout(() => {
+    const dataToSave = _pendingSocialData
+    _pendingSocialData = null
+    _debounceSaveTimer = null
+    if (dataToSave) {
+      saveSocialData(dataToSave).catch(e => console.error('[RelationshipManager] Debounced save failed:', e))
+    }
+  }, DEBOUNCE_DELAY)
+}
+
+/**
+ * 立即刷新待写入的社交数据到世界书
+ * 用于在关闭编辑器或确认保存前确保数据不丢失
+ * @returns {Promise<void>}
+ */
+export async function flushPendingSocialData() {
+  if (_debounceSaveTimer) {
+    clearTimeout(_debounceSaveTimer)
+    _debounceSaveTimer = null
+  }
+  if (_pendingSocialData) {
+    const dataToSave = _pendingSocialData
+    _pendingSocialData = null
+    try {
+      await saveSocialData(dataToSave)
+    } catch (e) {
+      console.error('[RelationshipManager] Flush save failed:', e)
+    }
+  }
+}
+
+/**
+ * 从 allClassData 中查找角色的性别
+ * @param {string} charName 角色名
+ * @param {Object} gameStore 游戏状态
+ * @returns {string} 'male' | 'female' | 'unknown'
+ */
+export function lookupGender(charName, gameStore) {
+  if (!gameStore) {
+    try { gameStore = useGameStore() } catch (e) { return 'unknown' }
+  }
+  
+  if (gameStore.allClassData) {
+    for (const classData of Object.values(gameStore.allClassData)) {
+      // 检查班主任
+      if (classData.headTeacher && classData.headTeacher.name === charName && classData.headTeacher.gender) {
+        return classData.headTeacher.gender
+      }
+      // 检查教师
+      if (classData.teachers) {
+        const teacher = classData.teachers.find(t => t.name === charName)
+        if (teacher && teacher.gender) return teacher.gender
+      }
+      // 检查学生
+      if (classData.students) {
+        const student = classData.students.find(s => s.name === charName)
+        if (student && student.gender) return student.gender
+      }
+    }
+  }
+  
+  // 从 npcs 数组查找
+  if (gameStore.npcs) {
+    const npc = gameStore.npcs.find(n => n.name === charName)
+    if (npc && npc.gender) return npc.gender
+  }
+  
+  return 'unknown'
+}
+
 /**
  * 初始化所有角色的关系数据
  * 从班级数据和世界书数据中构建完整的关系网络
@@ -26,7 +123,9 @@ export async function initializeRelationships() {
   // 或者在显式刷新时调用（目前这里是初始化）
   
   if (gameStore.npcRelationships && Object.keys(gameStore.npcRelationships).length > 0) {
-    console.log('[RelationshipManager] Relationships already initialized')
+    console.log('[RelationshipManager] Relationships already initialized, supplementing missing gender...')
+    // 即使已初始化，也补充缺失的 gender 字段（存档加载后可能丢失）
+    _supplementMissingGender(gameStore)
     return
   }
 
@@ -127,7 +226,31 @@ export async function initializeRelationships() {
 }
 
 /**
- * 展开泛指关系（如“偶像们”、“学生们”）
+ * 补充已初始化的 npcRelationships 中缺失的 gender 字段
+ * 从 allClassData 中查找并填充
+ */
+function _supplementMissingGender(gameStore) {
+  if (!gameStore.npcRelationships) return
+  
+  let supplemented = 0
+  for (const charName of Object.keys(gameStore.npcRelationships)) {
+    const charData = gameStore.npcRelationships[charName]
+    if (!charData.gender || charData.gender === 'unknown') {
+      const gender = lookupGender(charName, gameStore)
+      if (gender !== 'unknown') {
+        charData.gender = gender
+        supplemented++
+      }
+    }
+  }
+  
+  if (supplemented > 0) {
+    console.log(`[RelationshipManager] Supplemented gender for ${supplemented} characters`)
+  }
+}
+
+/**
+ * 展开泛指关系（如"偶像们"、"学生们"）
  */
 function expandGenericRelationships(relationships, gameStore) {
   const allChars = Object.keys(relationships)
@@ -363,18 +486,10 @@ export function setRelationship(sourceName, targetName, relationData) {
   // 更新印象列表
   saveImpressionData()
 
-  // 异步保存到世界书 (不阻塞)
-  // 注意：这里我们只更新了内存中的一项，实际上应该更新世界书中的对应条目
-  // 但为了性能，我们可能不想每次都全量读写大JSON。
-  // 考虑到数据一致性，这里做一个简单的全量同步作为 MVP 实现。
-  // 如果性能有问题，后续可以优化 saveSocialData 只做局部更新。
-  fetchSocialData().then(data => {
-    if (!data) data = {}
-    if (!data[sourceName]) data[sourceName] = { relationships: {} }
-    if (!data[sourceName].relationships) data[sourceName].relationships = {}
-    data[sourceName].relationships[targetName] = newRelation
-    saveSocialData(data).catch(e => console.error('Failed to sync relationship to worldbook', e))
-  })
+  // 使用防抖机制异步保存到世界书（避免短时间内多次写入导致竞态覆盖）
+  const partialData = {}
+  partialData[sourceName] = { relationships: { [targetName]: newRelation } }
+  debounceSaveSocialData(partialData)
 }
 
 /**
@@ -556,13 +671,10 @@ export function updatePersonality(charName, personality) {
     }
     gameStore.npcRelationships[charName].personality = newPersonality
     
-    // 同步到世界书
-    fetchSocialData().then(data => {
-      if (!data) data = {}
-      if (!data[charName]) data[charName] = {}
-      data[charName].personality = newPersonality
-      saveSocialData(data).catch(e => console.error('Failed to sync personality to worldbook', e))
-    })
+    // 使用防抖机制同步到世界书
+    const partialData = {}
+    partialData[charName] = { personality: newPersonality }
+    debounceSaveSocialData(partialData)
   }
 }
 
@@ -578,13 +690,10 @@ export function updateGoals(charName, goals) {
     }
     gameStore.npcRelationships[charName].goals = newGoals
 
-    // 同步到世界书
-    fetchSocialData().then(data => {
-      if (!data) data = {}
-      if (!data[charName]) data[charName] = {}
-      data[charName].goals = newGoals
-      saveSocialData(data).catch(e => console.error('Failed to sync goals to worldbook', e))
-    })
+    // 使用防抖机制同步到世界书
+    const partialData = {}
+    partialData[charName] = { goals: newGoals }
+    debounceSaveSocialData(partialData)
   }
 }
 
@@ -600,13 +709,10 @@ export function updatePriorities(charName, priorities) {
     }
     gameStore.npcRelationships[charName].priorities = newPriorities
 
-    // 同步到世界书
-    fetchSocialData().then(data => {
-      if (!data) data = {}
-      if (!data[charName]) data[charName] = {}
-      data[charName].priorities = newPriorities
-      saveSocialData(data).catch(e => console.error('Failed to sync priorities to worldbook', e))
-    })
+    // 使用防抖机制同步到世界书
+    const partialData = {}
+    partialData[charName] = { priorities: newPriorities }
+    debounceSaveSocialData(partialData)
   }
 }
 
