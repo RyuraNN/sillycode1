@@ -7,6 +7,7 @@
 
 import { formatScoresCompact, formatRankingForAI } from './academicEngine'
 import { SUBJECT_MAP } from '../data/academicData'
+import { getCurrentBookName } from './worldbookHelper'
 
 /**
  * 生成学业信息的世界书注入文本
@@ -122,7 +123,7 @@ export function generateNpcAcademicBrief(npcName, store) {
  * @param {Object} store gameStore实例
  */
 export async function updateAcademicWorldbookEntry(store) {
-  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
+  if (typeof window.updateWorldbookWith !== 'function') {
     return
   }
 
@@ -130,8 +131,7 @@ export async function updateAcademicWorldbookEntry(store) {
   if (!text) return
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookName = books?.primary || (books?.additional && books.additional[0])
+    const bookName = getCurrentBookName()
     if (!bookName) return
 
     const entryName = '[TH_ExamResults] 最近考试成绩'

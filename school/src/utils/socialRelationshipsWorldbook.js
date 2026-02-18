@@ -5,6 +5,7 @@
  */
 
 import { DEFAULT_RELATIONSHIPS, DEFAULT_PERSONALITIES, DEFAULT_GOALS, DEFAULT_PRIORITIES } from '../data/relationshipData'
+import { getCurrentBookName } from './worldbookHelper'
 
 const ENTRY_NAME = '[Social_Data] 社交关系数据'
 const ENTRY_KEY = ['social_data_storage'] // 触发词，虽然禁用状态下不会触发，但保持规范
@@ -22,9 +23,8 @@ export async function ensureSocialDataWorldbook() {
 
   try {
     // 获取当前角色卡绑定的世界书名称
-    const books = window.getCharWorldbookNames('current')
-    const bookName = books?.primary || (books?.additional && books.additional[0])
-    
+    const bookName = getCurrentBookName()
+
     // 如果没有绑定任何世界书，返回默认数据
     if (!bookName) {
       console.warn('[SocialWorldbook] No worldbook bound to character, using default data')
@@ -77,8 +77,7 @@ export async function fetchSocialData() {
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookName = books?.primary || (books?.additional && books.additional[0])
+    const bookName = getCurrentBookName()
     if (!bookName) return null
 
     // 使用 getWorldbook 读取（与其他世界书系统一致，且能读取禁用条目的内容）
@@ -139,9 +138,8 @@ export async function saveSocialData(data) {
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookName = books?.primary || (books?.additional && books.additional[0])
-    
+    const bookName = getCurrentBookName()
+
     if (!bookName) {
       console.warn('[SocialWorldbook] No worldbook bound, cannot save data')
       return false

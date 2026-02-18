@@ -4,6 +4,7 @@
  */
 
 import { useGameStore } from '../stores/gameStore'
+import { getCurrentBookName as _getCurrentBookName } from './worldbookHelper'
 
 // 条目名称前缀
 const ENTRY_PREFIX = '[Jobs:'
@@ -13,9 +14,7 @@ const ENTRY_SUFFIX = ']兼职状态'
  * 获取当前绑定的世界书名称
  */
 function getCurrentBookName() {
-  if (typeof window.getCharWorldbookNames !== 'function') return null
-  const books = window.getCharWorldbookNames('current')
-  return books.primary || (books.additional && books.additional[0])
+  return _getCurrentBookName()
 }
 
 /**

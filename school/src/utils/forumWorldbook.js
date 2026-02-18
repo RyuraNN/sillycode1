@@ -4,6 +4,7 @@
  */
 
 import { useGameStore } from '../stores/gameStore'
+import { getCurrentBookName } from './worldbookHelper'
 
 // 世界书条目名前缀
 const FORUM_WORLDBOOK_PREFIX = '[Forum:'
@@ -160,8 +161,7 @@ export async function saveForumToWorldbook(posts, runId, limit = 20) {
 
   try {
     // 首先检查是否已有角色卡绑定的世界书
-    const charWorldbooks = await getCharWorldbookNames('current')
-    const primaryWorldbook = charWorldbooks.primary
+    const primaryWorldbook = getCurrentBookName()
 
     if (!primaryWorldbook) {
       console.warn('[ForumWorldbook] No primary worldbook found for current character')
@@ -233,14 +233,13 @@ export async function saveForumToWorldbook(posts, runId, limit = 20) {
  * @returns {Array|null} 帖子列表或null
  */
 export async function loadForumFromWorldbook(runId) {
-  if (typeof getCharWorldbookNames === 'undefined') {
-    console.warn('[ForumWorldbook] getCharWorldbookNames not available')
+  if (typeof getWorldbook === 'undefined') {
+    console.warn('[ForumWorldbook] Worldbook API not available')
     return null
   }
 
   try {
-    const charWorldbooks = await getCharWorldbookNames('current')
-    const primaryWorldbook = charWorldbooks.primary
+    const primaryWorldbook = getCurrentBookName()
 
     if (!primaryWorldbook) return null
 
@@ -298,13 +297,12 @@ function parseWorldbookContent(content) {
  * @param {string} runId 运行ID
  */
 export async function deleteForumWorldbook(runId) {
-  if (typeof getCharWorldbookNames === 'undefined') {
+  if (typeof updateWorldbookWith === 'undefined') {
     return false
   }
 
   try {
-    const charWorldbooks = await getCharWorldbookNames('current')
-    const primaryWorldbook = charWorldbooks.primary
+    const primaryWorldbook = getCurrentBookName()
 
     if (!primaryWorldbook) return false
 
@@ -346,14 +344,13 @@ export function generatePostId(existingPosts) {
  * @param {string} currentRunId 当前运行ID
  */
 export async function switchForumSlot(currentRunId) {
-  if (typeof getCharWorldbookNames === 'undefined') {
-    console.warn('[ForumWorldbook] getCharWorldbookNames not available')
+  if (typeof updateWorldbookWith === 'undefined') {
+    console.warn('[ForumWorldbook] Worldbook API not available')
     return
   }
 
   try {
-    const charWorldbooks = await getCharWorldbookNames('current')
-    const primaryWorldbook = charWorldbooks.primary
+    const primaryWorldbook = getCurrentBookName()
 
     if (!primaryWorldbook) {
       console.warn('[ForumWorldbook] No primary worldbook found')

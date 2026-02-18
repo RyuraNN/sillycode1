@@ -1,5 +1,6 @@
 import { useGameStore } from '../stores/gameStore'
 import { buildSystemPromptContent } from './prompts'
+import { getAllBookNames } from './worldbookHelper'
 
 // 独立的生图分析提示词
 export const IMAGE_ANALYSIS_PROMPT = `你是一位专业的AI画师助手。你的唯一任务是阅读剧情正文，识别适合生成插画的时刻，并输出精确的生图指令。
@@ -96,17 +97,10 @@ async function getWorldbookContent(name) {
  * 遍历所有绑定的世界书，查找名为 [变量解析] 的条目
  */
 async function getVariableParsingEntryContent() {
-  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.getWorldbook !== 'function') return ''
+  if (typeof window.getWorldbook !== 'function') return ''
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookNames = []
-    if (books && typeof books === 'object') {
-      if (books.primary) bookNames.push(books.primary)
-      if (Array.isArray(books.additional)) bookNames.push(...books.additional)
-    } else if (Array.isArray(books)) {
-      bookNames.push(...books)
-    }
+    const bookNames = getAllBookNames()
 
     for (const name of bookNames) {
       let entries
@@ -138,17 +132,9 @@ async function getVariableParsingEntryContent() {
  * @returns {Promise<string>}
  */
 async function getActiveWorldbooksContent() {
-  if (typeof window.getCharWorldbookNames !== 'function') return ''
-  
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookNames = []
-    if (books && typeof books === 'object') {
-      if (books.primary) bookNames.push(books.primary)
-      if (Array.isArray(books.additional)) bookNames.push(...books.additional)
-    } else if (Array.isArray(books)) {
-      bookNames.push(...books)
-    }
+    const bookNames = getAllBookNames()
+    if (bookNames.length === 0) return ''
 
     let content = ''
     for (const name of bookNames) {

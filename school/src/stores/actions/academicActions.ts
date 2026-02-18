@@ -101,20 +101,19 @@ export const academicActions = {
       const playerClassId = this.player.classId
       if (!classResults[playerClassId]) classResults[playerClassId] = {}
       
-      // 玩家成绩基于难度基准系统：
+      // 玩家成绩基于 sqrt 比值公式：
       // 难度基准: 高一=40, 高二=60, 高三=80
-      // 知识溢出 = subjects[key] - 难度基准
-      // 溢出=0 → 85分，正溢出增分，负溢出减分
+      // score = 14 + 68 * sqrt(knowledge / benchmark)
+      // knowledge=benchmark → 82分，开局(~60%benchmark) → ~60分
       const gradeYear = this.player.gradeYear || 1
       const difficultyBenchmark = gradeYear === 1 ? 40 : gradeYear === 2 ? 60 : 80
       
       const playerScores: Record<string, number> = {}
       for (const subjectKey of Object.keys(SUBJECT_MAP)) {
         const knowledge = (this.player.subjects as any)[subjectKey] || 15
-        const overflow = knowledge - difficultyBenchmark
-        
-        // 溢出=0 → 85分，每点溢出约2分影响
-        let score = 85 + overflow * 2
+        // 基于知识与难度基准的比值，sqrt提供递减收益
+        // knowledge=benchmark → 82分，低于benchmark时仍有合理分数
+        let score = 14 + 68 * Math.sqrt(knowledge / difficultyBenchmark)
         
         // IQ加成（IQ > 85时有额外加分）
         const iq = this.player.attributes?.iq || 60

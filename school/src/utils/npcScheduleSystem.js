@@ -16,6 +16,7 @@ import {
 } from './scheduleGenerator.js'
 import { getItem, mapData, getChildren } from '../data/mapData.js'
 import { autoSelectElectives, getCourseById } from '../data/coursePoolData.js'
+import { getCurrentBookName, getAllBookNames } from './worldbookHelper.js'
 
 // ==================== 辅助函数 ====================
 
@@ -2390,7 +2391,7 @@ export function setScheduleConfig(config) {
 }
 
 export async function saveScheduleToWorldbook() {
-  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
+  if (typeof window.updateWorldbookWith !== 'function') {
     console.warn('[NpcSchedule] Worldbook API not available')
     return false
   }
@@ -2442,9 +2443,8 @@ export async function saveScheduleToWorldbook() {
   }
   
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookName = books.primary || (books.additional && books.additional[0])
-    
+    const bookName = getCurrentBookName()
+
     if (!bookName) {
       console.warn('[NpcSchedule] No worldbook bound to current character')
       return false
@@ -2509,19 +2509,12 @@ export async function saveScheduleToWorldbook() {
 }
 
 export async function loadScheduleDataFromWorldbook() {
-  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.getWorldbook !== 'function') {
+  if (typeof window.getWorldbook !== 'function') {
     console.warn('[NpcSchedule] Worldbook API not available, using default templates')
     return false
   }
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookNames = []
-    if (books && typeof books === 'object') {
-      if (books.primary) bookNames.push(books.primary)
-      if (Array.isArray(books.additional)) bookNames.push(...books.additional)
-    } else if (Array.isArray(books)) {
-      bookNames.push(...books)
-    }
+    const bookNames = getAllBookNames()
     console.log('[NpcSchedule] Scanning worldbooks for schedule data:', bookNames)
     let templatesLoaded = false
     let modifiersLoaded = false

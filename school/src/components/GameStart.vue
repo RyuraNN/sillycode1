@@ -470,7 +470,15 @@ const initialStats = {
 const baseStats = computed(() => {
   // 深拷贝初始值
   const stats = JSON.parse(JSON.stringify(initialStats))
-  
+
+  // 根据年级调整初始学科知识（高年级学生已有更多知识积累）
+  const gradeYear = parseInt(formData.value.classId?.charAt(0)) || 1
+  const gradeSubjectBase = { 1: 18, 2: 27, 3: 37 }
+  const baseKnowledge = gradeSubjectBase[gradeYear] || 18
+  for (const key in stats.subjects) {
+    stats.subjects[key] = baseKnowledge
+  }
+
   // 辅助函数：应用数据
   const applyData = (data) => {
     if (!data) return
@@ -772,6 +780,16 @@ const confirmSignature = async () => {
     // 设置玩家班级并生成课表，这个函数会自动调用 joinClassGroup
     // 创建班级群并保存到世界书
     await gameStore.setPlayerClass(formData.value.classId)
+  }
+
+  // 根据年级设置基础学科知识（高年级学生已有更多知识积累）
+  {
+    const gradeYear = gameStore.player.gradeYear || 1
+    const gradeSubjectBase = { 1: 18, 2: 27, 3: 37 }
+    const baseKnowledge = gradeSubjectBase[gradeYear] || 18
+    for (const key in gameStore.player.subjects) {
+      gameStore.player.subjects[key] = baseKnowledge
+    }
   }
 
   // 辅助函数：应用自定义数据

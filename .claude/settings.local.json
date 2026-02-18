@@ -10,7 +10,10 @@
       "Bash(findstr:*)",
       "Bash(npx vue-tsc:*)",
       "mcp__ide__getDiagnostics",
-      "Bash(npx vite build)"
+      "Bash(npx vite build)",
+      "WebSearch",
+      "Bash(cd:*)",
+      "Bash(exit 0)"
     ]
   }
 }

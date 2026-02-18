@@ -4,6 +4,7 @@ import HomeLayout from './components/HomeLayout.vue'
 import { useGameStore } from './stores/gameStore'
 import { requestPersistence, clearAllData } from './utils/indexedDB'
 import { loadCoursePoolFromWorldbook } from './data/coursePoolData'
+import { isWorldbookAvailable, getCurrentBookName } from './utils/worldbookHelper'
 
 const gameStore = useGameStore()
 
@@ -20,55 +21,48 @@ const initTimedOut = ref(false)
 
 /**
  * 检测世界书 API 是否已就绪（名称 + 内容都已加载）
+ * @param {boolean} lenient - 宽松模式：只检查API和名称，不验证条目内容
  * @returns {Promise<boolean>}
  */
-async function checkWorldbookReady() {
+async function checkWorldbookReady(lenient = false) {
   try {
-    // 检查 API 函数是否存在
-    if (typeof window.getCharWorldbookNames !== 'function') {
-      console.log('[App] getCharWorldbookNames not available')
+    // 使用 helper 检查 API 可用性
+    if (!isWorldbookAvailable()) {
+      console.log('[App] Worldbook API not available')
       return false
     }
-    
-    if (typeof window.getWorldbook !== 'function') {
-      console.log('[App] getWorldbook not available')
+
+    // 尝试获取世界书名称（包括角色卡和聊天绑定）
+    const bookName = getCurrentBookName()
+
+    if (!bookName) {
+      console.log('[App] No worldbook bound (checked char + chat bindings)')
       return false
     }
-    
-    // 尝试获取世界书列表
-    const books = window.getCharWorldbookNames('current')
-    
-    // 检查是否能获取到有效的世界书
-    if (!books) {
-      console.log('[App] No worldbooks returned')
-      return false
+
+    // 宽松模式：有名称就算就绪（用户手动确认时使用）
+    if (lenient) {
+      console.log('[App] Lenient mode: worldbook name found, skipping content check')
+      return true
     }
-    
-    // 检查是否有 primary 或 additional 世界书
-    const hasPrimary = books.primary && books.primary.length > 0
-    const hasAdditional = books.additional && books.additional.length > 0
-    
-    if (!hasPrimary && !hasAdditional) {
-      console.log('[App] No bound worldbooks found')
-      return false
-    }
-    
-    // 【关键修复】不仅检查名称，还要验证世界书条目内容已实际加载
-    // SillyTavern 可能先注册了世界书名称，但条目内容尚未加载完毕
-    const bookName = books.primary || (books.additional && books.additional[0])
-    if (bookName) {
+
+    // 严格模式：验证世界书条目内容已实际加载
+    try {
       const entries = await window.getWorldbook(bookName)
       if (!entries || !Array.isArray(entries) || entries.length === 0) {
         console.log('[App] Worldbook names available but entries not yet loaded for:', bookName)
         return false
       }
       console.log(`[App] Worldbook "${bookName}" verified: ${entries.length} entries loaded`)
+    } catch (wbError) {
+      console.log(`[App] getWorldbook("${bookName}") threw error (content not ready?):`, wbError?.message || wbError)
+      return false
     }
-    
-    console.log('[App] Worldbook ready:', books)
+
+    console.log('[App] Worldbook ready:', bookName)
     return true
   } catch (e) {
-    console.log('[App] Error checking worldbook:', e)
+    console.log('[App] Error checking worldbook:', e?.message || e)
     return false
   }
 }
@@ -133,11 +127,19 @@ async function doInitialize() {
  * 用户点击确认按钮
  */
 async function onConfirmWorldbookReady() {
-  const ready = await checkWorldbookReady()
+  // 先严格检查
+  let ready = await checkWorldbookReady(false)
+  if (!ready) {
+    // 严格检查失败，尝试宽松检查（只要有世界书名称就行）
+    ready = await checkWorldbookReady(true)
+    if (ready) {
+      console.log('[App] Strict check failed but lenient check passed, proceeding with initialization')
+    }
+  }
   if (ready) {
     await doInitialize()
   } else {
-    initError.value = '世界书仍未加载完成，请稍后再试'
+    initError.value = '未检测到绑定的世界书。请确认角色卡已绑定世界书后重试。'
   }
 }
 

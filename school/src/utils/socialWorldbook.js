@@ -1,4 +1,5 @@
 import { useGameStore } from '../stores/gameStore'
+import { getCurrentBookName } from './worldbookHelper'
 
 const ENTRY_PREFIX = '[Social:'
 const MOMENT_PREFIX = '[Moment:'
@@ -25,17 +26,6 @@ function normalizeId(id) {
     return id.replace('npc_', 'char_')
   }
   return id
-}
-
-// 获取当前绑定的世界书名称
-function getCurrentBookName() {
-  if (typeof window.getCharWorldbookNames !== 'function') {
-    console.warn('[SocialWorldbook] Worldbook API not available')
-    return null
-  }
-  const books = window.getCharWorldbookNames('current')
-  // 优先使用 primary，如果没有则使用第一个 additional
-  return books.primary || (books.additional && books.additional[0])
 }
 
 // 解析条目内容 (支持 JSON 和 纯文本)

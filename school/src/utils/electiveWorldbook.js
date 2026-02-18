@@ -2,6 +2,7 @@ import { useGameStore } from '../stores/gameStore'
 import { getCourseById } from '../data/coursePoolData'
 import { seededRandom } from './random'
 import { getWeekdayChinese } from './scheduleGenerator'
+import { getCurrentBookName, isWorldbookAvailable } from './worldbookHelper'
 
 /**
  * 选修课世界书管理器
@@ -16,7 +17,7 @@ const ENTRY_PREFIX = '选修课_'
  * @returns {boolean}
  */
 function isWorldbookApiReady() {
-  return typeof window.getCharWorldbookNames === 'function' &&
+  return isWorldbookAvailable() &&
          typeof window.createWorldbookEntries === 'function' &&
          typeof window.deleteWorldbookEntries === 'function'
 }
@@ -26,19 +27,7 @@ function isWorldbookApiReady() {
  * @returns {string|null}
  */
 function getTargetWorldbookName() {
-  if (typeof window.getCharWorldbookNames !== 'function') return null
-  
-  try {
-    const books = window.getCharWorldbookNames('current')
-    if (books && typeof books === 'object') {
-      return books.primary || (Array.isArray(books.additional) ? books.additional[0] : null)
-    } else if (Array.isArray(books) && books.length > 0) {
-      return books[0]
-    }
-  } catch (e) {
-    console.warn('[ElectiveWorldbook] Error getting worldbook names:', e)
-  }
-  return null
+  return getCurrentBookName()
 }
 
 /**

@@ -1,6 +1,6 @@
 /**
  * 外卖系统世界书解析器
- * 
+ *
  * 世界书条目格式：
  * 条目名称包含 "[商品目录]" 标记
  * 
@@ -147,20 +147,14 @@ export function parseProductCatalog(content) {
  * @returns {Promise<Array|null>} 商品数组，失败返回null
  */
 export async function fetchProductCatalogFromWorldbook() {
-  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.getWorldbook !== 'function') {
+  if (typeof window.getWorldbook !== 'function') {
     console.warn('[DeliveryWorldbook] Worldbook API not available')
     return null
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookNames = []
-    if (books && typeof books === 'object') {
-      if (books.primary) bookNames.push(books.primary)
-      if (Array.isArray(books.additional)) bookNames.push(...books.additional)
-    } else if (Array.isArray(books)) {
-      bookNames.push(...books)
-    }
+    const { getAllBookNames } = await import('./worldbookHelper.js')
+    const bookNames = getAllBookNames()
 
     console.log('[DeliveryWorldbook] Scanning worldbooks for product catalog:', bookNames)
 

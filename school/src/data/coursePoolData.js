@@ -2,6 +2,7 @@
  * 课程池数据
  * 包含所有年级的必修课和选修课
  */
+import { getCurrentBookName, getAllBookNames } from '../utils/worldbookHelper'
 
 // ============ 选课倾向类型定义 ============
 
@@ -847,7 +848,7 @@ function parseCourseLine(line) {
  * 保存课程池到世界书
  */
 export async function saveCoursePoolToWorldbook() {
-  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
+  if (typeof window.updateWorldbookWith !== 'function') {
     console.warn('[CoursePool] Worldbook API not available')
     return false
   }
@@ -893,10 +894,8 @@ export async function saveCoursePoolToWorldbook() {
   })
   
   try {
-    const books = window.getCharWorldbookNames('current')
-    // 优先保存到当前主世界书
-    const bookName = books.primary || (books.additional && books.additional[0])
-    
+    const bookName = getCurrentBookName()
+
     if (!bookName) {
       console.warn('[CoursePool] No worldbook bound to current character')
       return false
@@ -948,20 +947,13 @@ export async function saveCoursePoolToWorldbook() {
  * @param {string} currentRunId 当前游戏存档ID (用于过滤)
  */
 export async function loadCoursePoolFromWorldbook(currentRunId) {
-  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.getWorldbook !== 'function') {
+  if (typeof window.getWorldbook !== 'function') {
     console.warn('[CoursePool] Worldbook API not available')
     return false
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookNames = []
-    if (books && typeof books === 'object') {
-      if (books.primary) bookNames.push(books.primary)
-      if (Array.isArray(books.additional)) bookNames.push(...books.additional)
-    } else if (Array.isArray(books)) {
-      bookNames.push(...books)
-    }
+    const bookNames = getAllBookNames()
 
     let foundContent = null
     

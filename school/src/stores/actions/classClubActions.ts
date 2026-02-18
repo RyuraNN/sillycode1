@@ -11,6 +11,7 @@ import { saveImpressionData, switchImpressionSlot, restoreImpressionWorldbookFro
 import { generateWeeklySchedule } from '../../utils/scheduleGenerator'
 import { generateCharId } from '../../data/relationshipData'
 import { createInitialPlayerState, createInitialGameTime, createInitialWorldState } from '../gameStoreState'
+import { getCurrentBookName } from '../../utils/worldbookHelper'
 
 export const classClubActions = {
   /**
@@ -134,10 +135,7 @@ export const classClubActions = {
       }
       
       // 确保所有社团都有 _bookName
-      const books = typeof window.getCharWorldbookNames === 'function' 
-        ? window.getCharWorldbookNames('current') 
-        : null
-      const defaultBookName = books?.primary || (books?.additional?.[0]) || null
+      const defaultBookName = getCurrentBookName()
       
       if (defaultBookName) {
         for (const [clubId, club] of Object.entries(this.allClubs)) {
@@ -588,10 +586,7 @@ export const classClubActions = {
     console.log(`[GameStore] Creating club ${clubId}: ${clubInfo.name}`)
 
     // 获取默认世界书名称（用于后续更新）
-    const books = typeof window.getCharWorldbookNames === 'function' 
-      ? window.getCharWorldbookNames('current') 
-      : null
-    const defaultBookName = books?.primary || (books?.additional?.[0]) || null
+    const defaultBookName = getCurrentBookName()
 
     const fullClubInfo: ClubData = {
       id: clubId,
@@ -730,10 +725,9 @@ export const classClubActions = {
     const startTime = Date.now()
     
     // 【防护】验证世界书内容确实已加载，避免在内容未就绪时执行写操作导致数据缺失
-    if (typeof window.getCharWorldbookNames === 'function' && typeof window.getWorldbook === 'function') {
+    if (typeof window.getWorldbook === 'function') {
       try {
-        const books = window.getCharWorldbookNames('current')
-        const bookName = books?.primary || (books?.additional && books.additional[0])
+        const bookName = getCurrentBookName()
         if (bookName) {
           const entries = await window.getWorldbook(bookName)
           if (!entries || !Array.isArray(entries) || entries.length === 0) {

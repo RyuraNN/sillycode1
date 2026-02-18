@@ -16,6 +16,7 @@
 import { ELECTIVE_PREFERENCES } from '../data/coursePoolData'
 import { DEFAULT_TEMPLATES } from './npcScheduleSystem'
 import { parseAcademicTag } from '../data/academicData'
+import { getAllBookNames, getCurrentBookName } from './worldbookHelper'
 
 // ==================== 社团数据格式规范 ====================
 /**
@@ -124,15 +125,7 @@ export async function fetchAcademicDataFromWorldbook() {
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookNames = []
-    if (books && typeof books === 'object') {
-      if (books.primary) bookNames.push(books.primary)
-      if (Array.isArray(books.additional)) bookNames.push(...books.additional)
-    } else if (Array.isArray(books)) {
-      bookNames.push(...books)
-    }
-
+    const bookNames = getAllBookNames()
     const academicData = {}
     const targetName = '[AcademicData] 全校学力数据库'
 
@@ -151,7 +144,7 @@ export async function fetchAcademicDataFromWorldbook() {
         const lines = entry.content.split('\n')
         for (const line of lines) {
           if (!line.trim() || line.startsWith('#')) continue
-          
+
           // 格式: 姓名|等级|潜力|特长列表
           const parts = line.split('|').map(s => s.trim())
           if (parts.length >= 3) {
@@ -159,7 +152,7 @@ export async function fetchAcademicDataFromWorldbook() {
             const level = parts[1] || 'avg'
             const potential = parts[2] || 'medium'
             const traits = parts[3] ? parts[3].split(/[,，]/).map(t => t.trim()).filter(t => t) : []
-            
+
             academicData[name] = { level, potential, traits }
           }
         }
@@ -185,9 +178,8 @@ export async function updateAcademicDataInWorldbook(allStudents) {
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookName = books.primary || (books.additional && books.additional[0])
-    
+    const bookName = getCurrentBookName()
+
     if (!bookName) return false
 
     console.log('[WorldbookParser] Updating academic database...')
@@ -198,13 +190,13 @@ export async function updateAcademicDataInWorldbook(allStudents) {
     for (const s of allStudents) {
       // 过滤掉没有学力数据的
       if (!s.academicProfile) continue
-      
+
       // 确保是对象
       let ap = s.academicProfile
       if (typeof ap === 'string') {
         ap = parseAcademicTag(ap)
       }
-      
+
       // 检查是否是默认值，如果是则不保存以节省空间
       // 默认: level=avg, potential=medium, traits=[]
       if (ap.level === 'avg' && ap.potential === 'medium' && (!ap.traits || ap.traits.length === 0)) {
@@ -221,7 +213,7 @@ export async function updateAcademicDataInWorldbook(allStudents) {
     await window.updateWorldbookWith(bookName, (entries) => {
       const newEntries = [...entries]
       const index = newEntries.findIndex(e => e.name === entryName)
-      
+
       const entry = {
         name: entryName,
         content: content,
@@ -238,10 +230,10 @@ export async function updateAcademicDataInWorldbook(allStudents) {
       } else {
         newEntries.push(entry)
       }
-      
+
       return newEntries
     })
-    
+
     console.log(`[WorldbookParser] Academic database updated with ${count} records`)
     return true
 
@@ -318,14 +310,7 @@ export async function fetchClubDataFromWorldbook(currentRunId) {
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookNames = []
-    if (books && typeof books === 'object') {
-      if (books.primary) bookNames.push(books.primary)
-      if (Array.isArray(books.additional)) bookNames.push(...books.additional)
-    } else if (Array.isArray(books)) {
-      bookNames.push(...books)
-    }
+    const bookNames = getAllBookNames()
 
     console.log('[WorldbookParser] Scanning worldbooks for club data:', bookNames, 'currentRunId:', currentRunId)
 
@@ -349,7 +334,7 @@ export async function fetchClubDataFromWorldbook(currentRunId) {
           const tagContent = match[1]
           let clubId = tagContent
           let runId = null
-          
+
           if (tagContent.includes(':')) {
             const parts = tagContent.split(':')
             clubId = parts[0]
@@ -542,11 +527,9 @@ export async function createClubInWorldbook(clubInfo, runId) {
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    console.log(`[WorldbookParser] Available worldbooks:`, books)
-    
-    const bookName = books?.primary || (books?.additional && books.additional[0])
-    
+    const bookName = getCurrentBookName()
+    console.log(`[WorldbookParser] Available worldbook:`, bookName)
+
     if (!bookName) {
       console.warn('[WorldbookParser] No worldbook available - no primary or additional books found')
       return null
@@ -569,7 +552,7 @@ export async function createClubInWorldbook(clubInfo, runId) {
     }
 
     let updateSuccess = false
-    
+
     await window.updateWorldbookWith(bookName, (entries) => {
       const newEntries = [...entries]
       
@@ -755,9 +738,8 @@ export async function ensureClubExistsInWorldbook(clubData, runId) {
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookName = books.primary || (books.additional && books.additional[0])
-    
+    const bookName = getCurrentBookName()
+
     if (!bookName) return false
 
     // 【修复】无论是否创建新条目，都要确保 _bookName 被设置
@@ -901,14 +883,7 @@ export async function syncClubWorldbookState(currentRunId) {
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookNames = []
-    if (books && typeof books === 'object') {
-      if (books.primary) bookNames.push(books.primary)
-      if (Array.isArray(books.additional)) bookNames.push(...books.additional)
-    } else if (Array.isArray(books)) {
-      bookNames.push(...books)
-    }
+    const bookNames = getAllBookNames()
 
     console.log(`[WorldbookParser] Syncing club state for run ${currentRunId}`)
 
@@ -1083,15 +1058,7 @@ export async function fetchClassDataFromWorldbook() {
 
   try {
     // 1. 获取当前角色绑定的世界书
-    const books = window.getCharWorldbookNames('current')
-    
-    const bookNames = []
-    if (books && typeof books === 'object') {
-      if (books.primary) bookNames.push(books.primary)
-      if (Array.isArray(books.additional)) bookNames.push(...books.additional)
-    } else if (Array.isArray(books)) {
-      bookNames.push(...books)
-    }
+    const bookNames = getAllBookNames()
 
     console.log('[WorldbookParser] Scanning worldbooks:', bookNames)
 
@@ -1145,9 +1112,8 @@ export async function setPlayerClass(classId) {
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookName = books.primary || (books.additional && books.additional[0])
-    
+    const bookName = getCurrentBookName()
+
     if (!bookName) return
 
     console.log(`[WorldbookParser] Setting player class to ${classId} in worldbook: ${bookName}`)
@@ -1278,9 +1244,8 @@ export async function deleteClassDataFromWorldbook(classId) {
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookName = books.primary || (books.additional && books.additional[0])
-    
+    const bookName = getCurrentBookName()
+
     if (!bookName) return false
 
     console.log(`[WorldbookParser] Deleting class ${classId} from worldbook: ${bookName}`)
@@ -1319,9 +1284,8 @@ export async function updateClassDataInWorldbook(classId, classData, excludeAcad
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookName = books.primary || (books.additional && books.additional[0])
-    
+    const bookName = getCurrentBookName()
+
     if (!bookName) return false
 
     console.log(`[WorldbookParser] Updating class ${classId} in worldbook: ${bookName}`)
@@ -1483,14 +1447,7 @@ export async function fetchMapDataFromWorldbook() {
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookNames = []
-    if (books && typeof books === 'object') {
-      if (books.primary) bookNames.push(books.primary)
-      if (Array.isArray(books.additional)) bookNames.push(...books.additional)
-    } else if (Array.isArray(books)) {
-      bookNames.push(...books)
-    }
+    const bookNames = getAllBookNames()
 
     console.log('[WorldbookParser] Scanning worldbooks for map data:', bookNames)
 
@@ -1617,14 +1574,7 @@ export async function injectSmartKeysToWorldbook() {
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookNames = []
-    if (books && typeof books === 'object') {
-      if (books.primary) bookNames.push(books.primary)
-      if (Array.isArray(books.additional)) bookNames.push(...books.additional)
-    } else if (Array.isArray(books)) {
-      bookNames.push(...books)
-    }
+    const bookNames = getAllBookNames()
 
     console.log('[WorldbookParser] Starting smart key injection...')
 
@@ -1773,9 +1723,8 @@ export async function updateCompactMapEntry() {
     })
 
     // 4. 创建或更新世界书条目
-    const books = window.getCharWorldbookNames('current')
-    const bookName = books.primary || (books.additional && books.additional[0])
-    
+    const bookName = getCurrentBookName()
+
     if (!bookName) return
 
     console.log('[WorldbookParser] Updating compact map entry...')
@@ -2087,8 +2036,7 @@ export async function setupTeacherClassEntries(teachingClasses, homeroomClassId,
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookName = books?.primary || (books?.additional && books.additional[0])
+    const bookName = getCurrentBookName()
     if (!bookName) return false
 
     console.log(`[WorldbookParser] Setting up teacher class entries for run ${runId}`)
@@ -2186,14 +2134,7 @@ export async function syncClassWorldbookState(currentRunId, allClassData) {
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookNames = []
-    if (books && typeof books === 'object') {
-      if (books.primary) bookNames.push(books.primary)
-      if (Array.isArray(books.additional)) bookNames.push(...books.additional)
-    } else if (Array.isArray(books)) {
-      bookNames.push(...books)
-    }
+    const bookNames = getAllBookNames()
 
     // 当前存档中实际存在的班级ID集合
     const currentClassIds = new Set(Object.keys(allClassData || {}))
@@ -2300,8 +2241,7 @@ export async function createRunSpecificClassEntry(classId, classData, runId, pla
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookName = books?.primary || (books?.additional && books.additional[0])
+    const bookName = getCurrentBookName()
     if (!bookName) return false
 
     console.log(`[WorldbookParser] Creating run-specific class entry [Class:${classId}:${runId}]`)
@@ -2396,14 +2336,7 @@ export async function setVariableParsingWorldbookStatus(enabled) {
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookNames = []
-    if (books && typeof books === 'object') {
-      if (books.primary) bookNames.push(books.primary)
-      if (Array.isArray(books.additional)) bookNames.push(...books.additional)
-    } else if (Array.isArray(books)) {
-      bookNames.push(...books)
-    }
+    const bookNames = getAllBookNames()
 
     const targetEntryName = '[变量解析]'
     let found = false
@@ -2492,9 +2425,8 @@ export async function updateStaffRosterInWorldbook(staffList, runId) {
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookName = books.primary || (books.additional && books.additional[0])
-    
+    const bookName = getCurrentBookName()
+
     if (!bookName) return false
 
     console.log(`[WorldbookParser] Updating staff roster in worldbook: ${bookName}`)
@@ -2575,14 +2507,7 @@ export async function saveMapDataToWorldbook(mapDataList) {
   }
 
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookNames = []
-    if (books && typeof books === 'object') {
-      if (books.primary) bookNames.push(books.primary)
-      if (Array.isArray(books.additional)) bookNames.push(...books.additional)
-    } else if (Array.isArray(books)) {
-      bookNames.push(...books)
-    }
+    const bookNames = getAllBookNames()
 
     console.log('[WorldbookParser] Saving map data to worldbook...')
 

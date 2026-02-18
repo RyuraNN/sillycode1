@@ -3,6 +3,8 @@
  * 用于管理校园公告APP中的校规数据与世界书同步
  */
 
+import { getCurrentBookName } from './worldbookHelper'
+
 // 世界书条目名前缀
 const SCHOOL_RULE_WORLDBOOK_PREFIX = '[SchoolRules:'
 
@@ -96,8 +98,7 @@ export async function saveSchoolRulesToWorldbook(rules, runId) {
 
   try {
     // 获取角色卡绑定的世界书
-    const charWorldbooks = await getCharWorldbookNames('current')
-    const primaryWorldbook = charWorldbooks.primary
+    const primaryWorldbook = getCurrentBookName()
 
     if (!primaryWorldbook) {
       console.warn('[SchoolRuleWorldbook] No primary worldbook found for current character')
@@ -166,13 +167,12 @@ export async function saveSchoolRulesToWorldbook(rules, runId) {
  * @param {string} runId 运行ID
  */
 export async function deleteSchoolRuleWorldbook(runId) {
-  if (typeof getCharWorldbookNames === 'undefined') {
+  if (typeof updateWorldbookWith === 'undefined') {
     return false
   }
 
   try {
-    const charWorldbooks = await getCharWorldbookNames('current')
-    const primaryWorldbook = charWorldbooks.primary
+    const primaryWorldbook = getCurrentBookName()
 
     if (!primaryWorldbook) return false
 
@@ -197,14 +197,13 @@ export async function deleteSchoolRuleWorldbook(runId) {
  * @param {string} currentRunId 当前运行ID
  */
 export async function switchSchoolRuleSlot(currentRunId) {
-  if (typeof getCharWorldbookNames === 'undefined') {
-    console.warn('[SchoolRuleWorldbook] getCharWorldbookNames not available')
+  if (typeof updateWorldbookWith === 'undefined') {
+    console.warn('[SchoolRuleWorldbook] Worldbook API not available')
     return
   }
 
   try {
-    const charWorldbooks = await getCharWorldbookNames('current')
-    const primaryWorldbook = charWorldbooks.primary
+    const primaryWorldbook = getCurrentBookName()
 
     if (!primaryWorldbook) {
       console.warn('[SchoolRuleWorldbook] No primary worldbook found')

@@ -7,6 +7,7 @@
  */
 
 import { useGameStore } from '../stores/gameStore'
+import { getAllBookNames } from './worldbookHelper'
 
 // ==================== 事件库解析 ====================
 
@@ -600,19 +601,12 @@ export async function loadEventLibraryFromWorldbook() {
     console.warn('[EventSystem] Worldbook API not available')
     return null
   }
-  
+
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookNames = []
-    if (books && typeof books === 'object') {
-      if (books.primary) bookNames.push(books.primary)
-      if (Array.isArray(books.additional)) bookNames.push(...books.additional)
-    } else if (Array.isArray(books)) {
-      bookNames.push(...books)
-    }
-    
+    const bookNames = getAllBookNames()
+
     console.log('[EventSystem] Scanning worldbooks for event data:', bookNames)
-    
+
     for (const name of bookNames) {
       let entries
       try {
@@ -649,15 +643,8 @@ export async function loadEventTriggersFromWorldbook() {
   }
   
   try {
-    const books = window.getCharWorldbookNames('current')
-    const bookNames = []
-    if (books && typeof books === 'object') {
-      if (books.primary) bookNames.push(books.primary)
-      if (Array.isArray(books.additional)) bookNames.push(...books.additional)
-    } else if (Array.isArray(books)) {
-      bookNames.push(...books)
-    }
-    
+    const bookNames = getAllBookNames()
+
     for (const name of bookNames) {
       let entries
       try {
