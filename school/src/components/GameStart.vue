@@ -692,6 +692,7 @@ const confirmSignature = async () => {
   gameStore.player.backgroundStory = formData.value.backgroundStory
   gameStore.player.newGameGuideTurns = 3 // 初始化新游戏引导回合数
   gameStore.player.role = playerRole.value // 保存角色类型
+  gameStore.player.gameMode = formData.value.gameMode // 保存游戏模式
 
   // 教师模式数据保存
   if (playerRole.value === 'teacher') {
@@ -707,14 +708,19 @@ const confirmSignature = async () => {
 
     // 注册自定义课程
     if (teacherData.value.customCourses) {
+      const registeredCourses = []
       teacherData.value.customCourses.forEach(course => {
-        registerCustomCourse({
+        const registered = registerCustomCourse({
           ...course,
           teacher: formData.value.name,
           teacherGender: formData.value.gender,
           runId: gameStore.currentRunId
         })
+        // 保存注册后的完整课程对象（包含生成的ID）
+        registeredCourses.push(registered)
       })
+      // 更新 customCourses 为注册后的完整对象
+      teacherData.value.customCourses = registeredCourses
       // 保存到世界书
       await saveCoursePoolToWorldbook()
     }

@@ -168,6 +168,7 @@ export interface PlayerStats {
   gender: 'male' | 'female'
   characterFeature: string
   backgroundStory: string
+  gameMode: string
   level: number
   hp: number
   maxHp: number

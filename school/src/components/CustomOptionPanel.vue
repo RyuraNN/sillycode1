@@ -159,7 +159,6 @@ const updateField = (field, value) => {
             :disabled="remainingPoints <= 0"
           >+</button>
         </div>
-        <div class="attr-potential">潜力: 85</div>
       </div>
     </div>
 

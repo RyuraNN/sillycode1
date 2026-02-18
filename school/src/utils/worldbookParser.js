@@ -73,6 +73,9 @@ function parsePersonInfo(text, defaultRole = 'student') {
         // 匹配学力标签 (如 academic:poor/very_high:math_weak,music_strong)
         const academicStr = content.substring('academic:'.length)
         person.academicProfile = parseAcademicTag(academicStr)
+      } else if (content.startsWith('note:')) {
+        // 匹配备注标签
+        person.notes = content.substring('note:'.length)
       } else if (ELECTIVE_PREFERENCES[content]) {
         // 匹配选课倾向ID (如 music, sports)
         person.electivePreference = content
@@ -1214,7 +1217,12 @@ function formatPerson(p, includeAcademic = true) {
       text += `[academic:${level}/${potential}${traits}]`
     }
   }
-  
+
+  // 添加备注标签
+  if (p.notes) {
+    text += `[note:${p.notes}]`
+  }
+
   return text
 }
 

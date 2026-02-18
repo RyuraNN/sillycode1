@@ -342,13 +342,54 @@ export const buildTeacherSchedulePrompt = (gameTime, weeklySchedule, gameState) 
         if (gameState && gameState.npcElectiveSelections) {
           const students = []
           for (const [npcName, selections] of Object.entries(gameState.npcElectiveSelections)) {
-            // 检查是否选择了该课程（匹配课程ID或课程名）
+            // 检查是否选择了该课程
+            // 匹配逻辑：
+            // 1. 优先用 courseId 精确匹配
+            // 2. 如果 courseId 不存在或未匹配，尝试用课程名称匹配
+            // 3. 对于自定义课程，courseId 可能包含课程名称，进行模糊匹配
             // @ts-ignore
-            if (Array.isArray(selections) && (
-              selections.includes(info.subject) || 
-              (info.courseId && selections.includes(info.courseId))
-            )) {
-              students.push(npcName)
+            if (Array.isArray(selections)) {
+              let matched = false
+
+              // 策略1: courseId 精确匹配
+              if (info.courseId && selections.includes(info.courseId)) {
+                matched = true
+              }
+
+              // 策略2: 课程名称精确匹配（处理 courseId 就是课程名的情况）
+              if (!matched && selections.includes(info.subject)) {
+                matched = true
+              }
+
+              // 策略3: 模糊匹配（处理自定义课程ID包含课程名的情况）
+              if (!matched && info.courseId) {
+                // 检查 courseId 是否包含课程名
+                if (info.courseId.includes(info.subject)) {
+                  matched = selections.some(sel => sel.includes(info.subject))
+                }
+                // 反向检查：selections 中的ID是否包含课程名
+                if (!matched) {
+                  matched = selections.some(sel =>
+                    sel.includes(info.subject) ||
+                    (typeof sel === 'string' && info.courseId.includes(sel))
+                  )
+                }
+              }
+
+              // 策略4: 通过 getCourseById 反查课程名称进行匹配
+              if (!matched && typeof window !== 'undefined' && window.getCourseById) {
+                for (const selId of selections) {
+                  const course = window.getCourseById(selId)
+                  if (course && course.name === info.subject) {
+                    matched = true
+                    break
+                  }
+                }
+              }
+
+              if (matched) {
+                students.push(npcName)
+              }
             }
           }
           if (students.length > 0) {
@@ -749,13 +790,16 @@ export const buildSystemPromptContent = (gameState) => {
           details += `Personality: Order(${order}), Altruism(${altruism}), Tradition(${tradition}), Peace(${peace})\n`
         }
 
-        // 查找班级
+        // 查找班级和学力档案
         let className = 'Unknown'
+        let npcAcademicProfile = null
         if (allClassData) {
           for (const [id, data] of Object.entries(allClassData)) {
             // @ts-ignore
-            if (data.students && data.students.some(s => s.name === npc.name)) {
+            const foundStudent = data.students && data.students.find(s => s.name === npc.name)
+            if (foundStudent) {
               className = data.name || id
+              npcAcademicProfile = foundStudent.academicProfile || null
               break
             }
           }
@@ -795,6 +839,41 @@ export const buildSystemPromptContent = (gameState) => {
         // 备注信息
         if (gameState.characterNotes && gameState.characterNotes[npc.name]) {
           details += `Notes: ${gameState.characterNotes[npc.name]}\n`
+        }
+
+        // 目标
+        if (npcData && npcData.goals) {
+          const g = npcData.goals
+          const goalParts = []
+          if (g.immediate) goalParts.push(`Immediate: ${g.immediate}`)
+          if (g.shortTerm) goalParts.push(`Short-term: ${g.shortTerm}`)
+          if (g.longTerm) goalParts.push(`Long-term: ${g.longTerm}`)
+          if (goalParts.length > 0) {
+            details += `Goals: ${goalParts.join('; ')}\n`
+          }
+        }
+
+        // 优先级
+        if (npcData && npcData.priorities) {
+          const p = npcData.priorities
+          const hasPriority = Object.values(p).some(v => v !== 0 && v !== undefined)
+          if (hasPriority) {
+            details += `Priorities: Academics(${p.academics || 0}), Social(${p.social || 0}), Hobbies(${p.hobbies || 0}), Survival(${p.survival || 0}), Club(${p.club || 0})\n`
+          }
+        }
+
+        // 学力档案
+        const apSource = npcAcademicProfile || (npc.academicProfile && typeof npc.academicProfile === 'object' ? npc.academicProfile : null)
+        if (apSource) {
+          const ap = apSource
+          const isDefault = ap.level === 'avg' && ap.potential === 'medium' && (!ap.traits || ap.traits.length === 0)
+          if (!isDefault) {
+            let apStr = `Level: ${ap.level || 'avg'}, Potential: ${ap.potential || 'medium'}`
+            if (ap.traits && ap.traits.length > 0) {
+              apStr += `, Traits: [${ap.traits.join(', ')}]`
+            }
+            details += `Academic: ${apStr}\n`
+          }
         }
 
         // 关系链

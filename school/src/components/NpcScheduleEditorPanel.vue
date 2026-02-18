@@ -70,12 +70,15 @@ onUnmounted(() => {
 })
 
 const loadConfig = () => {
-  // 深拷贝默认配置
-  editData.timePeriods = JSON.parse(JSON.stringify(TIME_PERIODS))
-  editData.templates = JSON.parse(JSON.stringify(DEFAULT_TEMPLATES))
-  editData.roleMapping = JSON.parse(JSON.stringify(DEFAULT_ROLE_TEMPLATE_MAP))
-  editData.weatherModifiers = JSON.parse(JSON.stringify(WEATHER_MODIFIERS))
-  editData.moodModifiers = JSON.parse(JSON.stringify(MOOD_MODIFIERS))
+  // 从运行时配置加载（包含用户自定义的模板），再合并默认模板作为兜底
+  const config = getScheduleConfig()
+  editData.timePeriods = JSON.parse(JSON.stringify(config.timePeriods || TIME_PERIODS))
+  // 合并：默认模板 + 用户自定义模板（用户自定义优先）
+  const mergedTemplates = { ...DEFAULT_TEMPLATES, ...(config.templates || {}) }
+  editData.templates = JSON.parse(JSON.stringify(mergedTemplates))
+  editData.roleMapping = JSON.parse(JSON.stringify(config.roleMapping || DEFAULT_ROLE_TEMPLATE_MAP))
+  editData.weatherModifiers = JSON.parse(JSON.stringify(config.weatherModifiers || WEATHER_MODIFIERS))
+  editData.moodModifiers = JSON.parse(JSON.stringify(config.moodModifiers || MOOD_MODIFIERS))
 }
 
 // ==================== 时间段管理 ====================

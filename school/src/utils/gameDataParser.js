@@ -150,18 +150,25 @@ export const analyzeChanges = (data) => {
 }
 
 /**
- * 深度合并对象，target 优先
+ * 深度合并对象，source 合并到 target
  * @param {Object} target - 目标对象
  * @param {Object} source - 源对象
  * @returns {Object} 合并后的对象
  */
 export const deepMerge = (target, source) => {
+  if (!target) target = {}
   for (const key in source) {
-    if (source[key] instanceof Object && key in target) {
-      Object.assign(source[key], deepMerge(target[key], source[key]))
+    if (source.hasOwnProperty(key)) {
+      if (
+        source[key] && typeof source[key] === 'object' && !Array.isArray(source[key]) &&
+        target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])
+      ) {
+        target[key] = deepMerge(target[key], source[key])
+      } else {
+        target[key] = source[key]
+      }
     }
   }
-  Object.assign(target || {}, source)
   return target
 }
 

@@ -40,7 +40,8 @@ export const snapshotActions = {
       eventChecks: this.eventChecks || { lastDaily: '', lastWeekly: '', lastMonthly: '' },
       clubApplication: this.clubApplication || null,
       clubRejection: this.clubRejection || null,
-      clubInvitation: this.clubInvitation || null
+      clubInvitation: this.clubInvitation || null,
+      npcElectiveSelections: this.npcElectiveSelections || {}
       // 注意：characterNotes, customCoursePool, eventLibrary, eventTriggers 为全局或外部数据，不回溯
     }))
 
@@ -98,7 +99,8 @@ export const snapshotActions = {
       eventChecks: this.eventChecks || { lastDaily: '', lastWeekly: '', lastMonthly: '' },
       clubApplication: this.clubApplication || null,
       clubRejection: this.clubRejection || null,
-      clubInvitation: this.clubInvitation || null
+      clubInvitation: this.clubInvitation || null,
+      npcElectiveSelections: this.npcElectiveSelections || {}
       // 注意：characterNotes, customCoursePool, eventLibrary, eventTriggers 为全局或外部数据，不回溯
     }))
 
@@ -236,7 +238,8 @@ export const snapshotActions = {
     this.clubApplication = (state as any).clubApplication || null
     this.clubRejection = (state as any).clubRejection || null
     this.clubInvitation = (state as any).clubInvitation || null
-    
+    this.npcElectiveSelections = (state as any).npcElectiveSelections || {}
+
     this.currentRunId = state.currentRunId || Date.now().toString(36)
     this.currentFloor = state.currentFloor || 0
     
@@ -307,7 +310,8 @@ export const snapshotActions = {
       eventChecks: this.eventChecks || { lastDaily: '', lastWeekly: '', lastMonthly: '' },
       clubApplication: this.clubApplication || null,
       clubRejection: this.clubRejection || null,
-      clubInvitation: this.clubInvitation || null
+      clubInvitation: this.clubInvitation || null,
+      npcElectiveSelections: this.npcElectiveSelections || {}
     }))
   },
 
@@ -456,40 +460,47 @@ export const snapshotActions = {
   cleanupSnapshots(this: any, chatLog: ChatLogEntry[]): void {
     const limit = this.settings.snapshotLimit || 10
     const totalLogs = chatLog.length
-    
+
     if (totalLogs <= limit) return
-    
+
     // 清理超出范围的快照（只清理内联快照，不清理存档快照）
     const cutoffIndex = totalLogs - limit
-    
+
+    // 第一步：收集所有仍在使用的基准快照楼层
+    const activeBaseFloors = new Set<number>()
+    for (let i = cutoffIndex; i < totalLogs; i++) {
+      const log = chatLog[i]
+      if (log.snapshot) {
+        if ((log.snapshot as any)._isBase) {
+          activeBaseFloors.add((log.snapshot as any)._floor)
+        } else if (isDeltaSnapshot(log.snapshot)) {
+          activeBaseFloors.add((log.snapshot as DeltaSnapshot)._baseFloor)
+        }
+      }
+    }
+
+    // 第二步：清理快照，但保留仍被依赖的基准快照
     for (let i = 0; i < cutoffIndex; i++) {
       const log = chatLog[i]
       if (log.snapshot) {
         // 如果是基准快照，检查是否还有增量快照依赖它
         if ((log.snapshot as any)._isBase) {
           const baseFloor = (log.snapshot as any)._floor
-          let hasDependent = false
-          
-          // 检查后续是否有增量快照依赖这个基准
-          for (let j = i + 1; j < totalLogs; j++) {
-            const laterLog = chatLog[j]
-            if (laterLog.snapshot && isDeltaSnapshot(laterLog.snapshot) && 
-                (laterLog.snapshot as DeltaSnapshot)._baseFloor === baseFloor) {
-              hasDependent = true
-              break
-            }
+
+          // 如果这个基准快照仍被保留范围内的快照依赖，则不删除
+          if (activeBaseFloors.has(baseFloor)) {
+            console.log(`[Snapshot] Keeping base snapshot at floor ${baseFloor} (still in use)`)
+            continue
           }
-          
-          // 如果没有依赖，可以清理
-          if (!hasDependent) {
-            delete log.snapshot
-          }
+
+          // 否则可以安全删除
+          delete log.snapshot
         } else {
           // 非基准快照可以直接清理
           delete log.snapshot
         }
       }
-      
+
       // 同样清理 preVariableSnapshot
       if (log.preVariableSnapshot) {
         delete log.preVariableSnapshot
@@ -607,7 +618,9 @@ export const snapshotActions = {
     this.clubRejection = data.clubRejection || null
     // @ts-ignore
     this.clubInvitation = data.clubInvitation || null
-    
+    // @ts-ignore
+    this.npcElectiveSelections = data.npcElectiveSelections || {}
+
     // @ts-ignore
     if (data.currentRunId !== undefined && data.currentRunId !== null) this.currentRunId = data.currentRunId
     // @ts-ignore

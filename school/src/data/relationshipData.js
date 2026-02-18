@@ -14,6 +14,9 @@ export const RELATIONSHIP_GROUPS = {
   senior: { name: '前辈', color: '#9C27B0' },
   junior: { name: '后辈', color: '#00BCD4' },
   teacher_student: { name: '师生', color: '#795548' },
+  rival: { name: '对手', color: '#F44336' },
+  neighbor: { name: '邻居', color: '#8BC34A' },
+  colleague: { name: '同事', color: '#3F51B5' },
   other: { name: '其他', color: '#9E9E9E' }
 }
 
@@ -1512,10 +1515,10 @@ export function calculateRelationshipScore(relationship) {
  */
 export function getEmotionalState(relationship, playerGender = 'unknown', targetGender = 'unknown') {
   if (!relationship) return { text: '陌生人', class: 'level-stranger' }
-  
+
   const { intimacy = 0, trust = 0, passion = 0, hostility = 0 } = relationship
   const score = calculateRelationshipScore(relationship)
-  
+
   // 检查是否允许浪漫关系
   // 如果双方均为男性，则不显示浪漫相关的状态
   // 当性别为 unknown 时，保守处理：不阻止浪漫（因为无法确定）
@@ -1523,26 +1526,47 @@ export function getEmotionalState(relationship, playerGender = 'unknown', target
   const tGender = String(targetGender || 'unknown').toLowerCase().trim()
   const isRomanceBlocked = (pGender === 'male' && tGender === 'male')
 
-  // 特殊状态判断 (优先级高)
+  // === 极端负面状态 (最高优先级) ===
   if (hostility >= 80) return { text: '死敌', class: 'level-hostile-extreme' }
+  if (hostility >= 80 && intimacy <= -50) return { text: '不共戴天', class: 'level-hostile-extreme' }
   if (!isRomanceBlocked && hostility >= 40 && passion >= 50) return { text: '爱恨交织', class: 'level-complex' }
+  if (isRomanceBlocked && hostility >= 40 && passion >= 50) return { text: '纠葛', class: 'level-complex' }
+  if (hostility >= 60 && trust <= -30) return { text: '仇敌', class: 'level-hostile' }
   if (hostility >= 50) return { text: '敌对', class: 'level-hostile' }
-  
-  // 正向状态判断
+  if (hostility >= 30 && intimacy <= -20) return { text: '嫌恶', class: 'level-dislike' }
+
+  // === 浪漫状态 (仅非双男) ===
   if (!isRomanceBlocked && intimacy >= 80 && trust >= 80 && passion >= 70) return { text: '灵魂伴侣', class: 'level-soulmate' }
   if (!isRomanceBlocked && intimacy >= 70 && trust >= 70 && passion >= 50) return { text: '恋人', class: 'level-lover' }
-  if (!isRomanceBlocked && passion >= 70 && intimacy < 40) return { text: '迷恋', class: 'level-crush' } // 单相思/憧憬
-  
+  if (!isRomanceBlocked && passion >= 60 && intimacy >= 50 && trust < 50) return { text: '暧昧', class: 'level-crush' }
+  if (!isRomanceBlocked && passion >= 70 && intimacy < 40) return { text: '迷恋', class: 'level-crush' }
+  if (!isRomanceBlocked && passion >= 40 && intimacy >= 30 && trust >= 30) return { text: '心动', class: 'level-crush' }
+
+  // === 双男高passion替代状态（纯友谊/竞争向） ===
+  if (isRomanceBlocked && intimacy >= 80 && passion >= 50) return { text: '莫逆之交', class: 'level-best' }
+  if (isRomanceBlocked && passion >= 60 && intimacy >= 40) return { text: '肝胆相照', class: 'level-good' }
+  if (isRomanceBlocked && passion >= 40 && intimacy >= 30) return { text: '意气相投', class: 'level-friend' }
+
+  // === 正面深层关系 ===
   if (intimacy >= 80 && trust >= 80) return { text: '挚友', class: 'level-best' }
-  if (intimacy >= 60 && trust < 40) return { text: '损友', class: 'level-bad-friend' } 
+  if (intimacy >= 70 && trust >= 70) return { text: '知己', class: 'level-best' }
+  if (trust >= 80 && intimacy >= 50) return { text: '至交', class: 'level-best' }
+
+  // === 特殊关系 ===
+  if (intimacy >= 60 && trust < 30) return { text: '损友', class: 'level-bad-friend' }
   if (trust >= 70 && intimacy < 40) return { text: '可靠伙伴', class: 'level-partner' }
-  
-  // 基础
+  if (intimacy >= 50 && trust >= 50 && hostility >= 20) return { text: '亦敌亦友', class: 'level-complex' }
+  if (trust <= -30 && intimacy >= 30) return { text: '利用关系', class: 'level-bad-friend' }
+  if (hostility >= 20 && passion >= 30 && intimacy < 20) return { text: '宿敌', class: 'level-hostile' }
+
+  // === 基础关系 ===
   if (score >= 60) return { text: '好友', class: 'level-good' }
   if (score >= 30) return { text: '朋友', class: 'level-friend' }
   if (score >= 10) return { text: '熟人', class: 'level-known' }
+  if (score >= 0) return { text: '普通', class: 'level-stranger' }
+  if (score >= -30) return { text: '冷淡', class: 'level-cold' }
   if (score < -30) return { text: '厌恶', class: 'level-dislike' }
-  
+
   return { text: '普通', class: 'level-stranger' }
 }
 

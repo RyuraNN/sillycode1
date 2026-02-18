@@ -200,9 +200,9 @@ async function onSkipCacheAndContinue() {
 }
 
 onMounted(async () => {
-  // 自动轮询等待世界书就绪（逐步递增间隔，最多约 18 秒）
+  // 自动轮询等待世界书就绪（逐步递增间隔，最多约 30 秒）
   // SillyTavern 加载世界书条目内容需要时间，不能仅凭名称就判定就绪
-  const pollDelays = [300, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000]
+  const pollDelays = [300, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5000]
   
   for (const delay of pollDelays) {
     const ready = await checkWorldbookReady()

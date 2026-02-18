@@ -132,6 +132,16 @@ let scrollDebounceTimer = null
 const currentGenerationId = ref(0)
 const imageGenerationCache = new Map()
 const completedImages = new Map()
+const IMAGE_CACHE_LIMIT = 50
+
+// 安全地添加到图片缓存，超出限制时淘汰最旧的
+const addToImageCache = (key, value) => {
+  if (completedImages.size >= IMAGE_CACHE_LIMIT) {
+    const firstKey = completedImages.keys().next().value
+    completedImages.delete(firstKey)
+  }
+  completedImages.set(key, value)
+}
 
 // Visual Viewport 处理
 const inputBarOffset = ref(0)
@@ -351,7 +361,7 @@ const retryImageGeneration = async (prompt, reqId, logIndex) => {
     const base64Img = await requestImageGeneration(prompt, '', null, null)
     const imgId = 'img_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)
     await saveAndCache(imgId, base64Img)
-    completedImages.set(prompt, { id: imgId, base64: base64Img })
+    addToImageCache(prompt, { id: imgId, base64: base64Img })
     
     const refHtml = `<image-ref id="${imgId}" prompt="${prompt}" />`
     const placeholderRegex = new RegExp(`<div id="${reqId}"[^>]*>[\\s\\S]*?<\\/div>`, 'i')
@@ -395,7 +405,7 @@ const handleImageRegenerate = async (newPrompt) => {
     const base64Img = await requestImageGeneration(newPrompt, '', null, null)
     const newImgId = 'img_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)
     await saveAndCache(newImgId, base64Img)
-    completedImages.set(newPrompt, { id: newImgId, base64: base64Img })
+    addToImageCache(newPrompt, { id: newImgId, base64: base64Img })
     
     const refHtml = `<image-ref id="${newImgId}" prompt="${newPrompt}" history="${newHistory}" />`
     const placeholderRegex = new RegExp(`<div id="${reqId}"[^>]*>[\\s\\S]*?<\\/div>`, 'i')
@@ -601,7 +611,7 @@ const sendMessage = async () => {
                     .then(async (base64Img) => {
                       const imgId = 'img_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)
                       await saveAndCache(imgId, base64Img)
-                      completedImages.set(prompt, { id: imgId, base64: base64Img })
+                      addToImageCache(prompt, { id: imgId, base64: base64Img })
 
                       const refHtml = `<image-ref id="${imgId}" prompt="${prompt}" />`
                       
@@ -1187,7 +1197,7 @@ const processAIResponse = async (response) => {
           if (targetLog) {
             const imgId = 'img_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)
             await saveAndCache(imgId, base64Img)
-            completedImages.set(req.prompt, { id: imgId, base64: base64Img })
+            addToImageCache(req.prompt, { id: imgId, base64: base64Img })
 
             const refHtml = `<image-ref id="${imgId}" prompt="${req.prompt}" />`
             
@@ -1722,8 +1732,10 @@ onUnmounted(() => {
     inputBarObserver.disconnect()
   }
   cleanupImageCache()
-  // 清理内容缓存
+  // 清理所有缓存
   contentRenderCache.clear()
+  imageGenerationCache.clear()
+  completedImages.clear()
   if (scrollDebounceTimer) {
     clearTimeout(scrollDebounceTimer)
   }

@@ -5,71 +5,85 @@
 import { getTermInfo } from '../../utils/scheduleGenerator'
 import { updateAllNpcLocations, initializeScheduleSystem } from '../../utils/npcScheduleSystem'
 
+// 时间推进锁，防止递归调用
+let _isAdvancingTime = false
+
 export const timeActions = {
   /**
    * 推进时间 (minutes)
    */
   advanceTime(this: any, minutes: number) {
-    const previousDay = this.gameTime.day
-    
-    const currentDate = new Date(
-      this.gameTime.year,
-      this.gameTime.month - 1,
-      this.gameTime.day,
-      this.gameTime.hour,
-      this.gameTime.minute
-    )
-
-    currentDate.setMinutes(currentDate.getMinutes() + minutes)
-
-    this.gameTime.year = currentDate.getFullYear()
-    this.gameTime.month = currentDate.getMonth() + 1
-    this.gameTime.day = currentDate.getDate()
-    this.gameTime.hour = currentDate.getHours()
-    this.gameTime.minute = currentDate.getMinutes()
-
-    const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-    this.gameTime.weekday = weekdays[currentDate.getDay()]
-    
-    console.log(`[GameStore] Time advanced by ${minutes}m -> ${this.gameTime.year}-${this.gameTime.month}-${this.gameTime.day} ${this.gameTime.hour}:${this.gameTime.minute} (${this.gameTime.weekday})`)
-
-    this.updateWeatherForecast()
-    this.updateCurrentWeather()
-    this.checkWeatherChange()
-    
-    this.checkEventTriggers()
-    this.updateEvents()
-
-    // 检查学年进级
-    if (this.checkYearProgression) {
-      this.checkYearProgression()
+    // 防止递归调用（事件处理中可能再次触发时间推进）
+    if (_isAdvancingTime) {
+      console.warn('[GameStore] advanceTime called recursively, skipping')
+      return
     }
+    _isAdvancingTime = true
 
-    // 日期变化时：学业成长 + 考试检查
-    if (this.gameTime.day !== previousDay) {
-      if (this.updateDailyAcademicGrowth) {
-        this.updateDailyAcademicGrowth()
+    try {
+      const previousDay = this.gameTime.day
+
+      const currentDate = new Date(
+        this.gameTime.year,
+        this.gameTime.month - 1,
+        this.gameTime.day,
+        this.gameTime.hour,
+        this.gameTime.minute
+      )
+
+      currentDate.setMinutes(currentDate.getMinutes() + minutes)
+
+      this.gameTime.year = currentDate.getFullYear()
+      this.gameTime.month = currentDate.getMonth() + 1
+      this.gameTime.day = currentDate.getDate()
+      this.gameTime.hour = currentDate.getHours()
+      this.gameTime.minute = currentDate.getMinutes()
+
+      const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+      this.gameTime.weekday = weekdays[currentDate.getDay()]
+
+      console.log(`[GameStore] Time advanced by ${minutes}m -> ${this.gameTime.year}-${this.gameTime.month}-${this.gameTime.day} ${this.gameTime.hour}:${this.gameTime.minute} (${this.gameTime.weekday})`)
+
+      this.updateWeatherForecast()
+      this.updateCurrentWeather()
+      this.checkWeatherChange()
+
+      this.checkEventTriggers()
+      this.updateEvents()
+
+      // 检查学年进级
+      if (this.checkYearProgression) {
+        this.checkYearProgression()
       }
-      if (this.checkExamTrigger) {
-        const examSchedule = this.checkExamTrigger()
-        if (examSchedule && this.conductExam) {
-          const record = this.conductExam(examSchedule.type)
-          if (record) {
-            this.addCommand(`[系统] ${examSchedule.label}已结束，成绩已生成。`)
+
+      // 日期变化时：学业成长 + 考试检查
+      if (this.gameTime.day !== previousDay) {
+        if (this.updateDailyAcademicGrowth) {
+          this.updateDailyAcademicGrowth()
+        }
+        if (this.checkExamTrigger) {
+          const examSchedule = this.checkExamTrigger()
+          if (examSchedule && this.conductExam) {
+            const record = this.conductExam(examSchedule.type)
+            if (record) {
+              this.addCommand(`[系统] ${examSchedule.label}已结束，成绩已生成。`)
+            }
           }
         }
       }
-    }
-    
-    // 更新NPC位置（每小时更新一次，内部有缓存机制）
-    this.updateNpcLocations()
-    
-    const delivered = this.checkDeliveries()
-    if (delivered && delivered.length > 0) {
-      delivered.forEach((order: any) => {
-        const itemNames = order.items.map((i: any) => i.productName).join(', ')
-        this.addCommand(`[系统] 外卖已送达: ${itemNames}`)
-      })
+
+      // 更新NPC位置（每小时更新一次，内部有缓存机制）
+      this.updateNpcLocations()
+
+      const delivered = this.checkDeliveries()
+      if (delivered && delivered.length > 0) {
+        delivered.forEach((order: any) => {
+          const itemNames = order.items.map((i: any) => i.productName).join(', ')
+          this.addCommand(`[系统] 外卖已送达: ${itemNames}`)
+        })
+      }
+    } finally {
+      _isAdvancingTime = false
     }
   },
 

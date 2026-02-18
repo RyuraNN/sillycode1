@@ -968,6 +968,11 @@ onUnmounted(() => {
   color: #455A64;
 }
 
+.level-cold {
+  background: #ECEFF1;
+  color: #78909C;
+}
+
 .relationship-value {
   font-size: 12px;
   color: #e74c3c;

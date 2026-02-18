@@ -28,6 +28,7 @@ export function createInitialState(): GameState {
       gender: 'male',
       characterFeature: '',
       backgroundStory: '',
+      gameMode: 'normal',
       level: 1,
       hp: 100,
       maxHp: 100,

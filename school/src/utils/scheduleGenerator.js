@@ -608,11 +608,11 @@ export function generateIndependentTeacherSchedule(teacherInfo, currentDate, all
         // 如果该科目是选修课，跳过必修课排课逻辑
         if (electiveNames.has(subject)) return
 
-        // 恢复排课频率：每门课每周 1 节，有 50% 概率加 1 节
-        // 这样既保证了必修课的存在感，又不会填满所有空位
+        // 大学风格排课：每门课每周 1 节，仅 30% 概率加 1 节
+        // 这样课表更稀疏，符合大学课表特点
         let sessions = 1
-        if (random() > 0.5) sessions += 1
-        
+        if (random() > 0.7) sessions += 1
+
         for (let i = 0; i < sessions; i++) {
           requiredTasks.push({ classId, subject, type: 'required' })
         }
@@ -679,9 +679,11 @@ export function generateIndependentTeacherSchedule(teacherInfo, currentDate, all
   
   if (electiveMap.size > 0) {
     electiveMap.forEach((courseInfo) => {
-      // 每门选修课每周保底 2 节
-      let sessions = 2
-      
+      // 大学风格排课：每门选修课每周 1 节，有 40% 概率加 1 节
+      // 这样选修课也不会太满，更符合大学课表
+      let sessions = 1
+      if (random() > 0.6) sessions += 1
+
       for (let i = 0; i < sessions; i++) {
         const availableSlots = []
         weekdays.forEach(day => {
@@ -690,14 +692,14 @@ export function generateIndependentTeacherSchedule(teacherInfo, currentDate, all
             if (schedule[day][idx].isEmpty) availableSlots.push({ day, index: idx })
           }
         })
-        
+
         if (availableSlots.length > 0) {
           const slotInfo = availableSlots[Math.floor(random() * availableSlots.length)]
           const slot = schedule[slotInfo.day][slotInfo.index]
-          
+
           slot.subject = courseInfo.name
           slot.className = '选修班' // 通用名称
-          
+
           // 确定地点：优先使用课程自定义地点，否则随机
           let locName, locId
           // 只要有自定义location就使用，不再排除 'classroom'
@@ -705,7 +707,7 @@ export function generateIndependentTeacherSchedule(teacherInfo, currentDate, all
              locId = courseInfo.location
              // 尝试从映射表获取中文名，如果没有则直接使用ID (可能是中文名或未知ID)
              locName = LOCATION_NAMES[locId] || locId
-             
+
              // 如果是 'classroom' 这种通用ID，尝试获取具体教室
              if (locId === 'classroom') {
                 const randLoc = getRandomLocation(courseInfo.name, 'universal')
@@ -717,7 +719,7 @@ export function generateIndependentTeacherSchedule(teacherInfo, currentDate, all
              locId = randLoc.locationId
              locName = randLoc.locationName
           }
-          
+
           slot.location = locName
           slot.locationId = locId
           slot.isEmpty = false

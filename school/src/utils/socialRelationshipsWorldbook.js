@@ -72,7 +72,7 @@ export async function ensureSocialDataWorldbook() {
  * @returns {Promise<Object|null>}
  */
 export async function fetchSocialData() {
-  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.getContext !== 'function') {
+  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.getWorldbook !== 'function') {
     return null
   }
 
@@ -81,17 +81,13 @@ export async function fetchSocialData() {
     const bookName = books?.primary || (books?.additional && books.additional[0])
     if (!bookName) return null
 
-    // 获取上下文以读取世界书内容
-    // 注意：updateWorldbookWith 不会返回内容，我们需要手动查找
-    const context = await window.getContext()
-    const worldbooks = context.worldInfo || []
-    const book = worldbooks.find(b => b.name === bookName)
-    
-    if (book && book.entries) {
-      const entry = Object.values(book.entries).find(e => e.name === ENTRY_NAME || (e.comment && e.comment === ENTRY_NAME))
-      if (entry && entry.content) {
-        return JSON.parse(entry.content)
-      }
+    // 使用 getWorldbook 读取（与其他世界书系统一致，且能读取禁用条目的内容）
+    const entries = await window.getWorldbook(bookName)
+    if (!entries || !Array.isArray(entries)) return null
+
+    const entry = entries.find(e => e.name === ENTRY_NAME || (e.comment && e.comment === ENTRY_NAME))
+    if (entry && entry.content) {
+      return JSON.parse(entry.content)
     }
     return null
   } catch (e) {

@@ -28,10 +28,11 @@
         <span class="tab-label">社团</span>
         <span v-if="joinedClubsCount > 0" class="tab-badge">{{ joinedClubsCount }}</span>
       </div>
-      <div 
-        class="tab-item" 
+      <div
+        class="tab-item"
         :class="{ active: activeTab === 'grades' }"
         @click="activeTab = 'grades'"
+        v-if="gameStore.player.role !== 'teacher'"
       >
         <span class="tab-icon">📊</span>
         <span class="tab-label">成绩</span>
@@ -717,7 +718,57 @@
         </div>
       </div>
 
-      <!-- 技能列表 -->
+      <!-- 教师：教学信息 -->
+      <template v-if="gameStore.player.role === 'teacher'">
+        <div class="skills-section">
+          <div class="section-title">
+            <span class="section-icon">🏫</span>
+            <span>教学信息</span>
+          </div>
+          <div class="teacher-info-list">
+            <div class="teacher-info-item">
+              <span class="teacher-info-label">教授班级</span>
+              <span class="teacher-info-value">{{ gameStore.player.teachingClasses?.length ? gameStore.player.teachingClasses.join('、') : '无' }}</span>
+            </div>
+            <div class="teacher-info-item">
+              <span class="teacher-info-label">教授科目</span>
+              <span class="teacher-info-value">{{ gameStore.player.teachingSubjects?.length ? gameStore.player.teachingSubjects.join('、') : '无' }}</span>
+            </div>
+            <div class="teacher-info-item">
+              <span class="teacher-info-label">选修课程</span>
+              <span class="teacher-info-value">{{ gameStore.player.teachingElectives?.length ? gameStore.player.teachingElectives.join('、') : '无' }}</span>
+            </div>
+            <div class="teacher-info-item">
+              <span class="teacher-info-label">指导社团</span>
+              <span class="teacher-info-value">{{ gameStore.player.advisorClubs?.length ? gameStore.player.advisorClubs.join('、') : '无' }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="skills-section">
+          <div class="section-title">
+            <span class="section-icon">🎨</span>
+            <span>个人技能</span>
+          </div>
+          <div class="skills-grid">
+            <div v-for="(level, key) in gameStore.player.skills" :key="key" class="skill-item">
+              <div class="skill-header">
+                <span class="skill-name">{{ skillNames[key] || key }}</span>
+                <span class="skill-level">Lv.{{ level }}</span>
+              </div>
+              <div class="skill-progress-bg">
+                <div
+                  class="skill-progress-bar skill-bar"
+                  :style="{ width: `${gameStore.player.skillExps[key] || 0}%` }"
+                ></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- 学生：学科 + 职业技能 -->
+      <template v-else>
       <div class="skills-section">
         <div class="section-title">
           <span class="section-icon">📚</span>
@@ -759,6 +810,7 @@
           </div>
         </div>
       </div>
+      </template>
     </div>
   </div>
 </template>
@@ -1850,6 +1902,13 @@ onMounted(async () => {
 .skill-progress-bar { height: 100%; border-radius: 3px; transition: width 0.3s ease; }
 .subject-bar { background: linear-gradient(90deg, #4caf50, #8bc34a); }
 .skill-bar { background: linear-gradient(90deg, #2196f3, #03a9f4); }
+
+/* 教师信息列表 */
+.teacher-info-list { display: flex; flex-direction: column; gap: 10px; }
+.teacher-info-item { display: flex; align-items: baseline; gap: 8px; padding: 8px 12px; background: #f5f7fa; border-radius: 8px; border-left: 3px solid #1e3c72; }
+.teacher-info-label { font-size: 12px; color: #888; min-width: 60px; flex-shrink: 0; }
+.teacher-info-value { font-size: 13px; color: #333; font-weight: 500; word-break: break-all; }
+.teacher-card .card-header { background: linear-gradient(135deg, #2a5298 0%, #1e3c72 100%); border-bottom-color: #90caf9; }
 
 /* 论坛内容区域 */
 .forum-content { height: 100%; }

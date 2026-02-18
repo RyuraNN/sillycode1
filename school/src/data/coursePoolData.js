@@ -1282,8 +1282,13 @@ export function getCourseById(courseId) {
     if (data.required) allCourses.push(...data.required)
     if (data.electives) allCourses.push(...data.electives)
   })
-  
+
   return allCourses.find(c => c.id === courseId) || null
+}
+
+// 暴露到全局，供 prompts.js 使用
+if (typeof window !== 'undefined') {
+  window.getCourseById = getCourseById
 }
 
 /**
@@ -1342,9 +1347,9 @@ export function registerCustomCourse(courseData) {
     teacher: courseData.teacher,
     teacherGender: courseData.teacherGender || 'female',
     origin: '玩家自定义',
-    location: 'classroom',
+    location: courseData.location || 'classroom', // 使用传入的location
     type: courseData.type, // 'required' | 'elective'
-    availableFor: [], 
+    availableFor: [],
     preference: courseData.preference,
     runId: courseData.runId // 绑定存档ID
   }
