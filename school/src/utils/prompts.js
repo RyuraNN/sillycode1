@@ -288,6 +288,7 @@ AI可以使用以下标签来操作论坛（天华通APP）：
 - 回复: <forum_reply post_id="post_xxx" from="作者">回复内容</forum_reply>
 - 点赞: <forum_like post_id="post_xxx" from="用户名" />
 可用版块: 校园杂谈、学习交流、都市传说、失物招领、社团招新、二手交易
+注意：不要重复输出世界书中已有的帖子，只输出新帖子和新回复。已存在的帖子会被系统自动过滤。
 `
 
   return prompt

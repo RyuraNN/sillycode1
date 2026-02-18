@@ -845,21 +845,51 @@ export async function parseSocialTags(rawText) {
   }
 
   // 14-17. 论坛相关
+  // 辅助函数：计算两个字符串的相似度（基于最长公共子序列比率）
+  const calcSimilarity = (a, b) => {
+    if (!a || !b) return 0
+    if (a === b) return 1
+    const shorter = a.length < b.length ? a : b
+    const longer = a.length < b.length ? b : a
+    if (longer.length === 0) return 1
+    // 简化版：基于共有字符比率
+    const shorterChars = new Set(shorter)
+    let matchCount = 0
+    for (const ch of longer) {
+      if (shorterChars.has(ch)) matchCount++
+    }
+    return matchCount / longer.length
+  }
+
   const forumPostRegex = /<forum_post\s+([^>]+)>(.*?)<\/forum_post>/gs
   let forumPostMatch
   while ((forumPostMatch = forumPostRegex.exec(text)) !== null) {
     const attrs = parseAttributes(forumPostMatch[1])
     const content = forumPostMatch[2].trim()
-    
+
     if (attrs.board && attrs.title && attrs.from) {
-      // 去重检查：如果最近已存在相同内容的帖子，则跳过
-      const isDuplicate = gameStore.player.forum.posts.some(p => 
-        p.board === attrs.board && 
-        p.title === attrs.title && 
-        p.author === attrs.from && 
-        p.content === content &&
-        (Date.now() - p.timestamp < 300000) // 5分钟内的重复贴视为同一个
+      // 多层去重检查
+      // 层1：精确匹配（标题+作者+内容完全一致），无时间限制
+      const isExactDuplicate = gameStore.player.forum.posts.some(p =>
+        p.title === attrs.title &&
+        p.author === attrs.from &&
+        p.content === content
       )
+
+      // 层2：同作者同标题（AI可能微调了内容但本质是同一帖子）
+      const isTitleAuthorDuplicate = !isExactDuplicate && gameStore.player.forum.posts.some(p =>
+        p.title === attrs.title &&
+        p.author === attrs.from
+      )
+
+      // 层3：内容高度相似（同作者，内容相似度>0.8）
+      const isContentSimilar = !isExactDuplicate && !isTitleAuthorDuplicate && gameStore.player.forum.posts.some(p =>
+        p.author === attrs.from &&
+        p.board === attrs.board &&
+        calcSimilarity(p.content, content) > 0.8
+      )
+
+      const isDuplicate = isExactDuplicate || isTitleAuthorDuplicate || isContentSimilar
 
       if (!isDuplicate) {
         const newPost = {
@@ -877,35 +907,49 @@ export async function parseSocialTags(rawText) {
         gameStore.player.forum.posts.unshift(newPost)
         await saveForumToWorldbook(gameStore.player.forum.posts, gameStore.currentRunId, gameStore.settings.forumWorldbookLimit)
       } else {
-        console.log(`[MessageParser] Duplicate forum post detected, skipping: ${attrs.title}`)
+        const reason = isExactDuplicate ? 'exact' : isTitleAuthorDuplicate ? 'title+author' : 'content-similar'
+        console.log(`[MessageParser] Duplicate forum post detected (${reason}), skipping: ${attrs.title}`)
       }
     }
   }
 
+  // 收集本轮所有回复和点赞，最后统一保存
+  let forumChanged = false
+
   const forumReplyRegex = /<forum_reply\s+([^>]+)>(.*?)<\/forum_reply>/gs
   let forumReplyMatch
+  // 记录本轮已处理的回复（同作者对同帖子只保留第一条）
+  const replyDedup = new Set()
   while ((forumReplyMatch = forumReplyRegex.exec(text)) !== null) {
     const attrs = parseAttributes(forumReplyMatch[1])
     const content = forumReplyMatch[2].trim()
-    
+
     if (attrs.post_id && attrs.from) {
       const postId = attrs.post_id
+      // 本轮内同作者对同帖子只取第一条回复
+      const batchKey = `${postId}::${attrs.from}`
+      if (replyDedup.has(batchKey)) {
+        console.log(`[MessageParser] Same-batch duplicate reply from ${attrs.from} to ${postId}, skipping`)
+        continue
+      }
+
       const post = gameStore.player.forum.posts.find(p => p.id === postId)
       if (post) {
-        // 去重检查：该帖子下是否已有完全相同的回复
-        const isDuplicateReply = post.replies && post.replies.some(r => 
-          r.author === attrs.from && r.content === content
+        // 去重检查：精确匹配 或 同作者+内容高度相似
+        const isDuplicateReply = post.replies && post.replies.some(r =>
+          r.author === attrs.from && (r.content === content || calcSimilarity(r.content, content) > 0.8)
         )
 
         if (!isDuplicateReply) {
           if (!post.replies) post.replies = []
           post.replies.push({ author: attrs.from, content: content })
-          
+          replyDedup.add(batchKey)
+          forumChanged = true
+
           if (post.author === gameStore.player.name) {
             const idx = gameStore.player.forum.pendingCommands.findIndex(cmd => cmd.type === 'post' && cmd.post.id === postId)
             if (idx > -1) gameStore.player.forum.pendingCommands.splice(idx, 1)
           }
-          await saveForumToWorldbook(gameStore.player.forum.posts, gameStore.currentRunId, gameStore.settings.forumWorldbookLimit)
         } else {
           console.log(`[MessageParser] Duplicate forum reply detected, skipping`)
         }
@@ -917,20 +961,27 @@ export async function parseSocialTags(rawText) {
   let forumLikeMatch
   while ((forumLikeMatch = forumLikeRegex.exec(text)) !== null) {
     const attrs = parseAttributes(forumLikeMatch[1])
-    
+
     if (attrs.post_id && attrs.from) {
       const postId = attrs.post_id
       const post = gameStore.player.forum.posts.find(p => p.id === postId)
       if (post) {
         if (!post.likes) post.likes = []
-        if (!post.likes.includes(attrs.from)) post.likes.push(attrs.from)
+        if (!post.likes.includes(attrs.from)) {
+          post.likes.push(attrs.from)
+          forumChanged = true
+        }
         if (post.author === gameStore.player.name) {
           const idx = gameStore.player.forum.pendingCommands.findIndex(cmd => cmd.type === 'post' && cmd.post.id === postId)
           if (idx > -1) gameStore.player.forum.pendingCommands.splice(idx, 1)
         }
-        await saveForumToWorldbook(gameStore.player.forum.posts, gameStore.currentRunId, gameStore.settings.forumWorldbookLimit)
       }
     }
+  }
+
+  // 回复和点赞统一保存一次
+  if (forumChanged) {
+    await saveForumToWorldbook(gameStore.player.forum.posts, gameStore.currentRunId, gameStore.settings.forumWorldbookLimit)
   }
 
   // 清理过期提醒
