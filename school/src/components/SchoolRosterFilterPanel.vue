@@ -65,6 +65,7 @@ const {
 
 // ==================== 状态管理 ====================
 const activeTab = ref('filter') // 'filter' | 'composer' | 'characterEditor'
+const filterSubTab = ref('student') // 'student' | 'teacher'
 const saving = ref(false)
 const isLocked = ref(false)
 
@@ -956,11 +957,18 @@ const composerGroupedCharacters = computed(() => {
         <div class="panel-content">
           <!-- 标签页1：筛选名册 -->
           <div v-if="activeTab === 'filter'" class="tab-content">
-            <div class="filter-layout">
-              <!-- 学生视图 -->
-              <div class="student-section">
-                <h3>学生名册</h3>
+            <div class="filter-tab-layout">
+              <div class="filter-sub-tabs">
+                <button :class="{ active: filterSubTab === 'student' }" @click="filterSubTab = 'student'">
+                  👩‍🎓 学生名册 ({{ totalStats.selected }}/{{ totalStats.total }})
+                </button>
+                <button :class="{ active: filterSubTab === 'teacher' }" @click="filterSubTab = 'teacher'">
+                  👩‍🏫 教师名册
+                </button>
+              </div>
+              <div class="filter-sub-content">
                 <RosterFilterView
+                  v-if="filterSubTab === 'student'"
                   :filtered-groups="filteredGroups"
                   :expanded-works="expandedWorks"
                   v-model:search-query="searchQuery"
@@ -977,12 +985,8 @@ const composerGroupedCharacters = computed(() => {
                   @toggle-student="toggleStudent"
                   @expand-all="expandAllWorks"
                 />
-              </div>
-
-              <!-- 教师视图 -->
-              <div class="teacher-section">
-                <h3>教师名册</h3>
                 <TeacherView
+                  v-if="filterSubTab === 'teacher'"
                   :teacher-groups="processedTeacherGroups"
                   :expanded-groups="expandedTeacherGroups"
                   v-model:view-mode="teacherViewMode"
@@ -1241,41 +1245,50 @@ const composerGroupedCharacters = computed(() => {
   overflow: hidden;
 }
 
-.filter-layout {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1px;
-  height: 100%;
-  background: #444;
-}
-
-.student-section,
-.teacher-section {
-  background: #1a1a1a;
+.filter-tab-layout {
   display: flex;
   flex-direction: column;
+  height: 100%;
+}
+
+.filter-sub-tabs {
+  display: flex;
+  gap: 0;
+  background: #222;
+  border-bottom: 1px solid #444;
+  padding: 0 20px;
+  flex-shrink: 0;
+}
+
+.filter-sub-tabs button {
+  padding: 10px 20px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #999;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.filter-sub-tabs button:hover {
+  color: #ccc;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.filter-sub-tabs button.active {
+  color: #4CAF50;
+  border-bottom-color: #4CAF50;
+  background: rgba(76, 175, 80, 0.08);
+}
+
+.filter-sub-content {
+  flex: 1;
   overflow: hidden;
 }
 
-.student-section h3,
-.teacher-section h3 {
-  margin: 0;
-  padding: 15px 20px;
-  background: #2a2a2a;
-  border-bottom: 1px solid #444;
-  color: #fff;
-  font-size: 16px;
-  font-weight: 500;
-}
-
 /* 响应式设计 */
-@media (max-width: 1200px) {
-  .filter-layout {
-    grid-template-columns: 1fr;
-    grid-template-rows: 1fr 1fr;
-  }
-}
-
 @media (max-width: 768px) {
   .roster-panel-overlay {
     padding: 0;
