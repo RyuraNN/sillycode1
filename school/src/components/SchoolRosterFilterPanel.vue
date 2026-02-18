@@ -424,7 +424,7 @@ const handleSave = async () => {
 
     // 4. 同步到世界书
     for (const [classId, classInfo] of Object.entries(fullRosterSnapshot.value)) {
-      await updateClassDataInWorldbook(classId, classInfo)
+      await updateClassDataInWorldbook(classId, classInfo, true)
     }
 
     // 5. 同步学力数据
@@ -990,6 +990,14 @@ const handleSaveComposer = async () => {
   if (!classId) return
 
   fullRosterSnapshot.value[classId] = deepClone(composerClassData.value)
+
+  // 同步 currentRosterState，把该班级所有学生标记为选中
+  const students = fullRosterSnapshot.value[classId].students || []
+  if (!currentRosterState.value[classId]) currentRosterState.value[classId] = {}
+  students.forEach(s => {
+    if (s.name) currentRosterState.value[classId][s.name] = true
+  })
+
   await loadCharacterPool(fullRosterSnapshot.value)
   updateAvailableCharacters()
   showMessage('班级变更已保存到快照，请点击顶部「保存」同步到世界书。')

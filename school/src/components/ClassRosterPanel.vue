@@ -421,7 +421,7 @@ const handleConfirm = async () => {
     }
 
     // 2. 同步到世界书
-    const success = await updateClassDataInWorldbook(props.classId, currentClass.value)
+    const success = await updateClassDataInWorldbook(props.classId, currentClass.value, true)
     if (success) {
       alert('修改已保存到世界书！')
       emit('close')

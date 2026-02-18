@@ -2263,7 +2263,7 @@ export async function createRunSpecificClassEntry(classId, classData, runId, pla
       const isPlayerClass = classId === playerClassId
       const strategyType = isPlayerClass ? 'constant' : 'selective'
 
-      const content = formatClassData(classData)
+      const content = formatClassData(classData, true)
       const entryName = `[Class:${classId}:${runId}] ${classData.name || classId}`
 
       if (existingRunIndex !== -1) {

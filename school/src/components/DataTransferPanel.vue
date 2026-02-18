@@ -275,7 +275,7 @@ const handleImport = async () => {
         gameStore.allClassData[classId] = classInfo
         // 如果开启同步，更新世界书
         if (syncToWorldbook.value) {
-          await updateClassDataInWorldbook(classId, classInfo)
+          await updateClassDataInWorldbook(classId, classInfo, true)
         }
       }
       // 同步到 IndexedDB
