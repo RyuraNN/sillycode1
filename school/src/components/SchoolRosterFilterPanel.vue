@@ -908,6 +908,92 @@ const composerGroupedCharacters = computed(() => {
     .forEach(k => sorted[k] = groups[k])
   return sorted
 })
+
+// ==================== 班级组合器操作 ====================
+const handleRemoveComposerHeadTeacher = () => {
+  composerClassData.value.headTeacher = { name: '', gender: 'female', origin: '', role: 'teacher' }
+  updateAvailableCharacters()
+}
+
+const handleRemoveComposerTeacher = (idx) => {
+  const teachers = composerClassData.value.teachers
+  if (Array.isArray(teachers) && idx >= 0 && idx < teachers.length) {
+    teachers.splice(idx, 1)
+    updateAvailableCharacters()
+  }
+}
+
+const handleRemoveComposerStudent = (idx) => {
+  const students = composerClassData.value.students
+  if (Array.isArray(students) && idx >= 0 && idx < students.length) {
+    students.splice(idx, 1)
+    updateAvailableCharacters()
+  }
+}
+
+const removeCharFromOtherClass = (charName) => {
+  for (const [classId, classInfo] of Object.entries(fullRosterSnapshot.value)) {
+    if (classId === composerTargetClass.value) continue
+
+    if (classInfo.headTeacher?.name === charName) {
+      classInfo.headTeacher = { name: '', gender: 'female', origin: '', role: 'teacher' }
+      return
+    }
+
+    if (Array.isArray(classInfo.teachers)) {
+      const idx = classInfo.teachers.findIndex(t => t.name === charName)
+      if (idx !== -1) { classInfo.teachers.splice(idx, 1); return }
+    }
+
+    if (Array.isArray(classInfo.students)) {
+      const idx = classInfo.students.findIndex(s => s.name === charName)
+      if (idx !== -1) { classInfo.students.splice(idx, 1); return }
+    }
+  }
+}
+
+const addCharToCurrentClass = (char) => {
+  if (char.role === 'teacher') {
+    if (char.isHeadTeacher && !composerClassData.value.headTeacher?.name) {
+      composerClassData.value.headTeacher = {
+        name: char.name, gender: char.gender || 'female',
+        origin: char.origin || '', role: 'teacher'
+      }
+    } else {
+      if (!Array.isArray(composerClassData.value.teachers)) composerClassData.value.teachers = []
+      composerClassData.value.teachers.push({
+        name: char.name, gender: char.gender || 'female',
+        origin: char.origin || '', subject: char.subject || '', role: 'teacher'
+      })
+    }
+  } else {
+    if (!Array.isArray(composerClassData.value.students)) composerClassData.value.students = []
+    composerClassData.value.students.push({
+      name: char.name, gender: char.gender || 'female',
+      origin: char.origin || '', role: char.role || 'student'
+    })
+  }
+  updateAvailableCharacters()
+}
+
+const handleAddCharacterToClass = (char) => {
+  if (char.isAssigned) {
+    const yes = confirm(`「${char.name}」已在「${char.assignedTo}」中，是否将其从原班级移除并添加到当前班级？`)
+    if (!yes) return
+    removeCharFromOtherClass(char.name)
+  }
+  addCharToCurrentClass(char)
+}
+
+const handleSaveComposer = async () => {
+  const classId = composerTargetClass.value
+  if (!classId) return
+
+  fullRosterSnapshot.value[classId] = deepClone(composerClassData.value)
+  await loadCharacterPool(fullRosterSnapshot.value)
+  updateAvailableCharacters()
+  showMessage('班级变更已保存到快照，请点击顶部「保存」同步到世界书。')
+}
 </script>
 
 <template>
@@ -1017,11 +1103,11 @@ const composerGroupedCharacters = computed(() => {
               :available-works="composerAvailableWorks"
               :grouped-characters="composerGroupedCharacters"
               @add-class="() => {}"
-              @remove-head-teacher="() => {}"
-              @remove-teacher="(idx) => {}"
-              @remove-student="(idx) => {}"
-              @add-character="(char) => {}"
-              @save="() => {}"
+              @remove-head-teacher="handleRemoveComposerHeadTeacher"
+              @remove-teacher="handleRemoveComposerTeacher"
+              @remove-student="handleRemoveComposerStudent"
+              @add-character="handleAddCharacterToClass"
+              @save="handleSaveComposer"
               @cancel="activeTab = 'filter'"
             />
           </div>
