@@ -1014,7 +1014,7 @@ export const classClubActions = {
     this.worldState = createInitialWorldState()
 
     // 初始化默认 NPC 关系
-    this.initializeNpcRelationships()
+    await this.initializeNpcRelationships()
 
     this.saveToStorage(true)
     

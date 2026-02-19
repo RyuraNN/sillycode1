@@ -211,42 +211,71 @@ async function cleanAndMigrateSnapshots(snapshots: any[]): Promise<{ cleaned: an
 
 export const storageActions = {
   /**
-   * 初始化 NPC 关系数据 (如果不存在则填充默认值)
+   * 初始化 NPC 关系数据
+   * 优先级：运行时 store > 世界书 [Social_Data] > DEFAULT_RELATIONSHIPS 硬编码
    */
-  initializeNpcRelationships(this: any) {
+  async initializeNpcRelationships(this: any) {
     console.log('[GameStore] Initializing NPC relationships...')
-    
-    // 使用批量构建再一次性赋值，避免逐个属性触发 Vue 响应式更新
+
+    // 1. 尝试从世界书 [Social_Data] 读取
+    let socialData: Record<string, any> = {}
+    try {
+      const { ensureSocialDataWorldbook, fetchSocialData } = await import('../../utils/socialRelationshipsWorldbook')
+      await ensureSocialDataWorldbook()
+      socialData = (await fetchSocialData()) || {}
+    } catch (e) {
+      console.warn('[GameStore] Failed to fetch Social_Data from worldbook, using defaults only:', e)
+    }
+
     const newRelationships: Record<string, any> = {}
-    
+
+    // 2. 先处理世界书中的角色数据（优先级高于硬编码）
+    for (const [charName, charData] of Object.entries(socialData)) {
+      if (this.npcRelationships[charName]) {
+        // 已存在于运行时 store 的直接保留（运行时数据 > 世界书）
+        newRelationships[charName] = this.npcRelationships[charName]
+      } else {
+        // 从世界书构建（注意：世界书用 relationships，store 用 relations）
+        newRelationships[charName] = {
+          personality: charData.personality || { order: 0, altruism: 0, tradition: 0, peace: 0 },
+          goals: charData.goals || { immediate: '', shortTerm: '', longTerm: '' },
+          priorities: charData.priorities || { academics: 50, social: 50, hobbies: 50, survival: 50, club: 50 },
+          relations: charData.relationships ? JSON.parse(JSON.stringify(charData.relationships)) : {}
+        }
+      }
+    }
+
+    // 3. 再用 DEFAULT_RELATIONSHIPS 填充世界书中没有的角色（兜底）
     for (const [charName, relations] of Object.entries(DEFAULT_RELATIONSHIPS as Record<string, any>)) {
-      if (!this.npcRelationships[charName]) {
+      if (!newRelationships[charName] && !this.npcRelationships[charName]) {
         newRelationships[charName] = {
           personality: (DEFAULT_PERSONALITIES as Record<string, any>)[charName] || { order: 0, altruism: 0, tradition: 0, peace: 0 },
           goals: (DEFAULT_GOALS as Record<string, any>)[charName] || { immediate: '', shortTerm: '', longTerm: '' },
           priorities: (DEFAULT_PRIORITIES as Record<string, any>)[charName] || { academics: 50, social: 50, hobbies: 50, survival: 50, club: 50 },
           relations: {}
         }
-      } else {
-        // 已存在的直接引用
+      } else if (!newRelationships[charName]) {
         newRelationships[charName] = this.npcRelationships[charName]
       }
-      
-      for (const [targetName, relData] of Object.entries(relations as Record<string, any>)) {
-        const targetRelations = newRelationships[charName]?.relations || this.npcRelationships[charName]?.relations
-        if (targetRelations && !targetRelations[targetName]) {
-          targetRelations[targetName] = JSON.parse(JSON.stringify(relData))
+
+      // 填充缺失的具体关系对
+      const targetRelations = newRelationships[charName]?.relations
+      if (targetRelations) {
+        for (const [targetName, relData] of Object.entries(relations as Record<string, any>)) {
+          if (!targetRelations[targetName]) {
+            targetRelations[targetName] = JSON.parse(JSON.stringify(relData))
+          }
         }
       }
     }
-    
-    // 保留已有的、不在默认列表中的角色关系
+
+    // 4. 保留已有的、不在上述两个来源中的角色
     for (const [charName, data] of Object.entries(this.npcRelationships)) {
       if (!newRelationships[charName]) {
         newRelationships[charName] = data
       }
     }
-    
+
     // 一次性赋值，减少 Vue 响应式开销
     this.npcRelationships = newRelationships
   },
@@ -384,7 +413,7 @@ export const storageActions = {
     
     // Step 5: 初始化 NPC 关系（在 rebuildWorldbookState 之后）
     try {
-      this.initializeNpcRelationships()
+      await this.initializeNpcRelationships()
     } catch (e) {
       console.error('[GameStore] Failed to initialize NPC relationships:', e)
     }

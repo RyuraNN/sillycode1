@@ -1369,7 +1369,7 @@ const handleAssistantReroll = async () => {
   
   // 如果有 preVariableSnapshot，先恢复到辅助AI执行前的状态
   if (lastLog.preVariableSnapshot) {
-    gameStore.restoreGameState(lastLog.preVariableSnapshot)
+    await gameStore.restoreGameState(lastLog.preVariableSnapshot)
     await gameStore.syncWorldbook()
   }
   

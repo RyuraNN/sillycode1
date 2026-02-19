@@ -211,9 +211,9 @@ export const snapshotActions = {
       this.npcRelationships = state.npcRelationships
     } else {
       this.npcRelationships = {}
-      this.initializeNpcRelationships()
+      await this.initializeNpcRelationships()
     }
-    
+
     if (state.worldState) {
       this.worldState = state.worldState
     }
@@ -223,14 +223,14 @@ export const snapshotActions = {
     if (state.allClubs) {
       this.allClubs = state.allClubs
     }
-    
+
     // 恢复学年进级相关数据
     this.graduatedNpcs = state.graduatedNpcs || []
     this.lastAcademicYear = state.lastAcademicYear || 0
-    
+
     // 恢复考试历史
     this.examHistory = state.examHistory || []
-    
+
     // 恢复其他动态数据
     this.lastExamDate = (state as any).lastExamDate || null
     this.electiveAcademicData = (state as any).electiveAcademicData || {}
@@ -242,7 +242,7 @@ export const snapshotActions = {
 
     this.currentRunId = state.currentRunId || Date.now().toString(36)
     this.currentFloor = state.currentFloor || 0
-    
+
     this.saveToStorage(true)
 
     await this.rebuildWorldbookState()
@@ -407,10 +407,10 @@ export const snapshotActions = {
    */
   restoreFromMessageSnapshot(this: any, snapshot: any, chatLog: ChatLogEntry[]): void {
     if (!snapshot) return
-    
+
     // 如果是完整快照（包含 _isBase 或普通完整快照）
     if (snapshot._isBase || !isDeltaSnapshot(snapshot)) {
-      this.restoreGameState(snapshot)
+      this.restoreGameState(snapshot)  // fire-and-forget: async fallback only when npcRelationships missing
       return
     }
     
@@ -564,7 +564,7 @@ export const snapshotActions = {
   /**
    * 恢复指定的游戏状态
    */
-  restoreGameState(this: any, state: GameStateData) {
+  async restoreGameState(this: any, state: GameStateData) {
     const data = JSON.parse(JSON.stringify(state))
     
     // 【修复】状态合并
@@ -592,7 +592,7 @@ export const snapshotActions = {
       this.npcRelationships = data.npcRelationships
     } else {
       this.npcRelationships = {}
-      this.initializeNpcRelationships()
+      await this.initializeNpcRelationships()
     }
     if (data.worldState) this.worldState = data.worldState
     if (data.allClassData) this.allClassData = data.allClassData

@@ -193,7 +193,7 @@ async function onSkipCacheAndContinue() {
     // 尝试加载课程池
     await loadCoursePoolFromWorldbook(gameStore.currentRunId)
     await gameStore.rebuildWorldbookState()
-    gameStore.initializeNpcRelationships()
+    await gameStore.initializeNpcRelationships()
   } catch (e) {
     console.warn('[App] rebuildWorldbookState failed after skip:', e)
   } finally {
