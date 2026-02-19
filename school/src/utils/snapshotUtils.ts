@@ -189,7 +189,8 @@ export function computeDelta(
     'eventChecks',
     'clubApplication',
     'clubRejection',
-    'clubInvitation'
+    'clubInvitation',
+    'npcElectiveSelections'
   ]
   
   for (const field of keyFields) {

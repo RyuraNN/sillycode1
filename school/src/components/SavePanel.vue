@@ -141,13 +141,18 @@ const restoreToChatIndex = async (index) => {
   // 2. 获取目标聊天记录
   const targetLog = snapshot.chatLog[index]
   
-  // 3. 如果目标记录有快照，恢复该快照的状态（支持增量快照）
-  if (targetLog && targetLog.snapshot) {
-    gameStore.restoreFromMessageSnapshot(targetLog.snapshot, snapshot.chatLog)
+  // 3. 如果目标记录有快照，直接使用；否则向前查找最近一条有快照的消息
+  let snapshotToRestore = null
+  for (let i = index; i >= 0; i--) {
+    if (snapshot.chatLog[i] && snapshot.chatLog[i].snapshot) {
+      snapshotToRestore = snapshot.chatLog[i].snapshot
+      break
+    }
+  }
+  if (snapshotToRestore) {
+    gameStore.restoreFromMessageSnapshot(snapshotToRestore, snapshot.chatLog)
   } else {
-    // 如果没有快照（旧存档），保持 restoreSnapshot 恢复的最终状态
-    // 可以选择提示用户
-    console.warn('该记录无状态快照，使用存档最终状态')
+    console.warn('未找到任何可用快照，使用存档最终状态')
   }
 
   // 修复：回溯后强制同步世界书，以清除未来的记录
