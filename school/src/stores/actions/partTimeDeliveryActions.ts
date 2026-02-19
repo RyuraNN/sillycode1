@@ -84,6 +84,10 @@ export const partTimeDeliveryActions = {
    * 申请兼职
    */
   async applyForPartTimeJob(this: any, locationId: string, jobData: any): Promise<{ success: boolean; message: string }> {
+    if (this.player.role === 'teacher') {
+      return { success: false, message: '教师不需要申请兼职工作' }
+    }
+
     if (this.player.partTimeJob.currentJob) {
       return { success: false, message: '你已经有一份兼职了，请先辞职再申请新的' }
     }

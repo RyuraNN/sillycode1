@@ -424,6 +424,10 @@ export function checkPartTimeJobRequirements(requirementStr, player) {
  * @returns {Object} { canApply: boolean, reason: string, details: Array }
  */
 export function checkPartTimeJobEligibility(jobData, player, gameTime) {
+  if (player.role === 'teacher') {
+    return { canApply: false, reason: '教师不需要兼职工作', details: [] }
+  }
+
   if (!jobData) {
     return { canApply: false, reason: '兼职岗位数据无效', details: [] }
   }

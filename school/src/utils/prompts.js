@@ -982,8 +982,8 @@ ${player.name}邀请"${targetName}"加入"${clubName}"(社团ID: ${clubId})。
   // 构建社交提示词
   const socialPrompt = buildSocialPrompt(gameState)
 
-  // 构建兼职状态提示词
-  const partTimeJobPrompt = buildPartTimeJobPrompt(gameState)
+  // 构建兼职状态提示词（教师不需要兼职）
+  const partTimeJobPrompt = player.role === 'teacher' ? '' : buildPartTimeJobPrompt(gameState)
 
   // 构建校规提示词
   const schoolRulePrompt = buildSchoolRulePrompt(gameState)

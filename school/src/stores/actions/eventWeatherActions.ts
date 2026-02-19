@@ -105,6 +105,13 @@ export const eventWeatherActions = {
         this.addCommand(`[天赋生效] 天生财运让你这个月获得了 ${bonusMoney} 日元的额外零花钱！`)
       }
 
+      // 教师月薪发放
+      if (this.player.role === 'teacher') {
+        const teacherSalary = 500000
+        this.player.money += teacherSalary
+        this.addCommand(`[工资发放] 本月教师工资 ${teacherSalary.toLocaleString()} 日元已到账！`)
+      }
+
       this.eventChecks.lastMonthly = currentMonthKey
     }
     
