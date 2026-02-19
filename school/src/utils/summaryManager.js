@@ -288,6 +288,11 @@ export async function generateSuperSummary(sourceFloors, sourceType = 'major') {
     return { success: false, error: 'Summary system is disabled' }
   }
 
+  // 超级总结开关
+  if (gameStore.settings.summarySystem?.enableSuperSummary === false) {
+    return { success: false, error: 'Super summary is disabled' }
+  }
+
   // 获取对应的来源总结
   const sourceSummaries = gameStore.player.summaries
     .filter(s => s.type === sourceType && sourceFloors.includes(s.floor))
@@ -536,7 +541,12 @@ export function checkSuperSummaryNeeded(currentFloor) {
   if (!settings?.enabled || !settings.useAssistantForSummary) {
     return { needed: false }
   }
-  
+
+  // 超级总结开关
+  if (settings.enableSuperSummary === false) {
+    return { needed: false }
+  }
+
   // 1. 检查大总结是否需要合并
   const majorSummaries = gameStore.player.summaries
     .filter(s => s.type === 'major')

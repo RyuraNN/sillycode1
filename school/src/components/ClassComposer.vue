@@ -23,6 +23,9 @@
       <button class="btn-add-class" @click="$emit('addClass')">
         ＋ 新建班级
       </button>
+      <button class="btn-set-classroom" @click="$emit('setClassroom')">
+        🏫 设置教室
+      </button>
     </div>
 
     <!-- 主内容区 -->
@@ -47,6 +50,7 @@
       <div class="current-class-panel" v-show="composerPanel === 'class' || !isMobile">
         <div class="panel-header">
           <h4>{{ classData.name || '未命名班级' }}</h4>
+          <span v-if="classData.classroomId" class="classroom-tag" title="教室">🏫 {{ classData.classroomId }}</span>
           <span class="member-count">
             {{ totalMembers }}人
           </span>
@@ -222,6 +226,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'addClass',
+  'setClassroom',
   'removeHeadTeacher',
   'removeTeacher',
   'removeStudent',
@@ -432,6 +437,21 @@ const getWorkAddedCount = (workName) => {
   background: #45a049;
 }
 
+.btn-set-classroom {
+  padding: 7px 14px;
+  background: #2196F3;
+  border: none;
+  border-radius: 4px;
+  color: white;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.btn-set-classroom:hover {
+  background: #1976D2;
+}
+
 .composer-content {
   flex: 1;
   display: flex;
@@ -467,6 +487,14 @@ const getWorkAddedCount = (workName) => {
   margin: 0;
   color: #fff;
   font-size: 14px;
+}
+
+.classroom-tag {
+  padding: 3px 8px;
+  background: rgba(33, 150, 243, 0.15);
+  border-radius: 12px;
+  color: #64B5F6;
+  font-size: 12px;
 }
 
 .member-count,

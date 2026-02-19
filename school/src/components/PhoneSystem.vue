@@ -649,15 +649,24 @@ const handleHomeClick = () => {
                         </div>
 
                         <div class="setting-item">
+                          <span class="setting-label">启用超级总结</span>
+                          <label class="switch">
+                            <input type="checkbox" v-model="gameStore.settings.summarySystem.enableSuperSummary" @change="gameStore.saveToStorage()">
+                            <span class="slider"></span>
+                          </label>
+                        </div>
+                        <p class="hint">关闭后大总结不会被进一步合并，保留更多早期剧情细节</p>
+
+                        <div class="setting-item" v-if="gameStore.settings.summarySystem.enableSuperSummary">
                           <span class="setting-label">超级总结触发阈值</span>
                           <span class="setting-value">{{ gameStore.settings.summarySystem.majorCountForSuper }}个大总结</span>
                         </div>
-                        <div class="slider-container">
-                          <input 
-                            type="range" 
-                            v-model.number="gameStore.settings.summarySystem.majorCountForSuper" 
-                            min="2" 
-                            max="5" 
+                        <div class="slider-container" v-if="gameStore.settings.summarySystem.enableSuperSummary">
+                          <input
+                            type="range"
+                            v-model.number="gameStore.settings.summarySystem.majorCountForSuper"
+                            min="2"
+                            max="5"
                             step="1"
                             @change="gameStore.saveToStorage()"
                             class="setting-slider"

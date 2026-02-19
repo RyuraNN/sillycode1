@@ -184,6 +184,7 @@ export function createInitialState(): GameState {
       },
       summarySystem: {
         enabled: true,
+        enableSuperSummary: true,
         minorSummaryStartFloor: 8,
         majorSummaryStartFloor: 25,
         minorCountForMajor: 5,

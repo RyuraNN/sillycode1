@@ -845,8 +845,8 @@ const itemFromPoint = (x, y) => {
             </div>
             
             <!-- 编辑按钮 (选中时显示) -->
-            <button 
-              v-if="selectedItem?.id === item.id" 
+            <button
+              v-if="selectedItem?.id === item.id && !props.selectionMode"
               class="edit-btn"
               @mousedown.stop
               @touchstart.stop
@@ -854,12 +854,22 @@ const itemFromPoint = (x, y) => {
             >
               ✏️ 编辑
             </button>
+            <!-- 选择按钮 (选择模式 + 选中时显示) -->
+            <button
+              v-if="selectedItem?.id === item.id && props.selectionMode"
+              class="edit-btn select-btn"
+              @mousedown.stop
+              @touchstart.stop
+              @click.stop="emit('location-selected', { id: item.id, name: item.name }); emit('close')"
+            >
+              📍 选择
+            </button>
           </div>
         </div>
         
         <!-- 提示信息 -->
         <div class="help-tip" :class="{ 'selection-tip': props.selectionMode }">
-          <span v-if="props.selectionMode">📍 点击空白处创建社团活动室，创建后将自动选中该地点</span>
+          <span v-if="props.selectionMode">📍 点击已有地点选择 · 点击空白处创建新地点</span>
           <span v-else>💡 点击空白处创建地点 · 长按拖动 · 双击进入/编辑</span>
         </div>
       </div>
@@ -1484,6 +1494,15 @@ const itemFromPoint = (x, y) => {
 .edit-btn:hover {
   transform: translateY(-2px);
   box-shadow: 0 6px 14px rgba(33, 150, 243, 0.4);
+}
+
+.edit-btn.select-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  box-shadow: 0 4px 10px rgba(102, 126, 234, 0.3);
+}
+
+.edit-btn.select-btn:hover {
+  box-shadow: 0 6px 14px rgba(102, 126, 234, 0.4);
 }
 
 /* 弹窗样式 */

@@ -167,7 +167,7 @@ const filteredCharacters = computed(() => {
   // 身份筛选
   if (props.roleFilter !== 'all') {
     if (props.roleFilter === 'pending') {
-      result = result.filter(c => c.role === 'student' && c.grade === 0)
+      result = result.filter(c => c.role === 'student' && (c.grade === 0 || (!c.classId && !c.grade)))
     } else {
       result = result.filter(c => c.role === props.roleFilter)
     }

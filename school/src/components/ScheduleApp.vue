@@ -736,7 +736,7 @@
             </div>
             <div class="teacher-info-item">
               <span class="teacher-info-label">选修课程</span>
-              <span class="teacher-info-value">{{ gameStore.player.teachingElectives?.length ? gameStore.player.teachingElectives.join('、') : '无' }}</span>
+              <span class="teacher-info-value">{{ getElectiveNames(gameStore.player.teachingElectives) }}</span>
             </div>
             <div class="teacher-info-item">
               <span class="teacher-info-label">指导社团</span>
@@ -790,6 +790,19 @@
         </div>
       </div>
 
+      <!-- 选修课程 -->
+      <div class="skills-section" v-if="gameStore.player.selectedElectives?.length">
+        <div class="section-title">
+          <span class="section-icon">📝</span>
+          <span>选修课程</span>
+        </div>
+        <div class="elective-tags">
+          <span v-for="id in gameStore.player.selectedElectives" :key="id" class="elective-tag">
+            {{ getCourseById(id)?.name || id }}
+          </span>
+        </div>
+      </div>
+
       <div class="skills-section">
         <div class="section-title">
           <span class="section-icon">🎨</span>
@@ -818,6 +831,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useGameStore } from '../stores/gameStore'
+import { getCourseById } from '../data/coursePoolData'
 import { TIME_SLOTS, getWeekdayEnglish, getTermInfo, checkDayStatus } from '../utils/scheduleGenerator'
 import ForumApp from './ForumApp.vue'
 import ElectiveCourseSelector from './ElectiveCourseSelector.vue'
@@ -1003,6 +1017,12 @@ const skillNames = {
   socialMedia: '社媒',
   photography: '摄影',
   videoEditing: '剪辑'
+}
+
+// 将选修课 ID 数组转为课程名称
+const getElectiveNames = (ids) => {
+  if (!ids?.length) return '无'
+  return ids.map(id => getCourseById(id)?.name || id).join('、')
 }
 
 // 待处理论坛指令数量
@@ -1902,6 +1922,10 @@ onMounted(async () => {
 .skill-progress-bar { height: 100%; border-radius: 3px; transition: width 0.3s ease; }
 .subject-bar { background: linear-gradient(90deg, #4caf50, #8bc34a); }
 .skill-bar { background: linear-gradient(90deg, #2196f3, #03a9f4); }
+
+/* 选修课标签 */
+.elective-tags { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 15px; }
+.elective-tag { padding: 5px 12px; background: rgba(33, 150, 243, 0.15); border-radius: 16px; color: #64B5F6; font-size: 13px; }
 
 /* 教师信息列表 */
 .teacher-info-list { display: flex; flex-direction: column; gap: 10px; }

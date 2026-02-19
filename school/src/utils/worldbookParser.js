@@ -1275,9 +1275,10 @@ export async function deleteClassDataFromWorldbook(classId) {
  * @param {string} classId 班级ID
  * @param {Object} classData 班级数据对象
  * @param {boolean} excludeAcademic 是否排除学力数据（默认false）
+ * @param {string|null} runId 当前存档ID（优先更新 runId 副本）
  * @returns {Promise<boolean>} 是否成功
  */
-export async function updateClassDataInWorldbook(classId, classData, excludeAcademic = false) {
+export async function updateClassDataInWorldbook(classId, classData, excludeAcademic = false, runId = null) {
   if (typeof window.updateWorldbookWith !== 'function') {
     console.warn('[WorldbookParser] updateWorldbookWith API not available')
     return false
@@ -1292,11 +1293,23 @@ export async function updateClassDataInWorldbook(classId, classData, excludeAcad
 
     await window.updateWorldbookWith(bookName, (entries) => {
       const newEntries = [...entries]
-      // 查找现有条目
-      const index = newEntries.findIndex(entry => {
-        const match = entry.name && entry.name.match(/\[Class:([\w.-]+)\]/)
-        return match && match[1] === classId
-      })
+
+      let index = -1
+
+      // 1. 如果提供了 runId，优先查找 [Class:classId:runId] 条目
+      if (runId) {
+        index = newEntries.findIndex(entry => {
+          return entry.name && entry.name.includes(`[Class:${classId}:${runId}]`)
+        })
+      }
+
+      // 2. fallback：查找原始 [Class:classId] 条目（不含 runId）
+      if (index === -1) {
+        index = newEntries.findIndex(entry => {
+          const match = entry.name && entry.name.match(/\[Class:([\w.-]+)\]/)
+          return match && match[1] === classId && !entry.name.match(/\[Class:[\w.-]+:[\w.-]+\]/)
+        })
+      }
 
       if (index !== -1) {
         // 更新现有条目 - 同时更新 key 确保角色名可触发
@@ -2027,9 +2040,11 @@ export async function optimizeWorldbook(socialData) {
  * @param {string|null} homeroomClassId 担任班主任的班级ID
  * @param {string} playerName 玩家姓名
  * @param {string} runId 当前存档ID
+ * @param {string[]} teachingSubjects 玩家教授的科目列表
+ * @param {string} playerGender 玩家性别
  * @returns {Promise<boolean>} 是否成功
  */
-export async function setupTeacherClassEntries(teachingClasses, homeroomClassId, playerName, runId) {
+export async function setupTeacherClassEntries(teachingClasses, homeroomClassId, playerName, runId, teachingSubjects = [], playerGender = 'unknown') {
   if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
     console.warn('[WorldbookParser] Worldbook API not available')
     return false
@@ -2065,10 +2080,34 @@ export async function setupTeacherClassEntries(teachingClasses, homeroomClassId,
         if (classId === homeroomClassId) {
           classData.headTeacher = {
             name: playerName,
-            gender: 'unknown', // 玩家性别在别处定义，这里暂且 unknown
+            gender: playerGender,
             origin: '玩家',
             role: 'teacher',
             classId: classId
+          }
+        }
+
+        // 注入玩家为科任教师
+        if (teachingSubjects && teachingSubjects.length > 0) {
+          if (!classData.teachers) classData.teachers = []
+
+          for (const subject of teachingSubjects) {
+            const existingIdx = classData.teachers.findIndex(t => t.subject === subject)
+
+            const playerTeacher = {
+              name: playerName,
+              gender: playerGender,
+              origin: '玩家',
+              role: 'teacher',
+              subject: subject,
+              classId: classId
+            }
+
+            if (existingIdx !== -1) {
+              classData.teachers[existingIdx] = playerTeacher
+            } else {
+              classData.teachers.push(playerTeacher)
+            }
           }
         }
 

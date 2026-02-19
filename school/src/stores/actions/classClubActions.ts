@@ -660,9 +660,19 @@ export const classClubActions = {
     
     // 同步班级世界书条目状态（处理进级后的 runId 隔离条目）
     await syncClassWorldbookState(this.currentRunId, this.allClassData)
-    
-    // 同步班级策略（玩家班级蓝灯）
-    if (this.player.classId) {
+
+    // 教师模式：重建教师班级副本（注入科任教师等）
+    if (this.player.role === 'teacher' && this.player.teachingClasses && this.player.teachingClasses.length > 0) {
+      await setupTeacherClassEntries(
+        this.player.teachingClasses,
+        this.player.homeroomClassId,
+        this.player.name,
+        this.currentRunId,
+        this.player.teachingSubjects,
+        this.player.gender
+      )
+    } else if (this.player.classId) {
+      // 同步班级策略（玩家班级蓝灯）
       await setPlayerClass(this.player.classId)
     }
     
@@ -795,12 +805,20 @@ export const classClubActions = {
     
     // 如果是教师模式，恢复教师班级条目
     if (this.player.role === 'teacher' && this.player.teachingClasses && this.player.teachingClasses.length > 0) {
+      // 先同步状态：禁用其他存档的 runId 副本，启用当前存档的
+      await safeRebuildStep(
+        () => syncClassWorldbookState(this.currentRunId, this.allClassData),
+        'syncClassWorldbookState', 10000
+      )
+      // 再创建/更新当前教师存档的班级副本
       await safeRebuildStep(
         () => setupTeacherClassEntries(
           this.player.teachingClasses,
           this.player.homeroomClassId,
           this.player.name,
-          this.currentRunId
+          this.currentRunId,
+          this.player.teachingSubjects,
+          this.player.gender
         ),
         'setupTeacherClassEntries', 15000
       )
@@ -810,7 +828,7 @@ export const classClubActions = {
         () => syncClassWorldbookState(this.currentRunId, this.allClassData),
         'syncClassWorldbookState', 10000
       )
-      
+
       if (this.player.classId) {
         await safeRebuildStep(
           () => setPlayerClass(this.player.classId),

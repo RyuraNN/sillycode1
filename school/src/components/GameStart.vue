@@ -182,9 +182,15 @@ const addCustomCourse = () => {
   // 保存自定义课程配置
   teacherData.value.customCourses.push({ ...newCourseForm.value })
   
-  // 添加到教授学科列表
-  if (!teacherData.value.teachingSubjects.includes(newCourseForm.value.name)) {
-    teacherData.value.teachingSubjects.push(newCourseForm.value.name)
+  // 按课程类型分流
+  if (newCourseForm.value.type === 'elective') {
+    // 选修课暂存名称，注册后会用 ID 替换
+    if (!teacherData.value.customElectiveNames) teacherData.value.customElectiveNames = []
+    teacherData.value.customElectiveNames.push(newCourseForm.value.name)
+  } else {
+    if (!teacherData.value.teachingSubjects.includes(newCourseForm.value.name)) {
+      teacherData.value.teachingSubjects.push(newCourseForm.value.name)
+    }
   }
   
   showAddCourseModal.value = false
@@ -726,6 +732,13 @@ const confirmSignature = async () => {
         })
         // 保存注册后的完整课程对象（包含生成的ID）
         registeredCourses.push(registered)
+
+        // 选修课注册后加入 teachingElectives
+        if (registered.type === 'elective') {
+          if (!teacherData.value.teachingElectives.includes(registered.id)) {
+            teacherData.value.teachingElectives.push(registered.id)
+          }
+        }
       })
       // 更新 customCourses 为注册后的完整对象
       teacherData.value.customCourses = registeredCourses
@@ -762,7 +775,9 @@ const confirmSignature = async () => {
       teacherData.value.teachingClasses,
       teacherData.value.homeroomClassId,
       formData.value.name,
-      gameStore.currentRunId
+      gameStore.currentRunId,
+      teacherData.value.teachingSubjects,
+      formData.value.gender
     )
 
     // 教师自动加入教授班级的群组

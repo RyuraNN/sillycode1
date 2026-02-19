@@ -101,8 +101,7 @@ function computeDiff(
 function shouldSkipField(key: string): boolean {
   // 跳过一些不需要记录差异的大型字段
   const skipFields = [
-    'classRoster', // 班级花名册（大型数据）
-    'schedule'     // 课程表
+    'classRoster' // 班级花名册（大型数据）
   ]
   return skipFields.includes(key)
 }
@@ -168,6 +167,7 @@ export function computeDelta(
     'player.selectedElectives',
     'player.electivesLockedForTerm',
     'player.classId',
+    'player.schedule',
     // 总结与兼职
     'player.summaries',
     'player.partTimeJob',

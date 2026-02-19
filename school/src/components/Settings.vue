@@ -380,14 +380,27 @@ const loadModels = async () => {
 
                 <div class="setting-row">
                   <div class="setting-info">
+                    <span class="setting-label">启用超级总结</span>
+                    <span class="setting-hint">关闭后大总结不会被进一步合并，保留更多早期剧情细节</span>
+                  </div>
+                  <div class="setting-control">
+                    <label class="toggle-switch">
+                      <input type="checkbox" v-model="gameStore.settings.summarySystem.enableSuperSummary" @change="gameStore.saveToStorage()">
+                      <span class="toggle-slider"></span>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="setting-row" v-if="gameStore.settings.summarySystem.enableSuperSummary">
+                  <div class="setting-info">
                     <span class="setting-label">超级总结触发阈值 (大总结数)</span>
                   </div>
                   <div class="setting-control">
-                    <input 
-                      type="range" 
-                      v-model.number="gameStore.settings.summarySystem.majorCountForSuper" 
-                      min="2" 
-                      max="5" 
+                    <input
+                      type="range"
+                      v-model.number="gameStore.settings.summarySystem.majorCountForSuper"
+                      min="2"
+                      max="5"
                       step="1"
                       class="range-slider"
                       @change="gameStore.saveToStorage()"

@@ -22,6 +22,7 @@ import TeacherView from './TeacherView.vue'
 import TeacherEditModal from './TeacherEditModal.vue'
 import MessageModal from './MessageModal.vue'
 import MapEditorPanel from './MapEditorPanel.vue'
+import WorldbookSyncPanel from './WorldbookSyncPanel.vue'
 
 const emit = defineEmits(['close'])
 const gameStore = useGameStore()
@@ -68,6 +69,14 @@ const activeTab = ref('filter') // 'filter' | 'composer' | 'characterEditor'
 const filterSubTab = ref('student') // 'student' | 'teacher'
 const saving = ref(false)
 const isLocked = ref(false)
+
+// 地图编辑器（新建班级选教室）
+const showMapEditor = ref(false)
+const pendingNewClassId = ref('')
+
+// 新建班级表单
+const showNewClassForm = ref(false)
+const newClassForm = ref({ id: '', name: '' })
 
 // 消息模态框
 const showMessageModal = ref(false)
@@ -151,6 +160,7 @@ const batchSelection = ref({
 const showAIImportInput = ref(false)
 const showAIImportResult = ref(false)
 const importAllAsPending = ref(false)
+const showWorldbookSync = ref(false)
 
 // ==================== 辅助函数 ====================
 const showMessage = (msg) => {
@@ -424,7 +434,7 @@ const handleSave = async () => {
 
     // 4. 同步到世界书
     for (const [classId, classInfo] of Object.entries(fullRosterSnapshot.value)) {
-      await updateClassDataInWorldbook(classId, classInfo, true)
+      await updateClassDataInWorldbook(classId, classInfo, true, gameStore.currentRunId)
     }
 
     // 5. 同步学力数据
@@ -985,6 +995,66 @@ const handleAddCharacterToClass = (char) => {
   addCharToCurrentClass(char)
 }
 
+const handleAddClass = () => {
+  newClassForm.value = { id: '', name: '' }
+  showNewClassForm.value = true
+}
+
+const handleConfirmNewClass = () => {
+  const id = newClassForm.value.id.trim()
+  const name = newClassForm.value.name.trim() || id
+  if (!id) return
+
+  if (fullRosterSnapshot.value[id]) {
+    showMessage(`班级「${id}」已存在，请换一个编号。`)
+    return
+  }
+
+  fullRosterSnapshot.value[id] = {
+    name,
+    headTeacher: { name: '', gender: 'female', origin: '', role: 'teacher' },
+    teachers: [],
+    students: []
+  }
+
+  currentRosterState.value[id] = {}
+  composerTargetClass.value = id
+  loadComposerClassData()
+  showNewClassForm.value = false
+
+  // 打开地图编辑器让玩家选择/创建教室
+  pendingNewClassId.value = id
+  showMapEditor.value = true
+}
+
+const handleSetClassroom = () => {
+  const classId = composerTargetClass.value
+  if (!classId) {
+    showMessage('请先选择一个班级。')
+    return
+  }
+  pendingNewClassId.value = classId
+  showMapEditor.value = true
+}
+
+const handleClassroomSelected = (location) => {
+  const id = pendingNewClassId.value
+  if (id && fullRosterSnapshot.value[id]) {
+    fullRosterSnapshot.value[id].classroomId = location.id
+    if (composerTargetClass.value === id) {
+      composerClassData.value.classroomId = location.id
+    }
+  }
+  showMapEditor.value = false
+  pendingNewClassId.value = ''
+  showMessage(`教室已设为「${location.name}」(${location.id})`)
+}
+
+const handleMapEditorClose = () => {
+  showMapEditor.value = false
+  pendingNewClassId.value = ''
+}
+
 const handleSaveComposer = async () => {
   const classId = composerTargetClass.value
   if (!classId) return
@@ -1012,6 +1082,9 @@ const handleSaveComposer = async () => {
         <div class="panel-header">
           <h2>📋 全校名册管理</h2>
           <div class="header-actions">
+            <button class="btn-sync" @click="showWorldbookSync = true" title="同步世界书">
+              📖 同步世界书
+            </button>
             <button class="btn-batch" @click="handleOpenBatchComplete" title="AI批量补全">
               🤖 批量补全
             </button>
@@ -1110,7 +1183,8 @@ const handleSaveComposer = async () => {
               v-model:group-view="composerGroupView"
               :available-works="composerAvailableWorks"
               :grouped-characters="composerGroupedCharacters"
-              @add-class="() => {}"
+              @add-class="handleAddClass"
+              @set-classroom="handleSetClassroom"
               @remove-head-teacher="handleRemoveComposerHeadTeacher"
               @remove-teacher="handleRemoveComposerTeacher"
               @remove-student="handleRemoveComposerStudent"
@@ -1191,6 +1265,42 @@ const handleSaveComposer = async () => {
       @close="showTeacherEditor = false"
       @save="handleSaveTeacher"
     />
+
+    <MapEditorPanel
+      v-if="showMapEditor"
+      :selection-mode="true"
+      selection-title="选择班级教室"
+      :prefill-id="pendingNewClassId ? `classroom_${pendingNewClassId.toLowerCase().replace('-', '')}` : ''"
+      :prefill-name="pendingNewClassId ? `${fullRosterSnapshot[pendingNewClassId]?.name || pendingNewClassId}教室` : ''"
+      initial-parent-id="tianhua_high_school"
+      @location-selected="handleClassroomSelected"
+      @close="handleMapEditorClose"
+    />
+
+    <WorldbookSyncPanel
+      :visible="showWorldbookSync"
+      @close="showWorldbookSync = false"
+    />
+
+    <!-- 新建班级表单 -->
+    <div v-if="showNewClassForm" class="new-class-overlay" @click.self="showNewClassForm = false">
+      <div class="new-class-modal">
+        <h3>新建班级</h3>
+        <div class="form-row">
+          <label>班级编号</label>
+          <input v-model="newClassForm.id" placeholder="如：1-A、2-B、3-C" @keyup.enter="handleConfirmNewClass">
+          <span class="form-hint">将作为世界书条目 [Class:编号] 的标识</span>
+        </div>
+        <div class="form-row">
+          <label>显示名称</label>
+          <input v-model="newClassForm.name" :placeholder="newClassForm.id || '留空则使用编号'" @keyup.enter="handleConfirmNewClass">
+        </div>
+        <div class="form-actions">
+          <button class="btn-confirm" @click="handleConfirmNewClass" :disabled="!newClassForm.id.trim()">确认创建</button>
+          <button class="btn-form-cancel" @click="showNewClassForm = false">取消</button>
+        </div>
+      </div>
+    </div>
   </Teleport>
 </template>
 
@@ -1255,6 +1365,15 @@ const handleSaveComposer = async () => {
 .btn-batch {
   background: #9C27B0;
   color: white;
+}
+
+.btn-sync {
+  background: #1565C0;
+  color: white;
+}
+
+.btn-sync:hover {
+  background: #0D47A1;
 }
 
 .btn-batch:hover {
@@ -1421,5 +1540,106 @@ const handleSaveComposer = async () => {
     font-size: 14px;
     white-space: nowrap;
   }
+}
+
+.new-class-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10001;
+}
+
+.new-class-modal {
+  background: #2a2a2a;
+  border-radius: 10px;
+  padding: 24px;
+  width: 380px;
+  max-width: 90vw;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.new-class-modal h3 {
+  margin: 0 0 18px;
+  color: #fff;
+  font-size: 18px;
+}
+
+.form-row {
+  margin-bottom: 14px;
+}
+
+.form-row label {
+  display: block;
+  color: #aaa;
+  font-size: 13px;
+  margin-bottom: 5px;
+}
+
+.form-row input {
+  width: 100%;
+  padding: 9px 12px;
+  background: #1a1a1a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.form-row input:focus {
+  border-color: #4CAF50;
+  outline: none;
+}
+
+.form-hint {
+  display: block;
+  color: #666;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.form-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.btn-confirm {
+  flex: 1;
+  padding: 10px;
+  background: #4CAF50;
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-confirm:hover:not(:disabled) {
+  background: #45a049;
+}
+
+.btn-confirm:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-form-cancel {
+  padding: 10px 16px;
+  background: #444;
+  border: none;
+  border-radius: 6px;
+  color: #ccc;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-form-cancel:hover {
+  background: #555;
 }
 </style>
