@@ -671,7 +671,19 @@ const handleOpenBatchComplete = () => {
 
 const handleStartBatchProcess = async () => {
   const result = await startBatchProcess(batchSelection.value, fullRosterSnapshot.value, characterPool.value, 0)
-  if (!result.success && result.message) {
+  if (result.canResume) {
+    const yes = confirm(`检测到上次未完成的批量补全进度（第 ${result.resumeIndex} 批），是否从断点继续？\n\n选择「确定」从断点继续，选择「取消」重新开始。`)
+    if (yes) {
+      await handleResumeBatchProcess()
+    } else {
+      localStorage.removeItem('batchProgress')
+      batchResumeIndex.value = 0
+      const retryResult = await startBatchProcess(batchSelection.value, fullRosterSnapshot.value, characterPool.value, 0)
+      if (!retryResult.success && retryResult.message) {
+        showMessage(retryResult.message)
+      }
+    }
+  } else if (!result.success && result.message) {
     showMessage(result.message)
   }
 }

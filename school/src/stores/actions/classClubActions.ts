@@ -946,6 +946,27 @@ export const classClubActions = {
       'loadEventData', 10000
     )
 
+    // === 兜底：最终班级条目状态同步 ===
+    // Phase 2 中 syncClassWorldbookState 设置的 enabled 状态可能被后续大量 updateWorldbookWith 调用覆盖，
+    // 在所有写操作完成后再执行一次，确保班级条目状态正确。
+    await safeRebuildStep(
+      () => syncClassWorldbookState(this.currentRunId, this.allClassData),
+      'finalClassSync', 10000
+    )
+    if (this.player.role === 'teacher' && this.player.teachingClasses && this.player.teachingClasses.length > 0) {
+      await safeRebuildStep(
+        () => setupTeacherClassEntries(
+          this.player.teachingClasses,
+          this.player.homeroomClassId,
+          this.player.name,
+          this.currentRunId,
+          this.player.teachingSubjects,
+          this.player.gender
+        ),
+        'finalTeacherClassSetup', 15000
+      )
+    }
+
     const elapsed = Date.now() - startTime
     console.log(`[GameStore] Worldbook state rebuild complete in ${elapsed}ms`)
   },

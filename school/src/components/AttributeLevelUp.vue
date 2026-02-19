@@ -146,7 +146,7 @@ const addSkill = (key) => {
   border-radius: 8px;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
   overflow: hidden;
-  max-height: 90vh;
+  max-height: 70vh;
   display: flex;
   flex-direction: column;
 }
@@ -177,6 +177,8 @@ const addSkill = (key) => {
 .modal-body {
   padding: 15px;
   overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .points-info {

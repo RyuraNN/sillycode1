@@ -200,7 +200,8 @@ export function createInitialState(): GameState {
       debugMode: false,
       debugUnlocked: false,
       snapshotLimit: 10,
-      snapshotMode: 'delta'
+      snapshotMode: 'delta',
+      useGeminiMode: false
     },
     saveSnapshots: [],
     currentChatLog: [],

@@ -186,23 +186,20 @@ ${charListStr}
 
     let candidates, chunks
 
-    // 尝试从 localStorage 恢复未完成的批次
+    // 尝试从 localStorage 检测未完成的批次
     if (startFromChunk === 0) {
       const savedProgress = localStorage.getItem('batchProgress')
       if (savedProgress) {
         try {
           const progress = JSON.parse(savedProgress)
           const timeSinceLastSave = Date.now() - progress.timestamp
-          // 如果保存时间在 1 小时内，提示用户是否继续
-          if (timeSinceLastSave < 3600000 && progress.resumeIndex > 0) {
+          // 如果保存时间在 1 小时内，返回 canResume 让 UI 层询问用户
+          if (timeSinceLastSave < 3600000 && progress.resumeIndex > 0 && progress.candidates && progress.chunks) {
             console.log('[BatchComplete] Found unfinished batch process, can resume from chunk', progress.resumeIndex)
-            // 这里可以通过回调通知 UI 询问用户是否继续
-            // 暂时自动恢复
-            if (progress.candidates && progress.chunks) {
-              batchCandidatesCache.value = progress.candidates
-              batchChunksCache.value = progress.chunks
-              startFromChunk = progress.resumeIndex
-            }
+            batchCandidatesCache.value = progress.candidates
+            batchChunksCache.value = progress.chunks
+            batchResumeIndex.value = progress.resumeIndex
+            return { success: false, canResume: true, resumeIndex: progress.resumeIndex }
           }
         } catch (e) {
           console.warn('[BatchComplete] Failed to restore progress:', e)
@@ -275,7 +272,7 @@ ${charListStr}
           should_stream: false
         })
 
-        if (result && result !== '__ERROR__') {
+        if (result && result !== '__ERROR__' && result !== '__STOPPED__') {
           const updates = parseBatchResponse(result, chunk)
           batchResults.value.push(...updates)
         }
@@ -313,8 +310,20 @@ ${charListStr}
       const idx = characterPool.findIndex(c => c.name === item.name)
       if (idx !== -1) {
         const target = characterPool[idx]
-        if (item.changes.includes('性格倾向')) target.personality = item.updated.personality
-        if (item.changes.includes('学力档案')) target.academicProfile = item.updated.academicProfile
+        if (item.changes.includes('性格倾向')) {
+          const orig = target.personality
+          const isDefaultPersonality = !orig || (orig.order === 0 && orig.altruism === 0 && orig.tradition === 0 && orig.peace === 50)
+          if (selection.options.overwrite || isDefaultPersonality) {
+            target.personality = item.updated.personality
+          }
+        }
+        if (item.changes.includes('学力档案')) {
+          const orig = target.academicProfile
+          const isDefaultAcademic = !orig || (orig.level === 'avg' && orig.potential === 'medium' && (!orig.traits || orig.traits.length === 0))
+          if (selection.options.overwrite || isDefaultAcademic) {
+            target.academicProfile = item.updated.academicProfile
+          }
+        }
 
         // 处理关系更新
         if (item.updated._tempRelationships && item.updated._tempRelationships.length > 0) {

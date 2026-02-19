@@ -12,7 +12,7 @@ import { generateReply, generateStreaming, stopGeneration } from '../utils/stCli
 import { requestImageGeneration } from '../utils/imageGenerator'
 import { parseSocialTags, extractSuggestedReplies, extractTucao } from '../utils/messageParser'
 import { deleteSocialMessage, deleteMomentFromWorldbook } from '../utils/socialWorldbook'
-import { optimizeWorldbook, setVariableParsingWorldbookStatus, fetchMapDataFromWorldbook } from '../utils/worldbookParser'
+import { optimizeWorldbook, setVariableParsingWorldbookStatus, fetchMapDataFromWorldbook, syncClassWorldbookState, setupTeacherClassEntries } from '../utils/worldbookParser'
 import { callAssistantAI, callImageAnalysisAI } from '../utils/assistantAI'
 import { setMapData } from '../data/mapData'
 import { processPostReply, buildSummarizedHistory, extractSummary, removeThinking } from '../utils/summaryManager'
@@ -78,6 +78,7 @@ const showCommandPanel = ref(false)
 const showMenu = ref(false)
 const contentAreaRef = ref(null)
 const textareaRef = ref(null)
+const showGeminiTip = ref(false)
 const hasContentWarning = ref(false)
 const showWarningDetail = ref(false)
 
@@ -1629,6 +1630,23 @@ const handleRestore = async (snapshot) => {
   await loadImagesFromLog(gameLog.value)
   scrollToBottom(contentAreaRef.value)
   await initializeGameWorld()
+
+  // 兜底：initializeGameWorld 中的 optimizeWorldbook/injectSmartKeysToWorldbook 可能覆盖班级条目状态
+  try {
+    await syncClassWorldbookState(gameStore.currentRunId, gameStore.allClassData)
+    if (gameStore.player.role === 'teacher' && gameStore.player.teachingClasses?.length > 0) {
+      await setupTeacherClassEntries(
+        gameStore.player.teachingClasses,
+        gameStore.player.homeroomClassId,
+        gameStore.player.name,
+        gameStore.currentRunId,
+        gameStore.player.teachingSubjects,
+        gameStore.player.gender
+      )
+    }
+  } catch (e) {
+    console.warn('[GameMain] Post-restore class sync failed:', e)
+  }
 }
 
 const toggleDarkMode = () => {
@@ -1709,6 +1727,15 @@ onMounted(async () => {
   }
 
   await initializeGameWorld()
+
+  // Gemini 3.0 Preview 模式提示（辅助AI已开启时不弹）
+  if (gameStore.settings.useGeminiMode && !gameStore.settings.assistantAI?.enabled) {
+    const tipKey = `geminiTipShown_${gameStore.currentRunId}`
+    if (!sessionStorage.getItem(tipKey)) {
+      showGeminiTip.value = true
+      sessionStorage.setItem(tipKey, '1')
+    }
+  }
 
   if (gameStore.pendingRestoreLog) {
     gameLog.value = [...gameStore.pendingRestoreLog]
@@ -2073,6 +2100,20 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
           </div>
           <div class="modal-actions">
             <button class="confirm-btn" @click="showVariableViewer = false">关闭</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Gemini 3.0 Preview 模式提示弹窗 -->
+    <Teleport to="body">
+      <div v-if="showGeminiTip" class="modal-overlay" @click="showGeminiTip = false">
+        <div class="modal-content gemini-tip-modal" @click.stop>
+          <h3>⚡ Gemini 3.0 Preview 模式已启用</h3>
+          <p>该模型注意力范围较小，已为你自动开启总结系统和超级总结来压缩上下文。</p>
+          <p>建议同时开启<strong>辅助AI系统</strong>（设置 → 辅助AI），让辅助AI分摊总结等任务，减轻主模型的注意力压力。</p>
+          <div class="modal-actions">
+            <button class="confirm-btn" @click="showGeminiTip = false">知道了</button>
           </div>
         </div>
       </div>
@@ -2651,5 +2692,25 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
 .dark-mode .context-menu-item:hover {
   background: rgba(99, 102, 241, 0.15);
   color: #a5b4fc;
+}
+
+.gemini-tip-modal {
+  max-width: 420px;
+}
+
+.gemini-tip-modal h3 {
+  margin-bottom: 12px;
+  font-size: 1.1rem;
+}
+
+.gemini-tip-modal p {
+  margin-bottom: 8px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: #ccc;
+}
+
+.gemini-tip-modal strong {
+  color: #ffd700;
 }
 </style>

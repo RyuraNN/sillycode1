@@ -219,13 +219,7 @@ const localImportAllAsPending = computed({
 })
 
 const selectedCount = computed(() => {
-  let count = props.results.found.filter(c => c.selected).length
-  props.results.workResults.forEach(work => {
-    if (work.found) {
-      count += work.characters.filter(c => c.selected).length
-    }
-  })
-  return count
+  return props.results.found.filter(c => c.selected).length
 })
 
 const addEntry = () => {

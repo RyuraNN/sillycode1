@@ -58,6 +58,14 @@ const toggleFullscreen = () => {
     document.exitFullscreen()
   }
 }
+
+const onGeminiModeChange = () => {
+  if (gameStore.settings.useGeminiMode) {
+    gameStore.settings.summarySystem.enabled = true
+    gameStore.settings.summarySystem.enableSuperSummary = true
+  }
+  gameStore.saveToStorage()
+}
 </script>
 
 <template>
@@ -103,6 +111,12 @@ const toggleFullscreen = () => {
         <button class="menu-btn" @click="currentView = 'load'">读取存档</button>
         <button class="menu-btn" @click="currentView = 'settings'">游戏设置</button>
       </div>
+
+      <label class="gemini-mode-toggle" :class="{ active: gameStore.settings.useGeminiMode }">
+        <input type="checkbox" v-model="gameStore.settings.useGeminiMode" @change="onGeminiModeChange">
+        <span class="gemini-checkbox"></span>
+        <span class="gemini-label">Gemini 3.0 Preview 模式</span>
+      </label>
     </div>
 
     <!-- 子面板 -->
@@ -377,5 +391,54 @@ const toggleFullscreen = () => {
   z-index: 100;
   display: flex;
   gap: 12px;
+}
+
+.gemini-mode-toggle {
+  position: absolute;
+  bottom: 12%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  color: rgba(255, 248, 220, 0.5);
+  font-size: 0.9rem;
+  transition: color 0.3s ease;
+}
+
+.gemini-mode-toggle.active {
+  color: rgba(255, 215, 0, 0.9);
+}
+
+.gemini-mode-toggle input[type="checkbox"] {
+  display: none;
+}
+
+.gemini-checkbox {
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgba(218, 165, 32, 0.5);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+}
+
+.gemini-mode-toggle.active .gemini-checkbox {
+  background: rgba(218, 165, 32, 0.6);
+  border-color: rgba(255, 215, 0, 0.8);
+}
+
+.gemini-mode-toggle.active .gemini-checkbox::after {
+  content: '✓';
+  font-size: 11px;
+  color: #fff;
+}
+
+.gemini-mode-toggle:hover {
+  color: rgba(255, 248, 220, 0.8);
 }
 </style>

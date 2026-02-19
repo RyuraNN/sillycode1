@@ -593,10 +593,11 @@ const handleHomeClick = () => {
                       <div class="setting-item">
                         <span class="setting-label">启用总结系统</span>
                         <label class="switch">
-                          <input type="checkbox" v-model="gameStore.settings.summarySystem.enabled" @change="gameStore.saveToStorage()">
+                          <input type="checkbox" v-model="gameStore.settings.summarySystem.enabled" :disabled="gameStore.settings.useGeminiMode" @change="gameStore.saveToStorage()">
                           <span class="slider"></span>
                         </label>
                       </div>
+                      <span v-if="gameStore.settings.useGeminiMode" class="gemini-lock-hint">🔒 Gemini 3.0 Preview 模式下强制开启</span>
 
                       <div v-if="gameStore.settings.summarySystem.enabled">
                         <div class="setting-item">
@@ -651,10 +652,11 @@ const handleHomeClick = () => {
                         <div class="setting-item">
                           <span class="setting-label">启用超级总结</span>
                           <label class="switch">
-                            <input type="checkbox" v-model="gameStore.settings.summarySystem.enableSuperSummary" @change="gameStore.saveToStorage()">
+                            <input type="checkbox" v-model="gameStore.settings.summarySystem.enableSuperSummary" :disabled="gameStore.settings.useGeminiMode" @change="gameStore.saveToStorage()">
                             <span class="slider"></span>
                           </label>
                         </div>
+                        <span v-if="gameStore.settings.useGeminiMode" class="gemini-lock-hint">🔒 Gemini 3.0 Preview 模式下强制开启</span>
                         <p class="hint">关闭后大总结不会被进一步合并，保留更多早期剧情细节</p>
 
                         <div class="setting-item" v-if="gameStore.settings.summarySystem.enableSuperSummary">
@@ -806,6 +808,13 @@ const handleHomeClick = () => {
 </template>
 
 <style scoped>
+.gemini-lock-hint {
+  font-size: 0.7rem;
+  color: rgba(218, 165, 32, 0.8);
+  margin-left: 8px;
+  display: block;
+}
+
 .phone-overlay {
   position: fixed;
   top: 0;

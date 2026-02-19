@@ -2204,17 +2204,23 @@ export async function syncClassWorldbookState(currentRunId, allClassData) {
           if (specificMatch) {
             const classId = specificMatch[1]
             const runId = specificMatch[2]
-            
+
             if (runId === currentRunId) {
-              // 当前存档的条目：启用 (前提是该班级依然相关)
-              // 这里简化为：只要是当前存档生成的 runId 条目，就启用 (enabled: true)
-              // 具体的 constant/selective 策略在生成时已经设定好，或者在这里不做修改
+              // 当前存档的条目：启用
+              const shouldEnable = true
+              if (entry.enabled !== shouldEnable) {
+                console.log(`[WorldbookParser] ENABLE copy: ${entry.name}`)
+              }
               return {
                 ...entry,
                 enabled: true
               }
             } else {
               // 其他存档的条目，一律禁用
+              const shouldEnable = false
+              if (entry.enabled !== shouldEnable) {
+                console.log(`[WorldbookParser] DISABLE copy: ${entry.name}`)
+              }
               return {
                 ...entry,
                 enabled: false
@@ -2233,7 +2239,12 @@ export async function syncClassWorldbookState(currentRunId, allClassData) {
             // 如果切换到其他存档，activeRunClassIds 会变为空（或变为那个存档的副本），
             // 从而使 hasActiveRunCopy 为 false，进而重新启用原始条目。
             const hasActiveRunCopy = activeRunClassIds.has(classId)
-            
+
+            const shouldEnable = !hasActiveRunCopy
+            if (entry.enabled !== shouldEnable) {
+              console.log(`[WorldbookParser] ${shouldEnable ? 'ENABLE' : 'DISABLE'} original: ${entry.name} (hasActiveRunCopy: ${hasActiveRunCopy})`)
+            }
+
             if (hasActiveRunCopy) {
               // 有活跃的 runId 副本 → 禁用原始条目
               return {
