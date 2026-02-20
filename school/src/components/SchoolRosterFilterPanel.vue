@@ -594,6 +594,17 @@ const handleAddTeacher = () => {
 
 const handleEditTeacher = (teacher) => {
   editingTeacher.value = teacher
+
+  // 收集该教师在所有班级中的任教记录
+  const existingTeachingClasses = []
+  for (const [classId, classInfo] of Object.entries(fullRosterSnapshot.value)) {
+    if (Array.isArray(classInfo.teachers)) {
+      if (classInfo.teachers.some(t => t.name === teacher.name)) {
+        existingTeachingClasses.push(classId)
+      }
+    }
+  }
+
   teacherEditForm.value = {
     name: teacher.name || '',
     gender: teacher.gender || 'female',
@@ -601,7 +612,7 @@ const handleEditTeacher = (teacher) => {
     subject: teacher.subject || '',
     classId: teacher.classId || '',
     isHeadTeacher: teacher.isHeadTeacher || false,
-    teachingClasses: [],
+    teachingClasses: existingTeachingClasses,
     personality: teacher.personality || { order: 0, altruism: 0, tradition: 0, peace: 50 },
     notes: teacher.notes || ''
   }
@@ -610,53 +621,64 @@ const handleEditTeacher = (teacher) => {
 
 const handleSaveTeacher = async () => {
   const form = teacherEditForm.value
-  if (!form.name || !form.classId) {
-    showMessage('请填写姓名和班级')
+  if (!form.name) {
+    showMessage('请填写姓名')
     return
   }
 
-  // 如果是编辑模式，先从原位置移除
-  if (editingTeacher.value) {
-    const oldClassId = editingTeacher.value.classId
-    const oldName = editingTeacher.value.name
-    const oldClassData = fullRosterSnapshot.value[oldClassId]
+  const oldName = editingTeacher.value?.name || ''
 
-    if (oldClassData) {
-      if (oldClassData.headTeacher?.name === oldName) {
-        oldClassData.headTeacher = { name: '', gender: 'female', origin: '', role: 'teacher' }
-      }
-
-      if (Array.isArray(oldClassData.teachers)) {
-        const idx = oldClassData.teachers.findIndex(t => t.name === oldName)
-        if (idx !== -1) {
-          oldClassData.teachers.splice(idx, 1)
+  if (form.isHeadTeacher) {
+    if (!form.classId) {
+      showMessage('请选择班主任班级')
+      return
+    }
+    // 清除旧记录（所有班级）
+    if (oldName) {
+      for (const [, classInfo] of Object.entries(fullRosterSnapshot.value)) {
+        if (classInfo.headTeacher?.name === oldName) {
+          classInfo.headTeacher = { name: '', gender: 'female', origin: '', role: 'teacher' }
+        }
+        if (Array.isArray(classInfo.teachers)) {
+          const idx = classInfo.teachers.findIndex(t => t.name === oldName)
+          if (idx !== -1) classInfo.teachers.splice(idx, 1)
         }
       }
     }
-  }
-
-  // 添加到新位置
-  const newClassData = fullRosterSnapshot.value[form.classId]
-  if (!newClassData) return
-
-  if (form.isHeadTeacher) {
-    newClassData.headTeacher = {
-      name: form.name,
-      gender: form.gender,
-      origin: form.origin,
-      role: 'teacher'
+    // 设置新班主任
+    const targetClass = fullRosterSnapshot.value[form.classId]
+    if (targetClass) {
+      targetClass.headTeacher = {
+        name: form.name, gender: form.gender, origin: form.origin, role: 'teacher'
+      }
     }
   } else {
-    if (!newClassData.teachers) newClassData.teachers = []
-    if (!Array.isArray(newClassData.teachers)) newClassData.teachers = []
-
-    newClassData.teachers.push({
-      name: form.name,
-      gender: form.gender,
-      origin: form.origin,
-      subject: form.subject,
-      role: 'teacher'
-    })
+    if (!form.teachingClasses || form.teachingClasses.length === 0) {
+      showMessage('请至少选择一个任教班级')
+      return
+    }
+    // 清除旧记录（所有班级）
+    if (oldName) {
+      for (const [, classInfo] of Object.entries(fullRosterSnapshot.value)) {
+        if (classInfo.headTeacher?.name === oldName) {
+          classInfo.headTeacher = { name: '', gender: 'female', origin: '', role: 'teacher' }
+        }
+        if (Array.isArray(classInfo.teachers)) {
+          const idx = classInfo.teachers.findIndex(t => t.name === oldName)
+          if (idx !== -1) classInfo.teachers.splice(idx, 1)
+        }
+      }
+    }
+    // 添加到所有选中的班级
+    for (const classId of form.teachingClasses) {
+      const classData = fullRosterSnapshot.value[classId]
+      if (!classData) continue
+      if (!Array.isArray(classData.teachers)) classData.teachers = []
+      classData.teachers.push({
+        name: form.name, gender: form.gender, origin: form.origin,
+        subject: form.subject, role: 'teacher'
+      })
+    }
   }
 
   showTeacherEditor.value = false
@@ -1033,6 +1055,11 @@ const addCharToCurrentClass = (char) => {
 
 const handleAddCharacterToClass = (char) => {
   if (char.isAssigned) {
+    if (char.role === 'teacher') {
+      // 教师允许同时在多个班级任教，直接添加，不从原班级移除
+      addCharToCurrentClass(char)
+      return
+    }
     const yes = confirm(`「${char.name}」已在「${char.assignedTo}」中，是否将其从原班级移除并添加到当前班级？`)
     if (!yes) return
     removeCharFromOtherClass(char.name)
