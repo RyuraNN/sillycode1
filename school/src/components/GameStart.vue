@@ -184,9 +184,13 @@ const addCustomCourse = () => {
   
   // 按课程类型分流
   if (newCourseForm.value.type === 'elective') {
-    // 选修课暂存名称，注册后会用 ID 替换
     if (!teacherData.value.customElectiveNames) teacherData.value.customElectiveNames = []
     teacherData.value.customElectiveNames.push(newCourseForm.value.name)
+    // 自动选中这个自定义选修课
+    const pendingId = `pending_custom_${teacherData.value.customElectiveNames.length - 1}_${newCourseForm.value.name}`
+    if (!teacherData.value.teachingElectives.includes(pendingId)) {
+      teacherData.value.teachingElectives.push(pendingId)
+    }
   } else {
     if (!teacherData.value.teachingSubjects.includes(newCourseForm.value.name)) {
       teacherData.value.teachingSubjects.push(newCourseForm.value.name)
@@ -194,6 +198,30 @@ const addCustomCourse = () => {
   }
   
   showAddCourseModal.value = false
+}
+
+const removeCustomCourse = (idx) => {
+  const course = teacherData.value.customCourses[idx]
+  if (!course) return
+
+  if (course.type === 'elective') {
+    // 移除 customElectiveNames 中对应的名称
+    if (teacherData.value.customElectiveNames) {
+      const nameIdx = teacherData.value.customElectiveNames.indexOf(course.name)
+      if (nameIdx > -1) teacherData.value.customElectiveNames.splice(nameIdx, 1)
+    }
+    // 移除 teachingElectives 中对应的 pending ID
+    teacherData.value.teachingElectives = teacherData.value.teachingElectives.filter(
+      id => !(id.startsWith('pending_custom_') && id.endsWith(`_${course.name}`))
+    )
+  } else {
+    // 必修课：从 teachingSubjects 中移除
+    const subjIdx = teacherData.value.teachingSubjects.indexOf(course.name)
+    if (subjIdx > -1) teacherData.value.teachingSubjects.splice(subjIdx, 1)
+  }
+
+  // 从 customCourses 中移除
+  teacherData.value.customCourses.splice(idx, 1)
 }
 
 // 可选学科列表 (更新为更准确的名称)
@@ -215,9 +243,22 @@ const subjectOptions = [
 const allElectiveOptions = computed(() => {
   const allElectives = [
     ...UNIVERSAL_ELECTIVES,
+    ...(GRADE_1_COURSES.electives || []),
     ...(GRADE_2_COURSES.electives || []),
     ...(GRADE_3_COURSES.electives || [])
   ]
+  // 追加自定义选修课（尚未注册到课程池的）
+  if (teacherData.value.customCourses) {
+    teacherData.value.customCourses
+      .filter(c => c.type === 'elective')
+      .forEach((c, i) => {
+        allElectives.push({
+          id: `pending_custom_${i}_${c.name}`,
+          name: c.name,
+          _isCustomPending: true
+        })
+      })
+  }
   // 去重
   const seen = new Set()
   return allElectives.filter(c => {
@@ -735,6 +776,11 @@ const confirmSignature = async () => {
 
         // 选修课注册后加入 teachingElectives
         if (registered.type === 'elective') {
+          // 移除临时 pending ID，替换为正式 ID
+          const pendingPrefix = 'pending_custom_'
+          teacherData.value.teachingElectives = teacherData.value.teachingElectives.filter(
+            id => !(id.startsWith(pendingPrefix) && id.endsWith(`_${course.name}`))
+          )
           if (!teacherData.value.teachingElectives.includes(registered.id)) {
             teacherData.value.teachingElectives.push(registered.id)
           }
@@ -787,6 +833,9 @@ const confirmSignature = async () => {
         await gameStore.joinClassGroup(classId, classInfo)
       }
     }
+
+    // 触发 NPC 选课，使教师 prompt 中能显示选修课学生名单
+    await gameStore.processNpcElectiveSelection()
   }
   
   // 设置世界书策略（选中班级蓝灯，其他绿灯）并创建班级群
@@ -1280,6 +1329,13 @@ const confirmSignature = async () => {
                     {{ subj.label }}
                   </div>
                   <button class="add-custom-btn" @click="openAddCourseModal">+ 自定义课程</button>
+                </div>
+                <!-- 已添加的自定义课程 -->
+                <div v-if="teacherData.customCourses && teacherData.customCourses.length > 0" class="custom-courses-list">
+                  <div v-for="(course, idx) in teacherData.customCourses" :key="idx" class="select-chip active">
+                    {{ course.name }} ({{ course.type === 'elective' ? '选修' : '必修' }})
+                    <span class="remove-x" @click="removeCustomCourse(idx)">×</span>
+                  </div>
                 </div>
               </div>
             </div>

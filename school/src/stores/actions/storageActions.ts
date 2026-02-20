@@ -119,7 +119,32 @@ function validateAndRepairSettings(settings: any): any {
   if (!Array.isArray(settings.customContentTags)) {
     settings.customContentTags = [...defaults.customContentTags]
   }
-  
+
+  // 可空字符串字段
+  const nullableStringFields = [
+    'customInstructionsPrompt', 'customStylePrompt', 'customCoreRulesPrompt'
+  ]
+  for (const field of nullableStringFields) {
+    if (settings[field] !== null && typeof settings[field] !== 'string') {
+      settings[field] = null
+    }
+  }
+
+  // bannedWords 对象
+  if (!settings.bannedWords || typeof settings.bannedWords !== 'object') {
+    settings.bannedWords = { ...defaults.bannedWords }
+  } else {
+    settings.bannedWords = { ...defaults.bannedWords, ...settings.bannedWords }
+  }
+  if (!['instructions', 'style', 'coreRules'].includes(settings.bannedWords.position)) {
+    settings.bannedWords.position = 'style'
+  }
+
+  // useGeminiMode 迁移：旧存档 useGeminiMode=true 时自动关闭禁词表
+  if (settings.useGeminiMode && settings.bannedWords.enabled !== false) {
+    settings.bannedWords.enabled = false
+  }
+
   // 清除任何可能导致问题的非法字段
   // （删除已知已废弃的字段）
   const knownFields = new Set(Object.keys(defaults))

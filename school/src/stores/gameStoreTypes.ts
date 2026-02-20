@@ -631,6 +631,14 @@ export interface GameState {
     imageGenerationPrompt: string
     imageContextDepth: number
     customImageAnalysisPrompt: string
+    customInstructionsPrompt: string | null
+    customStylePrompt: string | null
+    customCoreRulesPrompt: string | null
+    bannedWords: {
+      enabled: boolean
+      customContent: string | null
+      position: 'instructions' | 'style' | 'coreRules'
+    }
     debugMode: boolean
     debugUnlocked: boolean
     snapshotLimit: number

@@ -198,6 +198,14 @@ export function createInitialState(): GameState {
       imageGenerationPrompt: '',
       imageContextDepth: 0,
       customImageAnalysisPrompt: '',
+      customInstructionsPrompt: null,
+      customStylePrompt: null,
+      customCoreRulesPrompt: null,
+      bannedWords: {
+        enabled: true,
+        customContent: null,
+        position: 'style'
+      },
       debugMode: false,
       debugUnlocked: false,
       snapshotLimit: 10,

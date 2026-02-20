@@ -321,6 +321,11 @@ const parseMessage = (content) => {
     return { type: 'text', text: content }
 }
 
+const formatText = (text) => {
+  if (!text) return ''
+  return text.replace(/\\n/g, '\n')
+}
+
 const loadMessages = async () => {
   if (!activeChat.value) return
   const data = await getSocialData(activeChat.value.id)
@@ -1105,7 +1110,7 @@ const handleSendFriendRequest = (charName) => {
                 </div>
                 <div class="moment-content">
                   <div class="moment-name">{{ moment.name }}</div>
-                  <div class="moment-text">{{ moment.content }}</div>
+                  <div class="moment-text">{{ formatText(moment.content) }}</div>
                   
                   <div class="moment-footer">
                     <span class="moment-time">{{ formatMomentTime(moment.timestamp) }}</span>
@@ -1133,7 +1138,7 @@ const handleSendFriendRequest = (charName) => {
                     <div v-if="moment.comments && moment.comments.length > 0" class="comments-list">
                       <div v-for="comment in moment.comments" :key="comment.id" class="comment-item">
                         <span class="comment-user">{{ comment.name }}:</span>
-                        <span class="comment-content">{{ comment.content }}</span>
+                        <span class="comment-content">{{ formatText(comment.content) }}</span>
                       </div>
                     </div>
                   </div>
@@ -1256,7 +1261,7 @@ const handleSendFriendRequest = (charName) => {
                
                <div class="message-bubble" :class="{ 'media-bubble': parseMessage(msg.content).type !== 'text' }">
                  <!-- 文本消息 -->
-                 <span v-if="parseMessage(msg.content).type === 'text'">{{ msg.content }}</span>
+                 <span v-if="parseMessage(msg.content).type === 'text'" style="white-space: pre-wrap">{{ formatText(msg.content) }}</span>
                  
                  <!-- 图片消息 -->
                  <div v-else-if="parseMessage(msg.content).type === 'image'" class="media-content image-msg">
@@ -2358,6 +2363,7 @@ const handleSendFriendRequest = (charName) => {
   line-height: 1.5;
   color: var(--text-primary);
   margin-bottom: 8px;
+  white-space: pre-wrap;
 }
 
 .moment-tags {
@@ -2446,6 +2452,7 @@ const handleSendFriendRequest = (charName) => {
 
 .comment-content {
   color: var(--text-primary);
+  white-space: pre-wrap;
 }
 
 .empty-moments {

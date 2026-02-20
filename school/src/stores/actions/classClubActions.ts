@@ -12,6 +12,7 @@ import { generateWeeklySchedule } from '../../utils/scheduleGenerator'
 import { generateCharId } from '../../data/relationshipData'
 import { createInitialPlayerState, createInitialGameTime, createInitialWorldState } from '../gameStoreState'
 import { getCurrentBookName } from '../../utils/worldbookHelper'
+import { resetCourseData, loadCoursePoolFromWorldbook } from '../../data/coursePoolData'
 
 export const classClubActions = {
   /**
@@ -882,12 +883,15 @@ export const classClubActions = {
             if (hasElectiveSlots) break
           }
         }
-        
+
         if (!hasElectiveSlots) {
           console.log('[GameStore] Elective slots missing from schedule, regenerating...')
           await this.generateElectiveSchedule()
         }
-        
+
+        await this.processNpcElectiveSelection()
+      } else if (this.player.role === 'teacher' && this.player.teachingElectives && this.player.teachingElectives.length > 0) {
+        // 教师模式：也需要触发 NPC 选课，以便 prompt 中显示学生名单
         await this.processNpcElectiveSelection()
       } else {
         const { clearElectiveEntries } = await import('../../utils/electiveWorldbook.js')
@@ -982,6 +986,10 @@ export const classClubActions = {
 
     this.currentRunId = Date.now().toString(36)
     this.currentFloor = 0
+
+    // 重置课程池，清除上个存档的自定义课程，再从 worldbook 重新加载（带 runId 过滤）
+    resetCourseData()
+    await loadCoursePoolFromWorldbook(this.currentRunId)
     
     // 使用初始状态重置玩家
     const initialPlayer = createInitialPlayerState()

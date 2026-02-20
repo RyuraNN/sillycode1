@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { fetchModels, IMAGE_ANALYSIS_PROMPT } from '../utils/assistantAI'
 import { generateBatchSummaries } from '../utils/summaryManager'
+import { DEFAULT_INSTRUCTIONS_PROMPT, DEFAULT_STYLE_PROMPT, DEFAULT_CORE_RULES_PROMPT, DEFAULT_BANNED_WORDS_PROMPT } from '../utils/prompts'
 import SummaryViewer from './SummaryViewer.vue'
 
 defineEmits(['back'])
@@ -25,6 +26,56 @@ const resetImageSystemPrompt = () => {
     gameStore.settings.customImageAnalysisPrompt = ''
     gameStore.saveToStorage()
   }
+}
+
+// 提示词编辑
+const showPromptEditor = ref(false)
+
+const promptDefaults = {
+  customInstructionsPrompt: DEFAULT_INSTRUCTIONS_PROMPT,
+  customStylePrompt: DEFAULT_STYLE_PROMPT,
+  customCoreRulesPrompt: DEFAULT_CORE_RULES_PROMPT
+}
+
+const onPromptInput = (field, event) => {
+  const val = event.target.value.trim()
+  gameStore.settings[field] = val === '' ? null : val
+  gameStore.saveToStorage()
+}
+
+const onBannedWordsInput = (event) => {
+  const val = event.target.value.trim()
+  gameStore.settings.bannedWords.customContent = val === '' ? null : val
+  gameStore.saveToStorage()
+}
+
+const loadDefaultText = (field) => {
+  gameStore.settings[field] = promptDefaults[field]
+  gameStore.saveToStorage()
+}
+
+const loadBannedWordsDefault = () => {
+  gameStore.settings.bannedWords.customContent = DEFAULT_BANNED_WORDS_PROMPT
+  gameStore.saveToStorage()
+}
+
+const resetPromptField = (field) => {
+  gameStore.settings[field] = null
+  gameStore.saveToStorage()
+}
+
+const resetBannedWords = () => {
+  gameStore.settings.bannedWords = { enabled: true, customContent: null, position: 'style' }
+  gameStore.saveToStorage()
+}
+
+const resetAllPrompts = () => {
+  if (!confirm('确定要将所有提示词重置为默认值吗？')) return
+  for (const field of Object.keys(promptDefaults)) {
+    gameStore.settings[field] = null
+  }
+  gameStore.settings.bannedWords = { enabled: true, customContent: null, position: 'style' }
+  gameStore.saveToStorage()
 }
 
 const startBatchGeneration = async () => {
@@ -580,6 +631,123 @@ const loadModels = async () => {
           </div>
         </div>
 
+        <!-- 提示词编辑 -->
+        <div class="settings-card">
+          <div class="card-header" @click="showPromptEditor = !showPromptEditor" style="cursor: pointer;">
+            <span class="card-icon">📝</span>
+            <h3 class="card-title">提示词编辑</h3>
+            <span style="margin-left: auto; font-size: 12px; opacity: 0.6;">{{ showPromptEditor ? '▲ 收起' : '▼ 展开' }}</span>
+          </div>
+          <transition name="fade">
+            <div class="card-body" v-if="showPromptEditor">
+              <p class="setting-hint" style="color: #e67e22; margin-bottom: 12px;">
+                ⚠️ 修改提示词可能影响AI行为，如遇异常请重置为默认值
+              </p>
+
+              <!-- Instructions -->
+              <div class="input-group">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <label class="input-label">输出格式指令 / Instructions</label>
+                  <span class="prompt-status-tag" :class="gameStore.settings.customInstructionsPrompt ? 'custom' : 'default'">
+                    {{ gameStore.settings.customInstructionsPrompt ? '已自定义' : '使用默认' }}
+                  </span>
+                </div>
+                <textarea
+                  class="text-input prompt-textarea"
+                  style="min-height: 150px;"
+                  :value="gameStore.settings.customInstructionsPrompt || ''"
+                  :placeholder="DEFAULT_INSTRUCTIONS_PROMPT.slice(0, 100) + '...'"
+                  @change="onPromptInput('customInstructionsPrompt', $event)"
+                ></textarea>
+                <div class="prompt-btn-group">
+                  <button class="text-btn" @click="loadDefaultText('customInstructionsPrompt')">加载默认文本</button>
+                  <button class="text-btn" @click="resetPromptField('customInstructionsPrompt')" v-if="gameStore.settings.customInstructionsPrompt">重置为默认</button>
+                </div>
+              </div>
+
+              <!-- Style -->
+              <div class="input-group">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <label class="input-label">写作风格 / Style</label>
+                  <span class="prompt-status-tag" :class="gameStore.settings.customStylePrompt ? 'custom' : 'default'">
+                    {{ gameStore.settings.customStylePrompt ? '已自定义' : '使用默认' }}
+                  </span>
+                </div>
+                <textarea
+                  class="text-input prompt-textarea"
+                  style="min-height: 300px;"
+                  :value="gameStore.settings.customStylePrompt || ''"
+                  :placeholder="DEFAULT_STYLE_PROMPT.slice(0, 100) + '...'"
+                  @change="onPromptInput('customStylePrompt', $event)"
+                ></textarea>
+                <div class="prompt-btn-group">
+                  <button class="text-btn" @click="loadDefaultText('customStylePrompt')">加载默认文本</button>
+                  <button class="text-btn" @click="resetPromptField('customStylePrompt')" v-if="gameStore.settings.customStylePrompt">重置为默认</button>
+                </div>
+              </div>
+
+              <!-- Core Rules -->
+              <div class="input-group">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <label class="input-label">核心规则 / Core Rules</label>
+                  <span class="prompt-status-tag" :class="gameStore.settings.customCoreRulesPrompt ? 'custom' : 'default'">
+                    {{ gameStore.settings.customCoreRulesPrompt ? '已自定义' : '使用默认' }}
+                  </span>
+                </div>
+                <textarea
+                  class="text-input prompt-textarea"
+                  style="min-height: 200px;"
+                  :value="gameStore.settings.customCoreRulesPrompt || ''"
+                  :placeholder="DEFAULT_CORE_RULES_PROMPT.slice(0, 100) + '...'"
+                  @change="onPromptInput('customCoreRulesPrompt', $event)"
+                ></textarea>
+                <div class="prompt-btn-group">
+                  <button class="text-btn" @click="loadDefaultText('customCoreRulesPrompt')">加载默认文本</button>
+                  <button class="text-btn" @click="resetPromptField('customCoreRulesPrompt')" v-if="gameStore.settings.customCoreRulesPrompt">重置为默认</button>
+                </div>
+              </div>
+
+              <!-- 禁词黑名单 -->
+              <div class="input-group">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <label class="input-label">禁词黑名单</label>
+                  <label class="toggle-label">
+                    <input type="checkbox" v-model="gameStore.settings.bannedWords.enabled" @change="gameStore.saveToStorage()" />
+                    <span>{{ gameStore.settings.bannedWords.enabled ? '已启用' : '已禁用' }}</span>
+                  </label>
+                </div>
+                <div v-if="gameStore.settings.bannedWords.enabled" style="margin-top: 8px;">
+                  <div class="input-group" style="margin-bottom: 8px;">
+                    <label class="input-label" style="font-size: 12px;">插入位置</label>
+                    <select class="text-input" v-model="gameStore.settings.bannedWords.position" @change="gameStore.saveToStorage()" style="width: auto;">
+                      <option value="style">写作风格 / Style</option>
+                      <option value="coreRules">核心规则 / Core Rules</option>
+                      <option value="instructions">输出格式指令 / Instructions</option>
+                    </select>
+                  </div>
+                  <textarea
+                    class="text-input prompt-textarea"
+                    style="min-height: 200px;"
+                    :value="gameStore.settings.bannedWords.customContent || ''"
+                    :placeholder="DEFAULT_BANNED_WORDS_PROMPT.slice(0, 100) + '...'"
+                    @change="onBannedWordsInput($event)"
+                  ></textarea>
+                  <div class="prompt-btn-group">
+                    <button class="text-btn" @click="loadBannedWordsDefault">加载默认文本</button>
+                    <button class="text-btn" @click="resetBannedWords" v-if="gameStore.settings.bannedWords.customContent">重置为默认</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 全部重置 -->
+              <div style="text-align: center; margin-top: 12px;">
+                <button class="text-btn" style="color: #e74c3c;" @click="resetAllPrompts">全部重置为默认</button>
+              </div>
+
+            </div>
+          </transition>
+        </div>
+
         <!-- 制作名单 -->
         <div class="settings-card">
           <div class="card-header">
@@ -589,7 +757,7 @@ const loadModels = async () => {
           <div class="card-body credits-body">
             <p>原作者：墨沈</p>
             <p @click="handleCreditsClick" style="cursor: pointer; user-select: none;">重置：Elyrene</p>
-            <p>版本号 V2.0fix</p>
+            <p>版本号 V2.0</p>
             <p>免费发布于DC类脑社区</p>
           </div>
         </div>
@@ -1300,6 +1468,26 @@ const loadModels = async () => {
   font-size: 0.85rem;
   line-height: 1.4;
   resize: vertical;
+}
+
+.prompt-status-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+.prompt-status-tag.default {
+  background: rgba(255,255,255,0.1);
+  color: #aaa;
+}
+.prompt-status-tag.custom {
+  background: rgba(52,152,219,0.2);
+  color: #5dade2;
+}
+
+.prompt-btn-group {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
 }
 
 .text-btn {
