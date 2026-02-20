@@ -779,10 +779,12 @@ export async function ensureClubExistsInWorldbook(clubData, runId) {
         
         // 确定策略类型：
         // 1. 学生会 (student_council) 始终为常驻 (constant/蓝灯)
-        // 2. 指定了 runId (isRunSpecific) 的条目为常驻 (constant/蓝灯)
-        // 3. 其他通用初始条目为选择性 (selective/绿灯)
+        // 2. restricted 模式社团为常驻 (constant/蓝灯)
+        // 3. 指定了 runId (isRunSpecific) 的条目为常驻 (constant/蓝灯)
+        // 4. 其他通用初始条目为选择性 (selective/绿灯)
         const isStudentCouncil = clubData.id === 'student_council'
-        const strategyType = (isStudentCouncil || isRunSpecific) ? 'constant' : 'selective'
+        const isRestricted = clubData.mode === 'restricted'
+        const strategyType = (isStudentCouncil || isRestricted || isRunSpecific) ? 'constant' : 'selective'
         
         // 确定优先级：
         // 学生会优先级较高 (5)，其他默认为 50

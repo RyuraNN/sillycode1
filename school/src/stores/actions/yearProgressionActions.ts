@@ -945,13 +945,17 @@ export const yearProgressionActions = {
     // 重新生成玩家课表
     if (this.player.role === 'teacher') {
       // 教师课表
-      const { generateTeacherSchedule } = await import('../../utils/scheduleGenerator') // 动态引入以避免循环依赖
-      this.player.schedule = generateTeacherSchedule(
-        this.player.teachingClasses,
-        this.player.teachingSubjects,
-        this.player.teachingElectives,
-        this.allClassData,
-        weekNumber
+      const { generateIndependentTeacherSchedule } = await import('../../utils/scheduleGenerator')
+      this.player.schedule = generateIndependentTeacherSchedule(
+        {
+          teachingClasses: this.player.teachingClasses,
+          homeroomClassId: this.player.homeroomClassId,
+          teachingSubjects: this.player.teachingSubjects,
+          teachingElectives: this.player.teachingElectives,
+          customCourses: this.player.customCourses || []
+        },
+        { year: this.gameTime.year, month: this.gameTime.month, day: this.gameTime.day },
+        this.allClassData
       )
       console.log('[YearProgression] Regenerated teacher schedule')
     } else if (this.player.classId) {

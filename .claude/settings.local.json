@@ -13,7 +13,10 @@
       "Bash(npx vite build)",
       "WebSearch",
       "Bash(cd:*)",
-      "Bash(exit 0)"
+      "Bash(exit 0)",
+      "Bash(awk:*)",
+      "Bash(grep:*)",
+      "Bash(xargs cat:*)"
     ]
   }
 }

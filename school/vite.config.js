@@ -6,6 +6,8 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 import { viteSingleFile } from 'vite-plugin-singlefile'
 import { Plugin as importToCDN } from 'vite-plugin-cdn-import'
 
+const isRawBuild = process.env.BUILD_RAW === 'true'
+
 /**
  * 自定义插件：将内联 <script> 的 JS 代码转为 base64，通过 bootstrap 脚本解码执行。
  *
@@ -36,6 +38,11 @@ function escapeInlineScriptPlugin() {
       }
 
       let html = fs.readFileSync(htmlPath, 'utf-8')
+
+      // 在 base64 编码前保存一份压缩但未编码的 raw 版本
+      const rawPath = path.resolve('dist/index.raw.html')
+      fs.writeFileSync(rawPath, html, 'utf-8')
+      console.log(`[escape-inline-script] Saved pre-encoding copy to index.raw.html`)
 
       html = html.replace(
         /(<script\b[^>]*>)([\s\S]*?)(<\/script>)/gi,
@@ -91,6 +98,31 @@ function escapeInlineScriptPlugin() {
   }
 }
 
+/**
+ * 仅在 BUILD_RAW 模式下启用：将 dist/index.html 重命名为 dist/index.raw.html
+ */
+function rawBuildRenamePlugin() {
+  return {
+    name: 'raw-build-rename',
+    enforce: 'post',
+    async closeBundle() {
+      const fs = await import('fs')
+      const path = await import('path')
+
+      const htmlPath = path.resolve('dist/index.html')
+      const rawPath = path.resolve('dist/index.raw.html')
+
+      if (!fs.existsSync(htmlPath)) {
+        console.warn('[raw-build-rename] index.html not found, skipping')
+        return
+      }
+
+      fs.renameSync(htmlPath, rawPath)
+      console.log('[raw-build-rename] Renamed index.html → index.raw.html')
+    }
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
@@ -104,7 +136,7 @@ export default defineConfig({
     }),
     vueDevTools(),
     viteSingleFile(),
-    escapeInlineScriptPlugin(),
+    ...isRawBuild ? [rawBuildRenamePlugin()] : [escapeInlineScriptPlugin()],
     // importToCDN({
     //   modules: [
     //     {
@@ -132,8 +164,8 @@ export default defineConfig({
   },
   build: {
     target: 'esnext', // SillyTavern 运行在现代 Chromium 内核，无需降级
-    minify: 'terser',
-    terserOptions: {
+    minify: isRawBuild ? false : 'terser',
+    terserOptions: isRawBuild ? undefined : {
       ecma: 2020,
       mangle: {
         reserved: ['$', 'jQuery'] // 避免 $ 作为压缩变量名，防止宏冲突

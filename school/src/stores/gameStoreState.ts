@@ -131,6 +131,7 @@ export function createInitialState(): GameState {
         shoes: null,
         accessory: null
       },
+      outfitDescription: '',
       activeEffects: [],
       productStock: {},
       summaries: [],

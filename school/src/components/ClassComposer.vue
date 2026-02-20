@@ -131,6 +131,16 @@
           </label>
 
           <label class="filter-checkbox">
+            <input type="checkbox" v-model="localShowInRoster" />
+            名册内已勾选
+          </label>
+
+          <label class="filter-checkbox">
+            <input type="checkbox" v-model="localShowUserCreated" />
+            玩家添加
+          </label>
+
+          <label class="filter-checkbox">
             <input type="checkbox" v-model="localGroupView" />
             按作品分组
           </label>
@@ -219,6 +229,8 @@ const props = defineProps({
   roleFilter: String,
   workFilter: String,
   showUnassigned: Boolean,
+  showInRoster: Boolean,
+  showUserCreated: Boolean,
   groupView: Boolean,
   availableWorks: Array,
   groupedCharacters: Object
@@ -239,6 +251,8 @@ const emit = defineEmits([
   'update:roleFilter',
   'update:workFilter',
   'update:showUnassigned',
+  'update:showInRoster',
+  'update:showUserCreated',
   'update:groupView'
 ])
 
@@ -282,6 +296,16 @@ const localShowUnassigned = computed({
   set: (val) => emit('update:showUnassigned', val)
 })
 
+const localShowInRoster = computed({
+  get: () => props.showInRoster,
+  set: (val) => emit('update:showInRoster', val)
+})
+
+const localShowUserCreated = computed({
+  get: () => props.showUserCreated,
+  set: (val) => emit('update:showUserCreated', val)
+})
+
 const localGroupView = computed({
   get: () => props.groupView,
   set: (val) => emit('update:groupView', val)
@@ -321,6 +345,16 @@ const filteredCharacters = computed(() => {
   // 仅未分配
   if (props.showUnassigned) {
     result = result.filter(c => !c.isAssigned)
+  }
+
+  // 名册内已勾选
+  if (props.showInRoster) {
+    result = result.filter(c => c.inRoster)
+  }
+
+  // 玩家添加
+  if (props.showUserCreated) {
+    result = result.filter(c => c.userCreated)
   }
 
   // 搜索

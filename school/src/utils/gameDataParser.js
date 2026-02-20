@@ -145,6 +145,7 @@ export const analyzeChanges = (data) => {
   if (data.npcs) changes.push('NPC状态发生了变化')
   if (data.npc_move) changes.push('NPC位置被强制变更')
   if (data.npc_mood) changes.push('NPC心情发生了变化')
+  if (data.outfit) changes.push('角色衣着发生了变化')
   
   return changes
 }
@@ -283,6 +284,11 @@ export const applyGameData = (data) => {
       processNpcMoveUpdate(data.npc_move, gameStore)
     }
 
+    // Process outfit updates
+    if (data.outfit) {
+      processOutfitUpdate(data.outfit, gameStore)
+    }
+
     // 检查事件触发
     gameStore.checkEventTriggers()
     gameStore.updateEvents()
@@ -312,6 +318,32 @@ function processNpcMoveUpdate(moveData, gameStore) {
       console.log(`[GameData] NPC ${name} forced to move to ${location} for ${duration} hours`)
     }
   })
+}
+
+/**
+ * 处理角色衣着更新
+ * @param {Object} outfitData - 衣着数据
+ * @param {Object} gameStore - 游戏状态
+ */
+function processOutfitUpdate(outfitData, gameStore) {
+  if (!outfitData || typeof outfitData !== 'object') return
+
+  // 玩家衣着
+  if (outfitData.player) {
+    gameStore.player.outfitDescription = outfitData.player
+    console.log(`[GameData] Player outfit updated: ${outfitData.player}`)
+  }
+
+  // NPC衣着
+  if (outfitData.npcs && typeof outfitData.npcs === 'object') {
+    for (const [npcName, description] of Object.entries(outfitData.npcs)) {
+      const npc = gameStore.npcs.find(n => n.name === npcName)
+      if (npc) {
+        npc.outfitDescription = description
+        console.log(`[GameData] NPC ${npcName} outfit updated: ${description}`)
+      }
+    }
+  }
 }
 
 /**

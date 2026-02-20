@@ -679,6 +679,59 @@ export const buildEventPrompt = (player, gameTime) => {
 }
 
 /**
+ * 获取角色默认衣着
+ * @param {string} role 角色类型
+ * @returns {string} 默认衣着描述
+ */
+function getDefaultOutfit(role) {
+  switch (role) {
+    case 'teacher': return '正装'
+    case 'staff': return '工作服'
+    default: return '校服'
+  }
+}
+
+/**
+ * 获取玩家衣着字符串（装备优先，混合模式）
+ * @param {Object} player 玩家对象
+ * @returns {string} 衣着描述
+ */
+function getPlayerOutfitString(player) {
+  const slotLabels = {
+    hat: '头部', outer: '外套', inner: '上衣',
+    pants: '下装', socks: '袜子', shoes: '鞋子', accessory: '饰品'
+  }
+  const slots = ['hat', 'outer', 'inner', 'pants', 'socks', 'shoes', 'accessory']
+  const equipped = []
+  let hasAnyEquipment = false
+
+  for (const slot of slots) {
+    const item = player.equipment?.[slot]
+    if (item) {
+      hasAnyEquipment = true
+      equipped.push(`${slotLabels[slot]}: ${item.name}`)
+    }
+  }
+
+  if (hasAnyEquipment) {
+    const fallback = player.outfitDescription || getDefaultOutfit(player.role || 'student')
+    const unequippedNote = equipped.length < 7 ? `（其余: ${fallback}）` : ''
+    return equipped.join('，') + unequippedNote
+  }
+
+  return player.outfitDescription || getDefaultOutfit(player.role || 'student')
+}
+
+/**
+ * 获取NPC衣着字符串
+ * @param {Object} npc NPC对象
+ * @returns {string} 衣着描述
+ */
+function getNpcOutfitString(npc) {
+  return npc.outfitDescription || getDefaultOutfit(npc.role || 'student')
+}
+
+/**
  * 游戏状态提示词模板
  * @param {Object} gameState 游戏状态对象
  * @returns {string} 格式化后的提示词内容
@@ -825,7 +878,8 @@ export const buildSystemPromptContent = (gameState) => {
           roleStr += ` (${npc.staffTitle})`
         }
         details += `Role: ${roleStr}\n`
-        
+        details += `Outfit: ${getNpcOutfitString(npc)}\n`
+
         // 工作地点 (职工)
         if (npc.role === 'staff' && npc.workplace) {
           const workplaceName = getItem(npc.workplace)?.name || npc.workplace
@@ -1123,6 +1177,7 @@ Grade: ${player.gradeYear || 1}年级
 Gender: ${player.gender || 'Unknown'}
 Class: ${className}
 Character Feature: ${player.characterFeature || '无'}${teacherStatusPrompt}
+Current Outfit: ${getPlayerOutfitString(player)}
 ${backgroundPrompt}Location: ${locationName}
 Money: ${player.money}
 Inventory: ${inventoryStr}

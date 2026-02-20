@@ -7,7 +7,7 @@ import { useCharacterPool } from '../composables/useCharacterPool'
 import { useBatchComplete } from '../composables/useBatchComplete'
 import { useAIImport } from '../composables/useAIImport'
 import { saveRosterBackup, saveFullCharacterPool } from '../utils/indexedDB'
-import { updateClassDataInWorldbook, updateAcademicDataInWorldbook, updateStaffRosterInWorldbook } from '../utils/worldbookParser'
+import { updateClassDataInWorldbook, updateAcademicDataInWorldbook, updateStaffRosterInWorldbook, ensureClubExistsInWorldbook, syncClubWorldbookState } from '../utils/worldbookParser'
 import { saveSocialData } from '../utils/socialRelationshipsWorldbook'
 import { saveImpressionDataImmediate } from '../utils/impressionWorldbook'
 
@@ -23,6 +23,9 @@ import TeacherEditModal from './TeacherEditModal.vue'
 import MessageModal from './MessageModal.vue'
 import MapEditorPanel from './MapEditorPanel.vue'
 import WorldbookSyncPanel from './WorldbookSyncPanel.vue'
+import ClubEditorPanel from './ClubEditorPanel.vue'
+import ClubEditModal from './ClubEditModal.vue'
+import { getItem } from '../data/mapData'
 
 const emit = defineEmits(['close'])
 const gameStore = useGameStore()
@@ -65,7 +68,7 @@ const {
 } = useAIImport()
 
 // ==================== 状态管理 ====================
-const activeTab = ref('filter') // 'filter' | 'composer' | 'characterEditor'
+const activeTab = ref('filter') // 'filter' | 'composer' | 'characterEditor' | 'clubEditor'
 const filterSubTab = ref('student') // 'student' | 'teacher'
 const saving = ref(false)
 const isLocked = ref(false)
@@ -116,6 +119,8 @@ const composerSearchQuery = ref('')
 const composerRoleFilter = ref('all')
 const composerWorkFilter = ref('')
 const composerShowUnassigned = ref(false)
+const composerShowInRoster = ref(false)
+const composerShowUserCreated = ref(false)
 const composerGroupView = ref(true)
 
 // 角色编辑器状态
@@ -142,6 +147,25 @@ const characterEditForm = ref({
 const charEditorSearchQuery = ref('')
 const charEditorRoleFilter = ref('all')
 const charEditorWorkFilter = ref('')
+
+// 社团编辑器状态
+const showClubEditor = ref(false)
+const editingClub = ref(null)
+const clubEditForm = ref({
+  name: '', description: '', coreSkill: '',
+  activityDay: '', location: '', advisor: '',
+  president: '', vicePresident: '',
+  mode: 'normal',
+  customId: ''
+})
+const mapEditorContext = ref('class') // 'class' | 'club'
+
+const clubLocationName = computed(() => {
+  const locId = clubEditForm.value.location
+  if (!locId) return ''
+  const item = getItem(locId)
+  return item?.name || locId
+})
 
 // 批量补全状态
 const showBatchCompleteModal = ref(false)
@@ -524,7 +548,7 @@ const handleSaveCharacter = async () => {
     // 编辑模式
     const idx = characterPool.value.findIndex(c => c.name === editingCharacter.value.name)
     if (idx !== -1) {
-      characterPool.value[idx] = { ...form }
+      characterPool.value[idx] = { ...form, userCreated: characterPool.value[idx].userCreated }
     }
   } else {
     // 添加模式
@@ -532,7 +556,7 @@ const handleSaveCharacter = async () => {
       showMessage('角色名已存在')
       return
     }
-    characterPool.value.push({ ...form })
+    characterPool.value.push({ ...form, userCreated: true })
   }
 
   await saveCharacterPool()
@@ -789,7 +813,8 @@ const handleConfirmAIImport = async () => {
       electivePreference: char.electivePreference || 'general',
       scheduleTag: char.scheduleTag || '',
       personality: char.personality || { order: 0, altruism: 0, tradition: 0, peace: 50 },
-      academicProfile: char.academicProfile || { level: 'avg', potential: 'medium', traits: [] }
+      academicProfile: char.academicProfile || { level: 'avg', potential: 'medium', traits: [] },
+      userCreated: true
     })
     addedCount++
   }
@@ -880,10 +905,18 @@ const updateAvailableCharacters = () => {
     .filter(c => !currentMembers.has(c.name) || c.role === 'teacher')
     .map(c => {
       const assignment = assignmentMap.get(c.name)
+      let inRoster = false
+      for (const classId of Object.keys(currentRosterState.value)) {
+        if (currentRosterState.value[classId]?.[c.name]) {
+          inRoster = true
+          break
+        }
+      }
       return {
         ...c,
         assignedTo: assignment ? assignment.className : null,
-        isAssigned: !!assignment
+        isAssigned: !!assignment,
+        inRoster
       }
     })
 }
@@ -1036,6 +1069,7 @@ const handleConfirmNewClass = () => {
 
   // 打开地图编辑器让玩家选择/创建教室
   pendingNewClassId.value = id
+  mapEditorContext.value = 'class'
   showMapEditor.value = true
 }
 
@@ -1046,6 +1080,7 @@ const handleSetClassroom = () => {
     return
   }
   pendingNewClassId.value = classId
+  mapEditorContext.value = 'class'
   showMapEditor.value = true
 }
 
@@ -1062,9 +1097,137 @@ const handleClassroomSelected = (location) => {
   showMessage(`教室已设为「${location.name}」(${location.id})`)
 }
 
+const handleLocationSelected = (location) => {
+  if (mapEditorContext.value === 'club') {
+    clubEditForm.value.location = location.id
+    showMapEditor.value = false
+  } else {
+    handleClassroomSelected(location)
+  }
+}
+
+const handleClubSelectLocation = () => {
+  mapEditorContext.value = 'club'
+  showMapEditor.value = true
+}
+
 const handleMapEditorClose = () => {
   showMapEditor.value = false
   pendingNewClassId.value = ''
+}
+
+// ==================== 社团编辑器处理函数 ====================
+const handleAddClub = () => {
+  editingClub.value = null
+  clubEditForm.value = {
+    name: '', description: '', coreSkill: '',
+    activityDay: '', location: '', advisor: '',
+    president: gameStore.player?.name || '', vicePresident: '',
+    mode: 'normal',
+    customId: ''
+  }
+  showClubEditor.value = true
+}
+
+const handleEditClub = (club) => {
+  editingClub.value = club
+  clubEditForm.value = {
+    name: club.name || '',
+    description: club.description || '',
+    coreSkill: club.coreSkill || '',
+    activityDay: club.activityDay || '',
+    location: club.location || '',
+    advisor: club.advisor || '',
+    president: Array.isArray(club.president) ? club.president.join(', ') : (club.president || ''),
+    vicePresident: Array.isArray(club.vicePresident) ? club.vicePresident.join(', ') : (club.vicePresident || ''),
+    mode: club.mode || (club.id === 'student_council' ? 'restricted' : 'normal'),
+    customId: '',
+    members: [...(club.members || [])]
+  }
+  showClubEditor.value = true
+}
+
+const handleSaveClub = async () => {
+  const form = clubEditForm.value
+  if (!form.name.trim()) {
+    showMessage('请输入社团名称')
+    return
+  }
+  if (editingClub.value) {
+    // 编辑模式
+    const clubId = editingClub.value.id
+    const club = gameStore.allClubs[clubId]
+    if (club) {
+      Object.assign(club, {
+        name: form.name, description: form.description,
+        coreSkill: form.coreSkill, activityDay: form.activityDay,
+        location: form.location, advisor: form.advisor,
+        president: form.president, vicePresident: form.vicePresident,
+        mode: form.mode,
+        members: form.members || club.members || []
+      })
+      await ensureClubExistsInWorldbook(club, gameStore.currentRunId)
+      await syncClubWorldbookState(gameStore.currentRunId)
+    }
+    showMessage('社团已更新')
+  } else if (form.customId?.trim()) {
+    // 自定义ID新建 — 直接写入 allClubs
+    const clubId = form.customId.trim()
+    if (gameStore.allClubs[clubId]) {
+      showMessage(`社团ID「${clubId}」已存在`)
+      return
+    }
+    const newClub = {
+      id: clubId,
+      name: form.name, description: form.description,
+      coreSkill: form.coreSkill, activityDay: form.activityDay,
+      location: form.location, advisor: form.advisor,
+      president: form.president || gameStore.player?.name || '',
+      vicePresident: form.vicePresident,
+      members: [gameStore.player?.name || ''],
+      mode: form.mode
+    }
+    gameStore.allClubs[clubId] = newClub
+    if (!gameStore.player.joinedClubs.includes(clubId)) {
+      gameStore.player.joinedClubs.push(clubId)
+    }
+    await ensureClubExistsInWorldbook(newClub, gameStore.currentRunId)
+    await syncClubWorldbookState(gameStore.currentRunId)
+    gameStore.saveToStorage(true)
+    showMessage('社团已创建')
+  } else {
+    // 自动ID新建 — 走原有 createClub
+    const result = await gameStore.createClub({
+      name: form.name, description: form.description,
+      coreSkill: form.coreSkill, activityDay: form.activityDay,
+      location: form.location, advisor: form.advisor
+    })
+    if (result?.clubId) {
+      const newClub = gameStore.allClubs[result.clubId]
+      if (newClub) {
+        newClub.mode = form.mode
+        if (form.mode !== 'normal') {
+          await ensureClubExistsInWorldbook(newClub, gameStore.currentRunId)
+          await syncClubWorldbookState(gameStore.currentRunId)
+        }
+      }
+    }
+    showMessage('社团已创建')
+  }
+  showClubEditor.value = false
+}
+
+const handleDeleteClub = async (clubId) => {
+  const club = gameStore.allClubs[clubId]
+  if (!club) return
+  delete gameStore.allClubs[clubId]
+  if (gameStore.player?.joinedClubs) {
+    const idx = gameStore.player.joinedClubs.indexOf(clubId)
+    if (idx !== -1) gameStore.player.joinedClubs.splice(idx, 1)
+  }
+  await syncClubWorldbookState(gameStore.currentRunId)
+  gameStore.saveToStorage(true)
+  showMessage(`社团"${club.name}"已删除`)
 }
 
 const handleSaveComposer = async () => {
@@ -1130,6 +1293,12 @@ const handleSaveComposer = async () => {
           >
             👥 角色编辑器
           </button>
+          <button
+            :class="{ active: activeTab === 'clubEditor' }"
+            @click="activeTab = 'clubEditor'"
+          >
+            🏫 社团编辑器
+          </button>
         </div>
 
         <!-- 内容区域 -->
@@ -1192,6 +1361,8 @@ const handleSaveComposer = async () => {
               v-model:role-filter="composerRoleFilter"
               v-model:work-filter="composerWorkFilter"
               v-model:show-unassigned="composerShowUnassigned"
+              v-model:show-in-roster="composerShowInRoster"
+              v-model:show-user-created="composerShowUserCreated"
               v-model:group-view="composerGroupView"
               :available-works="composerAvailableWorks"
               :grouped-characters="composerGroupedCharacters"
@@ -1217,6 +1388,16 @@ const handleSaveComposer = async () => {
               @add="handleAddCharacter"
               @edit="handleEditCharacter"
               @delete="handleDeleteCharacter"
+            />
+          </div>
+
+          <!-- 标签页4：社团编辑器 -->
+          <div v-if="activeTab === 'clubEditor'" class="tab-content">
+            <ClubEditorPanel
+              :clubs="gameStore.allClubs || {}"
+              @add-club="handleAddClub"
+              @edit-club="handleEditClub"
+              @delete-club="handleDeleteClub"
             />
           </div>
         </div>
@@ -1278,14 +1459,24 @@ const handleSaveComposer = async () => {
       @save="handleSaveTeacher"
     />
 
+    <ClubEditModal
+      :show="showClubEditor"
+      v-model:form="clubEditForm"
+      :is-editing="!!editingClub"
+      :location-name="clubLocationName"
+      @close="showClubEditor = false"
+      @save="handleSaveClub"
+      @select-location="handleClubSelectLocation"
+    />
+
     <MapEditorPanel
       v-if="showMapEditor"
       :selection-mode="true"
-      selection-title="选择班级教室"
-      :prefill-id="pendingNewClassId ? `classroom_${pendingNewClassId.toLowerCase().replace('-', '')}` : ''"
-      :prefill-name="pendingNewClassId ? `${fullRosterSnapshot[pendingNewClassId]?.name || pendingNewClassId}教室` : ''"
+      :selection-title="mapEditorContext === 'club' ? '选择社团活动地点' : '选择班级教室'"
+      :prefill-id="mapEditorContext === 'club' ? '' : (pendingNewClassId ? `classroom_${pendingNewClassId.toLowerCase().replace('-', '')}` : '')"
+      :prefill-name="mapEditorContext === 'club' ? '' : (pendingNewClassId ? `${fullRosterSnapshot[pendingNewClassId]?.name || pendingNewClassId}教室` : '')"
       initial-parent-id="tianhua_high_school"
-      @location-selected="handleClassroomSelected"
+      @location-selected="handleLocationSelected"
       @close="handleMapEditorClose"
     />
 

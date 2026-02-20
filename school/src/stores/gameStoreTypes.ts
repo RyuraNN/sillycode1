@@ -261,6 +261,7 @@ export interface PlayerStats {
   academicYear: number
   pendingDeliveries: PendingDelivery[]
   equipment: EquipmentSlots
+  outfitDescription?: string  // AI设置的衣着描述，装备栏为空时使用
   activeEffects: ActiveEffect[]
   productStock: ProductStock
   summaries: SummaryData[]
@@ -464,6 +465,7 @@ export interface NpcStats {
     locationId: string
     endTime: number // 绝对时间戳 (total hours)
   }
+  outfitDescription?: string  // AI设置的衣着描述
   // 学业系统
   motivation?: number                     // 学习动力 0-100 (默认50)
   studyFocus?: string | null             // 当前专注科目 (可选)
@@ -489,6 +491,7 @@ export interface ClubData {
   activityDay?: string
   location?: string
   description?: string
+  mode?: 'normal' | 'restricted'  // 社团模式：normal=可自由申请, restricted=不可主动申请(蓝灯)
   activity?: number
   completedRequests?: number
   _bookName?: string

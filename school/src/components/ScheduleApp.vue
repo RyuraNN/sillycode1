@@ -1101,7 +1101,8 @@ function canJoinClub(clubId) {
     return true
   }
 
-  if (clubId === 'student_council') return false
+  const club = gameStore.allClubs[clubId]
+  if (club?.mode === 'restricted' || clubId === 'student_council') return false
   if (gameStore.player.joinedClubs.includes(clubId)) return false
   if (gameStore.clubApplication) return false
   if (gameStore.player.joinedClubs.length === 0) return true

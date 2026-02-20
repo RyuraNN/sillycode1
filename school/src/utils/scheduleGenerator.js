@@ -213,7 +213,36 @@ export const LOCATION_NAMES = {
   'club_building_B': '第二社团活动楼',
   'computer_room': '第一计算机室',
   'computer_room_2': '第二计算机室',
-  'home_economics_room': '家政教室'
+  'home_economics_room': '家政教室',
+  'gymnasium': '体育馆',
+  'classroom_universal': '通用教室'
+}
+
+// 世界书 location 类别ID → 具体地点ID的映射
+// 排课时如果 location 是类别ID，从对应数组中随机选一个具体地点
+const LOCATION_CATEGORY_MAP = {
+  'music_room': ['music_room_1', 'music_room_2'],
+  'art_room': ['art_room_1', 'art_room_2'],
+  'science_lab_1': ['sb_chemistry_lab'],
+  'science_lab_2': ['sb_biology_lab'],
+  'science_lab_3': ['sb_chemistry_lab'],
+  'music_room_e': ['music_room_1', 'music_room_2'],
+  'dance_studio_e': ['main_gymnasium', 'sub_gymnasium'],
+  'performance_hall': ['auditorium'],
+  'gymnasium': ['main_gymnasium', 'sub_gymnasium'],
+  'various': ['auditorium', 'library']
+}
+
+/**
+ * 将 location 类别ID解析为具体地点ID
+ * 如果是类别ID，从对应的具体地点中随机选一个；否则原样返回
+ */
+function resolveLocationCategory(locationId) {
+  const candidates = LOCATION_CATEGORY_MAP[locationId]
+  if (candidates && candidates.length > 0) {
+    return candidates[Math.floor(Math.random() * candidates.length)]
+  }
+  return locationId
 }
 
 // ============ 工具函数 ============
@@ -670,8 +699,18 @@ export function generateIndependentTeacherSchedule(teacherInfo, currentDate, all
           electiveMap.set(course.name, { name: course.name, location: course.location, id: course.id })
         }
       } else {
+        console.warn(`[ScheduleGen] getCourseById("${id}") returned null, using ID as fallback name`)
         if (!electiveMap.has(id)) {
-          electiveMap.set(id, { name: id, location: null, id: id })
+          // 尝试从 imported ID 中提取可读的课程名
+          let fallbackName = id
+          if (id.startsWith('imported_')) {
+            const parts = id.replace('imported_', '').split('_')
+            // 格式: imported_类别_课程名_教师名_counter → 取课程名部分
+            if (parts.length >= 3) {
+              fallbackName = parts[1]
+            }
+          }
+          electiveMap.set(id, { name: fallbackName, location: null, id: id })
         }
       }
     })
@@ -704,8 +743,8 @@ export function generateIndependentTeacherSchedule(teacherInfo, currentDate, all
           let locName, locId
           // 只要有自定义location就使用，不再排除 'classroom'
           if (courseInfo.location) {
-             locId = courseInfo.location
-             // 尝试从映射表获取中文名，如果没有则直接使用ID (可能是中文名或未知ID)
+             // 先解析类别ID为具体地点（如 music_room → music_room_1）
+             locId = resolveLocationCategory(courseInfo.location)
              locName = LOCATION_NAMES[locId] || locId
 
              // 如果是 'classroom' 这种通用ID，尝试获取具体教室
@@ -780,15 +819,17 @@ export function extractSubjects(classInfo) {
 export function getRandomLocation(subject, classId, classroomId) {
   const possibleLocations = SUBJECT_LOCATION_MAP[subject] || ['classroom']
   // 优先使用传入的 classroomId，其次查硬编码映射，最后用 classId 推导
-  const classRoom = classroomId || CLASS_ROOM_MAP[classId] || `classroom_${classId.toLowerCase().replace('-', '')}`
+  const classRoom = classroomId || CLASS_ROOM_MAP[classId] || (classId === 'universal' ? 'auditorium' : `classroom_${classId.toLowerCase().replace('-', '')}`)
   
   // 将 'classroom' 替换为实际班级教室
   const actualLocations = possibleLocations.map(loc => 
     loc === 'classroom' ? classRoom : loc
   )
   
-  // 随机选择
-  const locationId = actualLocations[Math.floor(Math.random() * actualLocations.length)]
+  // 随机选择，并解析类别ID为具体地点
+  const locationId = resolveLocationCategory(
+    actualLocations[Math.floor(Math.random() * actualLocations.length)]
+  )
   const locationName = LOCATION_NAMES[locationId] || locationId
   
   return { locationId, locationName }

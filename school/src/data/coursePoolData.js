@@ -795,6 +795,10 @@ function serializeCourse(category, course, typeLabel) {
   if (course.runId) {
     line += `|${course.runId}`
   }
+  // 保存课程ID以确保反序列化后ID稳定
+  if (course.id) {
+    line += `|id:${course.id}`
+  }
   return line
 }
 
@@ -807,30 +811,46 @@ let _importIdCounter = 0
 function parseCourseLine(line) {
   const parts = line.split('|').map(s => s.trim())
   if (parts.length < 5) return null
-  
-  const [category, name, teacherInfo, location, typeLabel, runId] = parts
-  
+
+  const [category, name, teacherInfo, location, typeLabel, ...rest] = parts
+
+  // 解析 runId 和 courseId（从剩余部分中提取）
+  let runId = null
+  let existingId = null
+  for (const part of rest) {
+    if (part && part.startsWith('id:')) {
+      existingId = part.substring(3)
+    } else if (part) {
+      runId = part
+    }
+  }
+
   // 解析教师信息 "Name ♂ (Origin)"
   let teacher = teacherInfo
   let teacherGender = 'female' // 默认
   let origin = '自定义'
-  
+
   const match = teacherInfo.match(/^(.+?)(?:\s+([♂♀]))?(?:\s+\((.+)\))?$/)
   if (match) {
     teacher = match[1]
     if (match[2]) teacherGender = match[2] === '♂' ? 'male' : 'female'
     if (match[3]) origin = match[3]
   }
-  
-  // 【修复】使用 category + name + teacher + 自增计数器 生成确定性唯一ID
-  // 避免 Date.now() + Math.random() 在快速循环中产生重复ID
-  _importIdCounter++
-  const safeId = `${category}_${name}_${teacher}`.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_')
-  
+
+  // 优先使用已有ID，否则生成新ID
+  let courseId
+  if (existingId) {
+    courseId = existingId
+  } else {
+    _importIdCounter++
+    const safeId = `${category}_${name}_${teacher}`.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_')
+    courseId = `imported_${safeId}_${_importIdCounter}`
+  }
+
   return {
     category,
     course: {
-      id: `imported_${safeId}_${_importIdCounter}`,
+      id: courseId,
       name,
       teacher,
       teacherGender,
@@ -1257,6 +1277,7 @@ export function getCourseById(courseId) {
   const allCourses = [
     ...UNIVERSAL_ELECTIVES,
     ...GRADE_1_COURSES.required,
+    ...GRADE_1_COURSES.electives,
     ...GRADE_2_COURSES.required,
     ...GRADE_2_COURSES.electives,
     ...GRADE_3_COURSES.required,
@@ -1275,7 +1296,38 @@ export function getCourseById(courseId) {
     if (data.electives) allCourses.push(...data.electives)
   })
 
-  return allCourses.find(c => c.id === courseId) || null
+  const found = allCourses.find(c => c.id === courseId)
+  if (found) return found
+
+  // 防御：如果世界书加载失败导致运行时数据为空，从默认数据中兜底查找
+  const defaultCourses = [
+    ...DEFAULT_UNIVERSAL_ELECTIVES,
+    ...DEFAULT_GRADE_1_COURSES.required,
+    ...DEFAULT_GRADE_2_COURSES.required,
+    ...DEFAULT_GRADE_2_COURSES.electives,
+    ...DEFAULT_GRADE_3_COURSES.required,
+    ...DEFAULT_GRADE_3_COURSES.electives,
+    ...DEFAULT_IDOL_COURSES.grade1.required,
+    ...DEFAULT_IDOL_COURSES.grade1.electives,
+    ...DEFAULT_IDOL_COURSES.grade2.required,
+    ...DEFAULT_IDOL_COURSES.grade2.electives,
+    ...DEFAULT_IDOL_COURSES.grade3.required,
+    ...DEFAULT_IDOL_COURSES.grade3.electives
+  ]
+  const defaultFound = defaultCourses.find(c => c.id === courseId)
+  if (defaultFound) return defaultFound
+
+  // 防御：如果 ID 是 imported_xxx 格式（旧存档中未持久化ID），尝试按课程名模糊匹配
+  if (courseId.startsWith('imported_')) {
+    const allPoolCourses = [...allCourses, ...defaultCourses]
+    const fuzzyMatch = allPoolCourses.find(c => courseId.includes(c.name))
+    if (fuzzyMatch) {
+      console.warn(`[CoursePool] Fuzzy matched "${courseId}" → "${fuzzyMatch.name}" (id: ${fuzzyMatch.id})`)
+      return fuzzyMatch
+    }
+  }
+
+  return null
 }
 
 // 暴露到全局，供 prompts.js 使用
