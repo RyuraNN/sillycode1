@@ -330,8 +330,15 @@ function processOutfitUpdate(outfitData, gameStore) {
 
   // 玩家衣着
   if (outfitData.player) {
-    gameStore.player.outfitDescription = outfitData.player
-    console.log(`[GameData] Player outfit updated: ${outfitData.player}`)
+    if (typeof outfitData.player === 'object') {
+      // 槽位结构：合并更新（只覆盖传入的槽位）
+      if (!gameStore.player.outfitSlots) gameStore.player.outfitSlots = {}
+      Object.assign(gameStore.player.outfitSlots, outfitData.player)
+    } else if (typeof outfitData.player === 'string') {
+      // 向后兼容：字符串存入 inner 槽位作为整体描述
+      gameStore.player.outfitSlots = { inner: outfitData.player }
+    }
+    console.log(`[GameData] Player outfit updated:`, gameStore.player.outfitSlots)
   }
 
   // NPC衣着
@@ -339,8 +346,13 @@ function processOutfitUpdate(outfitData, gameStore) {
     for (const [npcName, description] of Object.entries(outfitData.npcs)) {
       const npc = gameStore.npcs.find(n => n.name === npcName)
       if (npc) {
-        npc.outfitDescription = description
-        console.log(`[GameData] NPC ${npcName} outfit updated: ${description}`)
+        if (typeof description === 'object') {
+          if (!npc.outfitSlots) npc.outfitSlots = {}
+          Object.assign(npc.outfitSlots, description)
+        } else if (typeof description === 'string') {
+          npc.outfitSlots = { inner: description }
+        }
+        console.log(`[GameData] NPC ${npcName} outfit updated:`, npc.outfitSlots)
       }
     }
   }

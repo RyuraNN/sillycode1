@@ -685,9 +685,12 @@ export const buildEventPrompt = (player, gameTime) => {
  */
 function getDefaultOutfit(role) {
   switch (role) {
-    case 'teacher': return '正装'
-    case 'staff': return '工作服'
-    default: return '校服'
+    case 'teacher':
+      return { inner: '正装衬衫', pants: '正装西裤', shoes: '皮鞋' }
+    case 'staff':
+      return { inner: '工作服上衣', pants: '工作服裤子', shoes: '工作鞋' }
+    default:
+      return { inner: '校服上衣', pants: '校服裤子', shoes: '校鞋' }
   }
 }
 
@@ -702,24 +705,26 @@ function getPlayerOutfitString(player) {
     pants: '下装', socks: '袜子', shoes: '鞋子', accessory: '饰品'
   }
   const slots = ['hat', 'outer', 'inner', 'pants', 'socks', 'shoes', 'accessory']
-  const equipped = []
-  let hasAnyEquipment = false
+  const keySlots = ['inner', 'pants', 'shoes']
+  const defaultOutfit = getDefaultOutfit(player.role || 'student')
+  const parts = []
 
   for (const slot of slots) {
-    const item = player.equipment?.[slot]
-    if (item) {
-      hasAnyEquipment = true
-      equipped.push(`${slotLabels[slot]}: ${item.name}`)
+    const equippedItem = player.equipment?.[slot]
+    const outfitDesc = player.outfitSlots?.[slot]
+    const defaultDesc = defaultOutfit[slot]
+    if (equippedItem) {
+      parts.push(`${slotLabels[slot]}: ${equippedItem.name}`)
+    } else if (outfitDesc) {
+      parts.push(`${slotLabels[slot]}: ${outfitDesc}`)
+    } else if (defaultDesc) {
+      parts.push(`${slotLabels[slot]}: ${defaultDesc}`)
+    } else if (keySlots.includes(slot)) {
+      parts.push(`${slotLabels[slot]}: 无`)
     }
   }
 
-  if (hasAnyEquipment) {
-    const fallback = player.outfitDescription || getDefaultOutfit(player.role || 'student')
-    const unequippedNote = equipped.length < 7 ? `（其余: ${fallback}）` : ''
-    return equipped.join('，') + unequippedNote
-  }
-
-  return player.outfitDescription || getDefaultOutfit(player.role || 'student')
+  return parts.join('，')
 }
 
 /**
@@ -728,7 +733,28 @@ function getPlayerOutfitString(player) {
  * @returns {string} 衣着描述
  */
 function getNpcOutfitString(npc) {
-  return npc.outfitDescription || getDefaultOutfit(npc.role || 'student')
+  const slotLabels = {
+    hat: '头部', outer: '外套', inner: '上衣',
+    pants: '下装', socks: '袜子', shoes: '鞋子', accessory: '饰品'
+  }
+  const slots = ['hat', 'outer', 'inner', 'pants', 'socks', 'shoes', 'accessory']
+  const keySlots = ['inner', 'pants', 'shoes']
+  const defaultOutfit = getDefaultOutfit(npc.role || 'student')
+  const parts = []
+
+  for (const slot of slots) {
+    const desc = npc.outfitSlots?.[slot]
+    const defaultDesc = defaultOutfit[slot]
+    if (desc) {
+      parts.push(`${slotLabels[slot]}: ${desc}`)
+    } else if (defaultDesc) {
+      parts.push(`${slotLabels[slot]}: ${defaultDesc}`)
+    } else if (keySlots.includes(slot)) {
+      parts.push(`${slotLabels[slot]}: 无`)
+    }
+  }
+
+  return parts.join('，')
 }
 
 /**

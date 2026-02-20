@@ -117,6 +117,17 @@ export interface EquipmentSlots {
   accessory: Item | null
 }
 
+/** 衣着槽位描述（文本） */
+export interface OutfitSlots {
+  hat?: string
+  outer?: string
+  inner?: string
+  pants?: string
+  socks?: string
+  shoes?: string
+  accessory?: string
+}
+
 /** 活动效果（临时buff/debuff） */
 export interface ActiveEffect {
   id: string
@@ -261,7 +272,7 @@ export interface PlayerStats {
   academicYear: number
   pendingDeliveries: PendingDelivery[]
   equipment: EquipmentSlots
-  outfitDescription?: string  // AI设置的衣着描述，装备栏为空时使用
+  outfitSlots?: OutfitSlots  // AI设置的衣着描述（按槽位），装备栏为空时使用
   activeEffects: ActiveEffect[]
   productStock: ProductStock
   summaries: SummaryData[]
@@ -465,7 +476,7 @@ export interface NpcStats {
     locationId: string
     endTime: number // 绝对时间戳 (total hours)
   }
-  outfitDescription?: string  // AI设置的衣着描述
+  outfitSlots?: OutfitSlots  // AI设置的衣着描述（按槽位）
   // 学业系统
   motivation?: number                     // 学习动力 0-100 (默认50)
   studyFocus?: string | null             // 当前专注科目 (可选)
