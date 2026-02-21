@@ -1864,15 +1864,6 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
           @wheel="handleScrollEvent"
           @touchmove="handleScrollEvent"
         >
-          <!-- 新消息提示 -->
-          <transition name="fade">
-            <button 
-              v-if="showNewMessageTip" 
-              class="new-message-tip" 
-              @click="scrollToBottom(contentAreaRef); showNewMessageTip = false"
-            >↓</button>
-          </transition>
-
           <!-- 加载更多 -->
           <div v-if="gameLog.length > visibleCount" class="load-more-container">
             <button class="load-more-btn" @click="loadMoreMessages">
@@ -1904,6 +1895,19 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
             ></div>
           </div>
         </div>
+
+        <!-- 回到底部按钮 -->
+        <transition name="fade">
+          <button
+            v-if="showNewMessageTip"
+            class="new-message-tip"
+            @click="handleNewMessageTipClick(contentAreaRef)"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+        </transition>
 
         <!-- Debug 辅助AI面板 -->
         <DebugAssistantPanel 
@@ -2129,6 +2133,7 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
   flex: 1;
   height: 100%;
   overflow: hidden;
+  position: relative;
 }
 
 .main-content.split-view .content-area {
@@ -2320,30 +2325,33 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
 
 .new-message-tip {
   position: absolute;
-  bottom: 20px;
+  bottom: 80px;
   right: 20px;
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: rgba(139, 69, 19, 0.9);
-  color: white;
-  border: none;
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: #475569;
+  border: 1px solid rgba(255, 255, 255, 0.3);
   font-size: 1.2rem;
-  font-weight: bold;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.04);
   z-index: 50;
   display: flex;
   align-items: center;
   justify-content: center;
-  animation: bounce 2s infinite;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.new-message-tip:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+.new-message-tip:active {
+  transform: translateY(0);
 }
 
-@keyframes bounce {
-  0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
-  40% { transform: translateY(-5px); }
-  60% { transform: translateY(-3px); }
-}
 
 .load-more-container {
   display: flex;
@@ -2494,7 +2502,10 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
 }
 
 .dark-mode .new-message-tip {
-  background: rgba(99, 102, 241, 0.9);
+  background: rgba(30, 30, 50, 0.6);
+  color: #c7d2fe;
+  border-color: rgba(99, 102, 241, 0.2);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(99, 102, 241, 0.1);
 }
 
 .dark-mode .load-more-btn {

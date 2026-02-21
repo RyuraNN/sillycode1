@@ -100,12 +100,14 @@ export function useScrollControl() {
     if (isGenerating) {
       autoScrollEnabled.value = false
     }
-    
-    // 检查是否滚动到底部，是则隐藏提示
+
+    // 根据距离底部的距离决定是否显示/隐藏按钮
     if (el) {
-      const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50
-      if (isNearBottom) {
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+      if (distFromBottom < 50) {
         showNewMessageTip.value = false
+      } else if (distFromBottom > 300) {
+        showNewMessageTip.value = true
       }
     }
   }
@@ -122,6 +124,7 @@ export function useScrollControl() {
    * @param {HTMLElement} el - 滚动容器元素
    */
   const handleNewMessageTipClick = (el) => {
+    autoScrollEnabled.value = true
     scrollToBottom(el)
     showNewMessageTip.value = false
   }
