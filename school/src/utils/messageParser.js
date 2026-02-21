@@ -30,6 +30,16 @@ function resolvePlayerAlias(name, gameStore) {
 }
 
 /**
+ * 检查名称是否匹配玩家（真名或别名）
+ */
+function isPlayerName(name, gameStore) {
+  if (!name || !gameStore?.player?.name) return false
+  const n = name.trim()
+  if (n === gameStore.player.name.trim()) return true
+  return PLAYER_ALIASES.some(a => a.toLowerCase() === n.toLowerCase())
+}
+
+/**
  * 规范化文本，将全角字符转换为半角，去除首尾空白
  * @param {string} text 
  * @returns {string}
@@ -111,6 +121,13 @@ function parseAttributes(attrsStr) {
  * @returns {Object} { charId, charName }
  */
 function resolveCharInfo(attrs, gameStore) {
+  // 防御：AI 不得以玩家身份操作朋友圈
+  const nameToCheck = attrs.user || attrs.name
+  if (isPlayerName(nameToCheck, gameStore)) {
+    console.warn(`[MessageParser] 已拦截: AI 尝试以玩家身份操作朋友圈 (user/name="${nameToCheck}")`)
+    return { charId: 'char_unknown', charName: '未知' }
+  }
+
   let charId = attrs.from
   let charName = attrs.user || attrs.name
 
@@ -156,6 +173,13 @@ async function processMessage(match, type, gameStore) {
 
   // 解析发件人
   const sender = attrs.sender || (type === 'group' ? null : attrs.from)
+
+  // 防御：AI 不得以玩家身份发送消息
+  const senderToCheck = type === 'group' ? sender : attrs.from
+  if (isPlayerName(senderToCheck, gameStore)) {
+    console.warn(`[MessageParser] 已拦截: AI 尝试以玩家身份发送${type}消息 (${type === 'group' ? 'sender' : 'from'}="${senderToCheck}")`)
+    return
+  }
 
   // 解析目标 ID 和 Name
   let id, name
@@ -315,6 +339,12 @@ export async function parseSocialTags(rawText) {
     
     // 如果没有名字，跳过
     if (!name) continue
+
+    // 防御：AI 不得让玩家加自己为好友
+    if (isPlayerName(name, gameStore)) {
+      console.warn(`[MessageParser] 已拦截: AI 尝试添加玩家自己为好友 (name="${name}")`)
+      continue
+    }
 
     // 如果没有 ID 或 ID 无效，尝试查找或生成
     if (!id || id === 'unknown' || id === 'char_unknown') {
@@ -871,6 +901,10 @@ export async function parseSocialTags(rawText) {
     const content = forumPostMatch[2].trim()
 
     if (attrs.board && attrs.title && attrs.from) {
+      if (isPlayerName(attrs.from, gameStore)) {
+        console.warn(`[MessageParser] 已拦截: AI 尝试以玩家身份发论坛帖 (from="${attrs.from}")`)
+        continue
+      }
       // 多层去重检查
       // 层1：精确匹配（标题+作者+内容完全一致），无时间限制
       const isExactDuplicate = gameStore.player.forum.posts.some(p =>
@@ -928,6 +962,10 @@ export async function parseSocialTags(rawText) {
     const content = forumReplyMatch[2].trim()
 
     if (attrs.post_id && attrs.from) {
+      if (isPlayerName(attrs.from, gameStore)) {
+        console.warn(`[MessageParser] 已拦截: AI 尝试以玩家身份回复论坛帖 (from="${attrs.from}")`)
+        continue
+      }
       const postId = attrs.post_id
       // 本轮内同作者对同帖子只取第一条回复
       const batchKey = `${postId}::${attrs.from}`
@@ -966,6 +1004,10 @@ export async function parseSocialTags(rawText) {
     const attrs = parseAttributes(forumLikeMatch[1])
 
     if (attrs.post_id && attrs.from) {
+      if (isPlayerName(attrs.from, gameStore)) {
+        console.warn(`[MessageParser] 已拦截: AI 尝试以玩家身份点赞论坛帖 (from="${attrs.from}")`)
+        continue
+      }
       const postId = attrs.post_id
       const post = gameStore.player.forum.posts.find(p => p.id === postId)
       if (post) {

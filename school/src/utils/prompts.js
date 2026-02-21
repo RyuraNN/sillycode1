@@ -1564,10 +1564,11 @@ ${styleText}${injectBanned('style')}
 ${coreRulesText}${injectBanned('coreRules')}
 [System Commands - 社交系统]
 以下指令用于维护玩家的社交关系，输出在<content>标签之外。
+※ 以下所有指令中的身份属性（from/sender/user/name）严禁使用玩家"${player.name}"的名字！AI只能扮演NPC角色！
 
 好友私聊（好友角色无论在不在场，想给玩家发私聊时使用）：
 <social_msg from="角色名称">消息内容</social_msg>
-※ 玩家不可给自己发消息
+※ 严禁将from设为玩家"${player.name}"！from只能是NPC角色名！
 
 消息状态（角色收到玩家私聊后的响应状态）：
 - 因客观原因（上课/睡觉/忙碌等）未能及时查看：<social_status name="角色名">hold</social_status>
@@ -1579,12 +1580,12 @@ ${coreRulesText}${injectBanned('coreRules')}
 ※ 使用前先检查玩家好友列表中是否已存在该角色，已存在则不重复输出。
 ※ 即使正文中已描写了"添加好友成功"的文字，此指令也必须同时输出，两者不是替代关系。
 ※ 如果系统提示词内提示某个角色收到了好友申请，请立即进行处理（无论该角色是否在场）。
-※ 玩家不可加自己为好友
+※ 严禁将name设为玩家"${player.name}"！玩家不可加自己为好友！
 
 群聊消息（群内任意角色（不包括玩家）想在群聊中发言时使用）：
 <group_msg group="群组名称" sender="角色姓名">消息内容</group_msg>
 ※ 群组名称务必与玩家已加入的群名称完全一致，不要随意简写或改写。
-※ 不得代替玩家在群内发言
+※ 严禁将sender设为玩家"${player.name}"！不得代替玩家在群内发言
 
 [System Commands - 社团系统]
 以下指令用于处理社团相关事务，输出在<content>标签之外。
@@ -1620,6 +1621,7 @@ NPC拒绝玩家的社团邀请（必须包含拒绝理由）：
 
 [System Commands - 论坛系统（天华通APP）]
 以下指令用于模拟校园论坛的动态，输出在<content>标签之外。
+※ 论坛指令中的from属性严禁使用玩家"${player.name}"的名字！AI不得代替玩家发帖、回帖或点赞！
 论坛是校园生活的重要组成部分，应自然反映校园舆论氛围，可用于铺垫事件、呼应伏笔、丰富世界的真实感。
 
 发帖：
