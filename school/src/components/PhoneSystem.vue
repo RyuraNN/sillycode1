@@ -9,6 +9,7 @@ import SocialApp from './SocialApp.vue'
 import SummaryViewer from './SummaryViewer.vue'
 import CalendarApp from './CalendarApp.vue'
 import ScheduleApp from './ScheduleApp.vue'
+import WeeklyPreviewModal from './WeeklyPreviewModal.vue'
 import WeatherApp from './WeatherApp.vue'
 import DeliveryApp from './DeliveryApp.vue'
 import PartTimeJobApp from './PartTimeJobApp.vue'
@@ -104,6 +105,27 @@ const totalUnreadCount = computed(() => {
   }
   if (gameStore.player.social.groups) {
     gameStore.player.social.groups.forEach(g => count += (g.unreadCount || 0))
+  }
+  return count
+})
+
+const scheduleUnreadCount = computed(() => {
+  let count = 0
+  // 未查看的考试
+  if (gameStore.unviewedExamIds?.length) {
+    count += gameStore.unviewedExamIds.length
+  }
+  // 未查看的周报
+  if (gameStore.weeklyPreviewData && gameStore.lastWeeklyPreviewWeek > (gameStore.lastViewedWeeklyPreview || 0)) {
+    count += 1
+  }
+  // 未查看的社团（新社团数 - 已查看数）
+  const allClubs = gameStore.allClubs || {}
+  const allClubIds = Object.keys(allClubs)
+  const viewedClubIds = gameStore.viewedClubIds || []
+  const unviewedClubs = allClubIds.filter(id => !viewedClubIds.includes(id))
+  if (unviewedClubs.length > 0) {
+    count += unviewedClubs.length
   }
   return count
 })
@@ -763,6 +785,9 @@ const handleHomeClick = () => {
                       <div v-if="app.id === 'social' && totalUnreadCount > 0" class="notification-badge">
                         {{ totalUnreadCount > 99 ? '99+' : totalUnreadCount }}
                       </div>
+                      <div v-if="app.id === 'schedule' && scheduleUnreadCount > 0" class="notification-badge">
+                        {{ scheduleUnreadCount > 99 ? '99+' : scheduleUnreadCount }}
+                      </div>
                     </div>
                     <span class="app-name">{{ app.name }}</span>
                   </div>
@@ -792,6 +817,9 @@ const handleHomeClick = () => {
                   </div>
                 </div>
               </div>
+
+              <!-- 周报弹窗（手机内） -->
+              <WeeklyPreviewModal />
             </div>
           </div>
         </div>

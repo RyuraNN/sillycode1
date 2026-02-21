@@ -91,9 +91,9 @@ export function generateNpcExamScores(npc, options = {}) {
     // 特长/弱项加成
     const traitBonus = traitBonuses[subjectKey] || 0
     
-    // 最终分数
+    // 最终分数 — traitBonus 移入 motivationFactor 乘法内，growthBonus 部分受 motivation 影响
     let score = midPoint + halfRange * randomFactor * examFactor
-    score = score * motivationFactor + growthBonus + traitBonus
+    score = (score + traitBonus) * motivationFactor + growthBonus * (0.6 + 0.4 * motivationFactor)
     
     // 钳制到 0-100
     score = Math.round(Math.max(0, Math.min(100, score)))
@@ -324,8 +324,8 @@ export function dailyAcademicGrowth(npc) {
   
   const subjectGrowth = {} // 仅用于返回给上层做日志，实际修改直接作用于 academicStats
   
-  // 基础成长概率 = 动力 / 200 (即 50动力 → 25%概率成长)
-  const growthChance = motivation / 200
+  // 基础成长概率 = 动力 / 150 (即 50动力 → 33%概率成长)
+  const growthChance = motivation / 150
   
   // 动力自然衰减/恢复 (趋向50)
   let motivationDelta = 0
@@ -339,7 +339,7 @@ export function dailyAcademicGrowth(npc) {
     if (Math.random() < growthChance) {
       const isFocused = studyFocus === subjectKey
       // 每日自然成长的量较小
-      const growthAmount = isFocused ? 0.8 : 0.2
+      const growthAmount = isFocused ? 0.8 : 0.4
       
       // 应用成长 (可能触发静默升级，但这里我们暂不处理升级通知，只加经验)
       // 如果要处理自然升级，需要类似 applyTeachingGrowth 的逻辑，但这里为了简化暂只加经验
@@ -386,6 +386,11 @@ export function adjustMotivationAfterExam(scores, rank, totalStudents, currentMo
   if (rankPercentile <= 0.1) delta += 8   // 前10%
   else if (rankPercentile <= 0.3) delta += 3
   else if (rankPercentile >= 0.9) delta -= 5 // 后10%
+
+  // 阻尼系数：越极端（远离50）变化越小
+  const distFromCenter = Math.abs(currentMotivation - 50) / 50 // 0~1
+  const damping = 1 - distFromCenter * 0.5 // 0.5~1.0
+  delta = delta * damping
   
   const newMotivation = Math.max(0, Math.min(100, currentMotivation + delta))
   return Math.round(newMotivation)

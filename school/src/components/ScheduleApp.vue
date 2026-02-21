@@ -829,7 +829,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { getCourseById } from '../data/coursePoolData'
 import { TIME_SLOTS, getWeekdayEnglish, getTermInfo, checkDayStatus } from '../utils/scheduleGenerator'
@@ -842,6 +842,19 @@ const gameStore = useGameStore()
 
 // 标签页状态
 const activeTab = ref('schedule')
+
+// 红点清除：切换到社团 tab 时标记所有社团为已查看，切换到成绩 tab 时清除考试红点
+watch(activeTab, (val) => {
+  if (val === 'clubs') {
+    const allClubs = gameStore.allClubs || {}
+    gameStore.viewedClubIds = Object.keys(allClubs)
+  }
+  if (val === 'grades') {
+    if (gameStore.unviewedExamIds?.length) {
+      gameStore.unviewedExamIds = []
+    }
+  }
+})
 const loading = ref(false)
 const selectedClub = ref(null)
 const actionMessage = ref(null)

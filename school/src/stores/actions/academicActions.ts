@@ -151,9 +151,9 @@ export const academicActions = {
     if (!this.examHistory) this.examHistory = []
     this.examHistory.push(examRecord)
     
-    // 限制历史记录数量（保留最近10次）
-    if (this.examHistory.length > 10) {
-      this.examHistory = this.examHistory.slice(-10)
+    // 限制历史记录数量（保留最近20次）
+    if (this.examHistory.length > 20) {
+      this.examHistory = this.examHistory.slice(-20)
     }
 
     // 更新最后考试日期
@@ -177,6 +177,10 @@ export const academicActions = {
 
     // 更新世界书
     updateAcademicWorldbookEntry(this)
+
+    // 红点：将新考试 ID 加入未查看列表
+    if (!this.unviewedExamIds) this.unviewedExamIds = []
+    this.unviewedExamIds.push(examRecord.examId)
 
     console.log(`[Academic] Exam completed. ${Object.keys(classResults).length} classes, records saved.`)
     
@@ -387,5 +391,126 @@ export const academicActions = {
     })
 
     console.log(`[Academic] Performed teaching on ${targets.length} students. Avg growth: ${results.reduce((s,r)=>s+r.growth,0)/results.length}`)
+  },
+
+  /**
+   * 每周一存储学业快照（用于周报对比）
+   */
+  saveWeeklySnapshot(this: any) {
+    const weekNumber = this.getWeekNumber?.() || 0
+    if (!weekNumber) return
+
+    const snapshot: Record<string, any> = {}
+    for (const npc of this.npcs) {
+      if (npc.role !== 'student' || !npc.isAlive) continue
+      const stats = npc.academicStats?.subjects || {}
+      const subjectData: Record<string, any> = {}
+      for (const [k, v] of Object.entries(stats) as [string, any][]) {
+        subjectData[k] = { level: v.level, exp: v.exp }
+      }
+      snapshot[npc.name] = {
+        subjects: subjectData,
+        motivation: npc.motivation ?? 50
+      }
+    }
+    // 也存玩家数据
+    snapshot['__player__'] = {
+      subjects: { ...this.player.subjects },
+      subjectExps: { ...this.player.subjectExps },
+      motivation: this.player.attributes?.mood ?? 60
+    }
+
+    this.weeklySnapshot = { week: weekNumber, data: snapshot }
+    console.log(`[Academic] Weekly snapshot saved for week ${weekNumber}`)
+  },
+
+  /**
+   * 周五生成周报数据（对比周一快照）
+   */
+  generateWeeklyPreview(this: any) {
+    const weekNumber = this.getWeekNumber?.() || 0
+    if (!weekNumber) return
+    if (this.lastWeeklyPreviewWeek === weekNumber) return // 本周已生成
+
+    const snapshot = this.weeklySnapshot
+    if (!snapshot || !snapshot.data) {
+      console.log('[Academic] No snapshot for weekly preview')
+      return
+    }
+
+    const subjectKeys = Object.keys(SUBJECT_MAP)
+    const changes: any[] = []
+    const levelUps: any[] = []
+    let totalMotivationDelta = 0
+    let npcCount = 0
+
+    for (const npc of this.npcs) {
+      if (npc.role !== 'student' || !npc.isAlive) continue
+      const prev = snapshot.data[npc.name]
+      if (!prev) continue
+      npcCount++
+
+      const stats = npc.academicStats?.subjects || {}
+      const motivationDelta = (npc.motivation ?? 50) - (prev.motivation ?? 50)
+      totalMotivationDelta += motivationDelta
+
+      let totalExpDelta = 0
+      const subjectDeltas: Record<string, number> = {}
+      for (const k of subjectKeys) {
+        const curExp = stats[k]?.exp || 0
+        const prevExp = prev.subjects?.[k]?.exp || 0
+        const delta = curExp - prevExp
+        subjectDeltas[k] = Math.round(delta * 10) / 10
+        totalExpDelta += delta
+
+        // 检查升级
+        const curLevel = stats[k]?.level || 'avg'
+        const prevLevel = prev.subjects?.[k]?.level || 'avg'
+        if (curLevel !== prevLevel) {
+          levelUps.push({ name: npc.name, subject: k, from: prevLevel, to: curLevel })
+        }
+      }
+
+      changes.push({
+        name: npc.name,
+        subjectDeltas,
+        totalExpDelta: Math.round(totalExpDelta * 10) / 10,
+        motivationDelta: Math.round(motivationDelta * 10) / 10
+      })
+    }
+
+    // 玩家数据
+    const playerPrev = snapshot.data['__player__']
+    let playerChanges = null
+    if (playerPrev) {
+      const pDeltas: Record<string, number> = {}
+      for (const k of subjectKeys) {
+        const cur = (this.player.subjects as any)?.[k] || 0
+        const prev = playerPrev.subjects?.[k] || 0
+        pDeltas[k] = Math.round((cur - prev) * 10) / 10
+      }
+      playerChanges = {
+        subjectDeltas: pDeltas,
+        motivationDelta: Math.round(((this.player.attributes?.mood ?? 60) - (playerPrev.motivation ?? 60)) * 10) / 10
+      }
+    }
+
+    // 排序找 TOP3 成长最快
+    const sorted = [...changes].sort((a, b) => b.totalExpDelta - a.totalExpDelta)
+    const top3 = sorted.slice(0, 3)
+    // 动力下降预警
+    const motivationWarnings = changes.filter(c => c.motivationDelta < -5).sort((a, b) => a.motivationDelta - b.motivationDelta).slice(0, 3)
+
+    this.weeklyPreviewData = {
+      week: weekNumber,
+      playerChanges,
+      top3,
+      motivationWarnings,
+      levelUps,
+      avgMotivationDelta: npcCount > 0 ? Math.round(totalMotivationDelta / npcCount * 10) / 10 : 0,
+      npcCount
+    }
+    this.lastWeeklyPreviewWeek = weekNumber
+    console.log(`[Academic] Weekly preview generated for week ${weekNumber}`)
   }
 }

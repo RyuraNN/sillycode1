@@ -168,8 +168,6 @@ const ASSISTANT_SYSTEM_PROMPT = `你是一个叫昔涟的书记记录小助手�
     人物关系|这次正文中人物关系的变化
     重要信息|这次正文中的重要信息。
 
-3. 建议回复：根据当前剧情发展，为玩家生成 3-4 个建议回复选项，包裹在 <suggested_replies> 标签中。内容必须是标准的 JSON 字符串数组。
-    例如：<suggested_replies>["选项一", "选项二", "选项三"]</suggested_replies>
 
 
     

@@ -680,6 +680,15 @@ export interface GameState {
   lastExamDate: string | null  // 上次考试日期 'YYYY-MM-DD'，防止重复触发
   customCoursePool: any | null
   npcElectiveSelections?: Record<string, string[]> // NPC选课记录 { NPC名: [课程ID] }
+  // 红点/通知相关
+  unviewedExamIds: string[]
+  lastViewedWeeklyPreview: number
+  viewedClubIds: string[]
+  // 周报相关
+  weeklySnapshot: any
+  weeklyPreviewData: any
+  showWeeklyPreview: boolean
+  lastWeeklyPreviewWeek: number
   worldState: {
     economy: number
     weather: {

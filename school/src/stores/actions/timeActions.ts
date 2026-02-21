@@ -70,6 +70,22 @@ export const timeActions = {
             }
           }
         }
+
+        // 周报系统：假期中跳过
+        const termInfo = this.getTermInfo?.()
+        const isVacationNow = termInfo?.isVacation === true
+        if (!isVacationNow) {
+          // 周一：存快照
+          if (this.gameTime.weekday === 'Monday' && this.saveWeeklySnapshot) {
+            this.saveWeeklySnapshot()
+          }
+          // 检测周五→周六（上学周结束）：生成周报
+          const prevDate = new Date(this.gameTime.year, this.gameTime.month - 1, previousDay)
+          const prevWeekday = weekdays[prevDate.getDay()]
+          if (prevWeekday === 'Friday' && this.generateWeeklyPreview) {
+            this.generateWeeklyPreview()
+          }
+        }
       }
 
       // 更新NPC位置（每小时更新一次，内部有缓存机制）

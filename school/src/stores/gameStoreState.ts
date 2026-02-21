@@ -228,6 +228,15 @@ export function createInitialState(): GameState {
     lastExamDate: null,
     customCoursePool: null,
     npcElectiveSelections: {},
+    // 红点/通知相关
+    unviewedExamIds: [] as string[],
+    lastViewedWeeklyPreview: 0,
+    viewedClubIds: [] as string[],
+    // 周报相关
+    weeklySnapshot: null as any,
+    weeklyPreviewData: null as any,
+    showWeeklyPreview: false,
+    lastWeeklyPreviewWeek: 0,
     worldState: {
       economy: 100,
       weather: {
