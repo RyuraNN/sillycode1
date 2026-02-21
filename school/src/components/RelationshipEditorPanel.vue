@@ -9,6 +9,7 @@
           <option value="all">全部</option>
           <option value="hasRelations">有关系</option>
           <option value="noRelations">无关系</option>
+          <option value="ghostOnly">仅幽灵角色</option>
         </select>
       </div>
       <div class="char-list">
@@ -16,12 +17,13 @@
           v-for="char in filteredCharacters"
           :key="char.name"
           class="char-card"
-          :class="{ selected: selectedChar === char.name }"
+          :class="{ selected: selectedChar === char.name, ghost: char.ghost }"
           @click="selectedChar = char.name"
         >
-          <span class="gender-icon">{{ char.gender === 'male' ? '♂' : char.gender === 'female' ? '♀' : '?' }}</span>
+          <span class="gender-icon">{{ char.ghost ? '👻' : (char.gender === 'male' ? '♂' : char.gender === 'female' ? '♀' : '?') }}</span>
           <span class="char-name">{{ char.name }}</span>
-          <span class="rel-badge" v-if="char.relCount > 0">{{ char.relCount }}</span>
+          <span class="ref-badge" v-if="char.ghost">被引用 ×{{ char.refCount }}</span>
+          <span class="rel-badge" v-else-if="char.relCount > 0">{{ char.relCount }}</span>
         </div>
         <div v-if="filteredCharacters.length === 0" class="empty-hint">无匹配角色</div>
       </div>
@@ -148,6 +150,57 @@
           </div>
         </div>
       </template>
+
+      <!-- 幽灵角色视图 -->
+      <template v-else-if="isGhostSelected">
+        <div class="char-header ghost-header">
+          <div class="char-info">
+            <span class="gender-icon large">👻</span>
+            <h3>{{ selectedChar }}</h3>
+            <span class="rel-count ghost-hint">幽灵角色</span>
+          </div>
+          <div class="char-actions">
+            <button class="btn-action btn-danger" @click="$emit('clear-ghost-references', selectedChar)">🗑️ 清除所有引用</button>
+          </div>
+        </div>
+        <div class="ghost-notice">
+          <p>该角色不存在于关系数据中，但被以下 {{ ghostReferences.length }} 个角色引用：</p>
+        </div>
+        <div class="rel-list">
+          <div v-for="rev in ghostReferences" :key="rev.source" class="rel-card readonly">
+            <div class="rel-card-header">
+              <span class="rel-target-name">{{ rev.source }} → {{ selectedChar }}</span>
+              <div class="rel-groups">
+                <span v-for="g in rev.groups" :key="g" class="group-tag"
+                  :style="{ background: getGroupColor(g), color: '#fff' }">{{ getGroupName(g) }}</span>
+              </div>
+            </div>
+            <div class="axes-compact">
+              <div class="axis-bar-row" v-for="axisKey in ['intimacy','trust','passion']" :key="axisKey">
+                <span class="axis-label">{{ axisNames[axisKey] }}</span>
+                <div class="bar-track bidirectional">
+                  <div class="bar-center"></div>
+                  <div class="bar-fill" :class="rev[axisKey] >= 0 ? 'positive' : 'negative'"
+                    :style="getBarStyle(axisKey, rev[axisKey])"></div>
+                </div>
+                <span class="axis-val" :class="rev[axisKey] >= 0 ? 'val-pos' : 'val-neg'">{{ rev[axisKey] }}</span>
+              </div>
+              <div class="axis-bar-row">
+                <span class="axis-label">{{ axisNames.hostility }}</span>
+                <div class="bar-track unidirectional">
+                  <div class="bar-fill hostility" :style="{ width: rev.hostility + '%' }"></div>
+                </div>
+                <span class="axis-val val-hostility">{{ rev.hostility }}</span>
+              </div>
+            </div>
+            <div v-if="rev.tags && rev.tags.length" class="rel-tags">
+              <span v-for="(tag, i) in rev.tags" :key="i" class="impression-tag">{{ tag }}</span>
+            </div>
+          </div>
+          <div v-if="ghostReferences.length === 0" class="empty-hint">无引用数据</div>
+        </div>
+      </template>
+
       <div v-else class="empty-state">
         <p>👈 选择一个角色查看关系详情</p>
       </div>
@@ -165,7 +218,8 @@ const props = defineProps({
 
 defineEmits([
   'edit-relationship', 'delete-relationship', 'add-relationship',
-  'clear-char-relations', 'clear-char-impressions', 'remove-character'
+  'clear-char-relations', 'clear-char-impressions', 'remove-character',
+  'clear-ghost-references'
 ])
 
 const searchQuery = ref('')
@@ -177,14 +231,38 @@ const showReverse = ref(false)
 
 const axisNames = { intimacy: '亲密', trust: '信赖', passion: '激情', hostility: '敌意' }
 
-// 角色列表
+// 角色列表（含幽灵角色）
 const allCharacters = computed(() => {
   const rels = props.npcRelationships || {}
-  return Object.keys(rels).map(name => ({
+  const topKeys = new Set(Object.keys(rels))
+
+  // 收集幽灵角色：只作为关系目标存在，自身无顶层条目
+  const ghostRefCount = {}
+  for (const charData of Object.values(rels)) {
+    for (const target of Object.keys(charData?.relations || {})) {
+      if (!topKeys.has(target)) {
+        ghostRefCount[target] = (ghostRefCount[target] || 0) + 1
+      }
+    }
+  }
+
+  const normal = Object.keys(rels).map(name => ({
     name,
     gender: rels[name]?.gender || 'unknown',
-    relCount: Object.keys(rels[name]?.relations || {}).length
-  })).sort((a, b) => a.name.localeCompare(b.name, 'zh'))
+    relCount: Object.keys(rels[name]?.relations || {}).length,
+    ghost: false,
+    refCount: 0
+  }))
+
+  const ghosts = Object.entries(ghostRefCount).map(([name, count]) => ({
+    name,
+    gender: 'unknown',
+    relCount: 0,
+    ghost: true,
+    refCount: count
+  }))
+
+  return [...normal, ...ghosts].sort((a, b) => a.name.localeCompare(b.name, 'zh'))
 })
 
 const filteredCharacters = computed(() => {
@@ -194,7 +272,8 @@ const filteredCharacters = computed(() => {
     list = list.filter(c => c.name.toLowerCase().includes(q))
   }
   if (filterMode.value === 'hasRelations') list = list.filter(c => c.relCount > 0)
-  else if (filterMode.value === 'noRelations') list = list.filter(c => c.relCount === 0)
+  else if (filterMode.value === 'noRelations') list = list.filter(c => c.relCount === 0 && !c.ghost)
+  else if (filterMode.value === 'ghostOnly') list = list.filter(c => c.ghost)
   return list
 })
 
@@ -202,6 +281,32 @@ const filteredCharacters = computed(() => {
 const selectedCharData = computed(() => {
   if (!selectedChar.value) return null
   return props.npcRelationships?.[selectedChar.value] || null
+})
+
+// 是否选中了幽灵角色
+const isGhostSelected = computed(() => {
+  if (!selectedChar.value) return false
+  const rels = props.npcRelationships || {}
+  return !Object.prototype.hasOwnProperty.call(rels, selectedChar.value)
+})
+
+// 幽灵角色被引用的关系列表
+const ghostReferences = computed(() => {
+  if (!isGhostSelected.value || !selectedChar.value) return []
+  const rels = props.npcRelationships || {}
+  const result = []
+  for (const [sourceName, charData] of Object.entries(rels)) {
+    const rel = charData?.relations?.[selectedChar.value]
+    if (rel) {
+      result.push({
+        source: sourceName,
+        intimacy: rel.intimacy ?? 0, trust: rel.trust ?? 0,
+        passion: rel.passion ?? 0, hostility: rel.hostility ?? 0,
+        groups: rel.groups || [], tags: rel.tags || []
+      })
+    }
+  }
+  return result
 })
 
 const selectedRelations = computed(() => {
@@ -389,4 +494,17 @@ function getBarStyle(axisKey, val) {
   color: #666; font-size: 15px;
 }
 .empty-hint { color: #555; font-size: 13px; text-align: center; padding: 20px; }
+/* 幽灵角色样式 */
+.char-card.ghost { border-left: 3px solid #FF9800; }
+.ref-badge {
+  background: #FF9800; color: #fff; font-size: 10px; padding: 1px 6px;
+  border-radius: 10px; white-space: nowrap;
+}
+.ghost-header { border-left: 3px solid #FF9800; }
+.ghost-hint { color: #FF9800; font-size: 12px; }
+.ghost-notice {
+  padding: 10px 16px; color: #bbb; font-size: 13px;
+  border-bottom: 1px solid #333; flex-shrink: 0;
+}
+.ghost-notice p { margin: 0; }
 </style>

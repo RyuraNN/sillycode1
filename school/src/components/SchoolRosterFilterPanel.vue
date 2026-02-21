@@ -254,6 +254,22 @@ const showMessage = (msg) => {
   showMessageModal.value = true
 }
 
+// 将面板编辑的关系数据同步回 [Social_Data] 世界书
+async function syncRelationshipsToWorldbook() {
+  const rels = gameStore.npcRelationships
+  if (!rels) return
+  const worldbookData = {}
+  for (const [name, charData] of Object.entries(rels)) {
+    worldbookData[name] = {
+      personality: charData.personality,
+      relationships: charData.relations,
+      goals: charData.goals,
+      priorities: charData.priorities
+    }
+  }
+  await saveSocialData(worldbookData)
+}
+
 // ==================== 初始化 ====================
 onMounted(async () => {
   await loadData()
@@ -1352,6 +1368,7 @@ const handleSaveRelationship = async (formData) => {
     groups: formData.groups, tags: formData.tags
   })
   await flushPendingSocialData()
+  await syncRelationshipsToWorldbook()
   showRelationshipEditor.value = false
   showMessage(`关系 ${source} → ${target} 已保存`)
 }
@@ -1360,6 +1377,7 @@ const handleDeleteRelationship = async (source, target) => {
   if (!confirm(`确定删除 ${source} ↔ ${target} 的双向关系？`)) return
   removeRelationship(source, target)
   await flushPendingSocialData()
+  await syncRelationshipsToWorldbook()
   showMessage(`已删除 ${source} ↔ ${target} 的关系`)
 }
 
@@ -1374,6 +1392,7 @@ const handleClearCharRelations = async (charName) => {
     if (otherRels?.[charName]) delete otherRels[charName]
   }
   await flushPendingSocialData()
+  await syncRelationshipsToWorldbook()
   await saveImpressionDataImmediate()
   showMessage(`已清空「${charName}」的所有关系`)
 }
@@ -1385,6 +1404,7 @@ const handleClearCharImpressions = async (charName) => {
     if (rel && rel.tags) rel.tags = []
   }
   await flushPendingSocialData()
+  await syncRelationshipsToWorldbook()
   await saveImpressionDataImmediate()
   showMessage(`已清除所有角色对「${charName}」的印象标签`)
 }
@@ -1393,7 +1413,22 @@ const handleRemoveCharacter = async (charName) => {
   if (!confirm(`⚠️ 确定完全移除「${charName}」？\n将从关系数据中彻底删除该角色及所有相关关系。`)) return
   removeCharacterFromRelations(charName, true)
   await flushPendingSocialData()
+  await syncRelationshipsToWorldbook()
   showMessage(`已移除角色「${charName}」`)
+}
+
+const handleClearGhostReferences = async (charName) => {
+  if (!confirm(`确定清除所有角色对幽灵角色「${charName}」的引用？`)) return
+  const rels = gameStore.npcRelationships
+  if (!rels) return
+  for (const otherName in rels) {
+    const otherRels = rels[otherName]?.relations
+    if (otherRels?.[charName]) delete otherRels[charName]
+  }
+  await flushPendingSocialData()
+  await syncRelationshipsToWorldbook()
+  await saveImpressionDataImmediate()
+  showMessage(`已清除所有对幽灵角色「${charName}」的引用`)
 }
 
 const handleSaveComposer = async () => {
@@ -1583,6 +1618,7 @@ const handleSaveComposer = async () => {
               @clear-char-relations="handleClearCharRelations"
               @clear-char-impressions="handleClearCharImpressions"
               @remove-character="handleRemoveCharacter"
+              @clear-ghost-references="handleClearGhostReferences"
             />
           </div>
         </div>
