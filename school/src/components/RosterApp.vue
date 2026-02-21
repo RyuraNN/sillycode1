@@ -9,8 +9,6 @@ const emit = defineEmits(['close'])
 const gameStore = useGameStore()
 
 const selectedCharName = ref(null)
-const canvasRef = ref(null)
-const sphereContainerRef = ref(null)
 
 // 辅助函数：获取角色的完整关系数据 (合并 Store 和 Default，并过滤被排除的角色)
 const getCharRelations = (charName) => {
@@ -163,319 +161,456 @@ const getDisplayEmotionalState = (relation) => {
     return getEmotionalState(relation, playerGender, npcGender)
 }
 
-// === 球形关系图逻辑 ===
-let ctx = null
-let animationFrameId = null
-let nodes = []
-let edges = []
-let rotationX = 0
-let rotationY = 0
-let currentRotationX = 0
-let currentRotationY = 0
-let isDragging = false
-let lastMouseX = 0
-let lastMouseY = 0
+// === 2D 力导向关系网络图 ===
+const networkCanvasRef = ref(null)
+const networkContainerRef = ref(null)
+let netCtx = null
+let netAnimId = null
+let netNodes = []    // { id, name, x, y, vx, vy, pinned, color, isPlayer }
+let netEdges = []    // { source, target, color, width, sourceIdx, targetIdx }
 
-// 初始化关系图数据
-const initGraphData = () => {
-    if (!currentChar.value) return
-    
-    nodes = []
-    edges = []
-    
-    const centerCharName = currentChar.value.name
-    
-    // 获取合并后的关系数据
-    const relations = getCharRelations(centerCharName)
-    
-    // 1. 添加中心节点
-    nodes.push({
-        id: centerCharName,
-        name: centerCharName,
-        avatar: currentChar.value.avatar || null,
-        isCenter: true,
-        x: 0, y: 0, z: 0,
-        color: '#FF6B6B'
+// 交互状态
+let dragNode = null
+let isPanning = false
+let panOffsetX = 0, panOffsetY = 0
+let lastPanX = 0, lastPanY = 0
+let zoomScale = 1
+const MIN_ZOOM = 0.3, MAX_ZOOM = 3
+let mouseDownX = 0, mouseDownY = 0
+const isGrabbing = ref(false)
+
+// 力导向参数
+const REPULSION = 5000
+const SPRING_K = 0.005
+const SPRING_LEN = 120
+const DAMPING = 0.85
+const CENTER_GRAVITY = 0.01
+const MAX_VELOCITY = 8
+
+// 构建名册白名单
+const getRosterNames = () => {
+    const names = new Set()
+    names.add(gameStore.player.name)
+    for (const classInfo of Object.values(gameStore.allClassData || {})) {
+        if (classInfo.headTeacher?.name) names.add(classInfo.headTeacher.name)
+        if (Array.isArray(classInfo.teachers)) classInfo.teachers.forEach(t => { if (t.name) names.add(t.name) })
+        if (Array.isArray(classInfo.students)) classInfo.students.forEach(s => { if (s.name) names.add(s.name) })
+    }
+    return names
+}
+
+// 初始化全局网络数据
+const initNetworkData = () => {
+    netNodes = []
+    netEdges = []
+    const rosterNames = getRosterNames()
+    const playerName = gameStore.player.name
+
+    // 收集所有有关系数据的角色名
+    const allNames = new Set()
+    for (const name of rosterNames) {
+        allNames.add(name)
+    }
+    // 也从 npcRelationships 和 DEFAULT_RELATIONSHIPS 中收集
+    for (const name of Object.keys(gameStore.npcRelationships || {})) {
+        if (rosterNames.has(name)) allNames.add(name)
+    }
+    for (const name of Object.keys(DEFAULT_RELATIONSHIPS || {})) {
+        if (rosterNames.has(name)) allNames.add(name)
+    }
+
+    // 只保留名册中的角色
+    const nameList = [...allNames].filter(n => rosterNames.has(n))
+
+    // 创建节点（随机圆形分布）
+    const count = nameList.length
+    const nameToIdx = {}
+    nameList.forEach((name, i) => {
+        const angle = (2 * Math.PI * i) / count + (Math.random() - 0.5) * 0.3
+        const r = 80 + Math.random() * 60
+        const isPlayer = name === playerName
+        // 获取与玩家的关系来决定颜色
+        const rel = getCharRelations(name)[playerName] || getCharRelations(playerName)[name]
+        netNodes.push({
+            id: name,
+            name,
+            x: Math.cos(angle) * r,
+            y: Math.sin(angle) * r,
+            vx: 0, vy: 0,
+            pinned: false,
+            color: isPlayer ? '#FFD700' : getNodeColor(rel || { intimacy: 0, trust: 0, passion: 0, hostility: 0 }),
+            isPlayer
+        })
+        nameToIdx[name] = i
     })
-    
-    // 获取所有目标角色名
-    const targetNames = Object.keys(relations).filter(name => {
-        return true
-    })
-    
-    if (targetNames.length > 0) {
-        // 限制节点数量，避免过于拥挤
-        const maxNodes = 30
-        const displayTargets = targetNames.slice(0, maxNodes)
-        
-        // 2. 分布周围节点 (斐波那契球面分布)
-        const phi = Math.PI * (3 - Math.sqrt(5)) // 黄金角
-        
-        displayTargets.forEach((targetName, i) => {
-            const relData = relations[targetName]
-            
-            // 计算球面坐标
-            const y = 1 - (i / (displayTargets.length - 1)) * 2 // y goes from 1 to -1
-            const radius = Math.sqrt(1 - y * y) // radius at y
-            
-            const theta = phi * i
-            
-            const x = Math.cos(theta) * radius
-            const z = Math.sin(theta) * radius
-            
-            // 缩放半径
-            const R = 120 
-            
-            nodes.push({
-                id: targetName,
-                name: targetName,
-                isCenter: false,
-                x: x * R,
-                y: y * R,
-                z: z * R,
-                color: getNodeColor(relData),
-                relation: relData
-            })
-            
-            // 添加连线
-            edges.push({
-                source: centerCharName,
+
+    // 收集所有边（去重）
+    const edgeSet = new Set()
+    for (const sourceName of nameList) {
+        const relations = getCharRelations(sourceName)
+        for (const [targetName, relData] of Object.entries(relations)) {
+            if (!rosterNames.has(targetName)) continue
+            const si = nameToIdx[sourceName]
+            const ti = nameToIdx[targetName]
+            if (si === undefined || ti === undefined) continue
+            const key = Math.min(si, ti) + '-' + Math.max(si, ti)
+            if (edgeSet.has(key)) continue
+            edgeSet.add(key)
+            netEdges.push({
+                source: sourceName,
                 target: targetName,
+                sourceIdx: si,
+                targetIdx: ti,
                 color: getEdgeColor(relData),
                 width: getEdgeWidth(relData)
             })
-        })
+        }
     }
 }
 
 const getNodeColor = (rel) => {
-    if (rel.hostility > 50) return '#FF6B6B' // 红 (敌对)
-    if (rel.passion > 50) return '#FF85B3' // 粉 (激情)
-    if (rel.trust > 60) return '#4ECDC4' // 青绿 (信赖)
-    if (rel.intimacy > 60) return '#45B7D1' // 天蓝 (亲密)
-    return '#96CEB4' // 柔绿
+    if (!rel) return '#96CEB4'
+    if (rel.hostility > 50) return '#FF6B6B'
+    if (rel.passion > 50) return '#FF85B3'
+    if (rel.trust > 60) return '#4ECDC4'
+    if (rel.intimacy > 60) return '#45B7D1'
+    return '#96CEB4'
 }
 
 const getEdgeColor = (rel) => {
-    if (rel.hostility > 50) return '#FF6B6B' // 红 (敌对)
-    if (rel.passion > 50) return '#FF85B3' // 粉 (激情)
-    if (rel.trust > 60) return '#4ECDC4' // 青绿 (信赖)
-    if (rel.intimacy > 60) return '#45B7D1' // 天蓝 (亲密)
-    return '#A8E6CF' // 柔绿
+    if (!rel) return '#A8E6CF'
+    if (rel.hostility > 50) return '#FF6B6B'
+    if (rel.passion > 50) return '#FF85B3'
+    if (rel.trust > 60) return '#4ECDC4'
+    if (rel.intimacy > 60) return '#45B7D1'
+    return '#A8E6CF'
 }
 
 const getEdgeWidth = (rel) => {
-    const score = Math.max(rel.intimacy, rel.trust, rel.passion, rel.hostility)
+    if (!rel) return 1
+    const score = Math.max(rel.intimacy || 0, rel.trust || 0, rel.passion || 0, rel.hostility || 0)
     return 1 + (score / 100) * 2.5
 }
 
+// 力导向物理模拟
+const simulateForces = () => {
+    const n = netNodes.length
+    if (n === 0) return
+
+    // 1. 节点间库仑斥力
+    for (let i = 0; i < n; i++) {
+        if (netNodes[i].pinned) continue
+        for (let j = i + 1; j < n; j++) {
+            let dx = netNodes[i].x - netNodes[j].x
+            let dy = netNodes[i].y - netNodes[j].y
+            let dist = Math.sqrt(dx * dx + dy * dy) || 1
+            const force = REPULSION / (dist * dist)
+            const fx = (dx / dist) * force
+            const fy = (dy / dist) * force
+            netNodes[i].vx += fx
+            netNodes[i].vy += fy
+            if (!netNodes[j].pinned) {
+                netNodes[j].vx -= fx
+                netNodes[j].vy -= fy
+            }
+        }
+    }
+
+    // 2. 边弹簧引力
+    for (const edge of netEdges) {
+        const a = netNodes[edge.sourceIdx]
+        const b = netNodes[edge.targetIdx]
+        let dx = b.x - a.x
+        let dy = b.y - a.y
+        let dist = Math.sqrt(dx * dx + dy * dy) || 1
+        const displacement = dist - SPRING_LEN
+        const force = SPRING_K * displacement
+        const fx = (dx / dist) * force
+        const fy = (dy / dist) * force
+        if (!a.pinned) { a.vx += fx; a.vy += fy }
+        if (!b.pinned) { b.vx -= fx; b.vy -= fy }
+    }
+
+    // 3. 向心力 + 速度衰减 + 位置更新
+    for (const node of netNodes) {
+        if (node.pinned) continue
+        // 向心力
+        node.vx -= node.x * CENTER_GRAVITY
+        node.vy -= node.y * CENTER_GRAVITY
+        // 衰减
+        node.vx *= DAMPING
+        node.vy *= DAMPING
+        // 限速
+        const speed = Math.sqrt(node.vx * node.vx + node.vy * node.vy)
+        if (speed > MAX_VELOCITY) {
+            node.vx = (node.vx / speed) * MAX_VELOCITY
+            node.vy = (node.vy / speed) * MAX_VELOCITY
+        }
+        node.x += node.vx
+        node.y += node.vy
+    }
+}
+
+// 初始化 Canvas
 const initCanvas = () => {
-    if (!canvasRef.value) return
-    const canvas = canvasRef.value
-    // 设置高分辨率
+    if (!networkCanvasRef.value) return
+    const canvas = networkCanvasRef.value
     const dpr = window.devicePixelRatio || 1
     const rect = canvas.getBoundingClientRect()
     canvas.width = rect.width * dpr
     canvas.height = rect.height * dpr
-    ctx = canvas.getContext('2d')
-    ctx.scale(dpr, dpr)
-    
-    // 初始旋转
-    currentRotationY = 0.005 
+    netCtx = canvas.getContext('2d')
+    netCtx.scale(dpr, dpr)
 }
 
-const draw = () => {
-    if (!ctx || !canvasRef.value) return
-    const width = canvasRef.value.width / (window.devicePixelRatio || 1)
-    const height = canvasRef.value.height / (window.devicePixelRatio || 1)
-    const centerX = width / 2
-    const centerY = height / 2
-    
-    // 清除画布并绘制渐变背景
-    const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, Math.max(width, height) / 2)
+// 绘制网络图
+const drawNetwork = () => {
+    if (!netCtx || !networkCanvasRef.value) return
+    const width = networkCanvasRef.value.width / (window.devicePixelRatio || 1)
+    const height = networkCanvasRef.value.height / (window.devicePixelRatio || 1)
+    const cx = width / 2
+    const cy = height / 2
+
+    // 物理模拟
+    simulateForces()
+
+    // 清除 + 背景
+    const gradient = netCtx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(width, height) / 2)
     gradient.addColorStop(0, '#1a2a3a')
     gradient.addColorStop(1, '#0d1520')
-    ctx.fillStyle = gradient
-    ctx.fillRect(0, 0, width, height)
-    
-    // 更新旋转
-    if (!isDragging) {
-        rotationY += 0.003 // 自动旋转
+    netCtx.fillStyle = gradient
+    netCtx.fillRect(0, 0, width, height)
+
+    netCtx.save()
+    netCtx.translate(cx + panOffsetX, cy + panOffsetY)
+    netCtx.scale(zoomScale, zoomScale)
+
+    // 绘制边
+    for (const edge of netEdges) {
+        const a = netNodes[edge.sourceIdx]
+        const b = netNodes[edge.targetIdx]
+        // 外发光
+        netCtx.beginPath()
+        netCtx.moveTo(a.x, a.y)
+        netCtx.lineTo(b.x, b.y)
+        netCtx.strokeStyle = edge.color
+        netCtx.lineWidth = edge.width + 3
+        netCtx.globalAlpha = 0.15
+        netCtx.stroke()
+        // 主线
+        netCtx.beginPath()
+        netCtx.moveTo(a.x, a.y)
+        netCtx.lineTo(b.x, b.y)
+        netCtx.strokeStyle = edge.color
+        netCtx.lineWidth = edge.width
+        netCtx.globalAlpha = 0.7
+        netCtx.stroke()
     }
-    
-    // 缓动
-    currentRotationX += (rotationX - currentRotationX) * 0.1
-    currentRotationY += (rotationY - currentRotationY) * 0.1
-    
-    // 投影并排序节点
-    const projectedNodes = nodes.map(node => {
-        // 旋转
-        let x = node.x
-        let y = node.y
-        let z = node.z
-        
-        // 绕Y轴旋转
-        const cosY = Math.cos(currentRotationY)
-        const sinY = Math.sin(currentRotationY)
-        const x1 = x * cosY - z * sinY
-        const z1 = z * cosY + x * sinY
-        
-        // 绕X轴旋转
-        const cosX = Math.cos(currentRotationX)
-        const sinX = Math.sin(currentRotationX)
-        const y2 = y * cosX - z1 * sinX
-        const z2 = z1 * cosX + y * sinX
-        
-        // 透视投影
-        const scale = 300 / (300 + z2) // 视距 300
-        const screenX = centerX + x1 * scale
-        const screenY = centerY + y2 * scale
-        
-        return {
-            ...node,
-            screenX,
-            screenY,
-            scale,
-            zIndex: z2
-        }
-    })
-    
-    // 按 Z 轴排序 (画后面的先画)
-    projectedNodes.sort((a, b) => b.zIndex - a.zIndex)
-    
-    // 绘制连线（带发光效果）
-    edges.forEach(edge => {
-        const sourceNode = projectedNodes.find(n => n.id === edge.source)
-        const targetNode = projectedNodes.find(n => n.id === edge.target)
-        
-        if (sourceNode && targetNode) {
-            const alpha = Math.min(1, Math.max(0.15, (sourceNode.scale + targetNode.scale) / 2 - 0.2))
-            
-            // 外发光
-            ctx.beginPath()
-            ctx.moveTo(sourceNode.screenX, sourceNode.screenY)
-            ctx.lineTo(targetNode.screenX, targetNode.screenY)
-            ctx.strokeStyle = edge.color
-            ctx.lineWidth = (edge.width + 3) * ((sourceNode.scale + targetNode.scale) / 2)
-            ctx.globalAlpha = alpha * 0.3
-            ctx.stroke()
-            
-            // 主线
-            ctx.beginPath()
-            ctx.moveTo(sourceNode.screenX, sourceNode.screenY)
-            ctx.lineTo(targetNode.screenX, targetNode.screenY)
-            ctx.strokeStyle = edge.color
-            ctx.lineWidth = edge.width * ((sourceNode.scale + targetNode.scale) / 2)
-            ctx.globalAlpha = alpha
-            ctx.stroke()
-        }
-    })
-    ctx.globalAlpha = 1
-    
+    netCtx.globalAlpha = 1
+
     // 绘制节点
-    projectedNodes.forEach(node => {
-        const size = (node.isCenter ? 10 : 5) * node.scale
-        const fontSize = (node.isCenter ? 13 : 10) * node.scale
-        const alpha = Math.min(1, Math.max(0.4, node.scale))
-        
-        // 节点外发光
-        ctx.beginPath()
-        ctx.arc(node.screenX, node.screenY, size + 4, 0, Math.PI * 2)
-        const glowGradient = ctx.createRadialGradient(
-            node.screenX, node.screenY, size,
-            node.screenX, node.screenY, size + 8
-        )
-        glowGradient.addColorStop(0, node.color + '80')
-        glowGradient.addColorStop(1, 'transparent')
-        ctx.fillStyle = glowGradient
-        ctx.globalAlpha = alpha
-        ctx.fill()
-        
-        // 绘制节点
-        ctx.beginPath()
-        ctx.arc(node.screenX, node.screenY, size, 0, Math.PI * 2)
-        ctx.fillStyle = node.color
-        ctx.globalAlpha = alpha
-        ctx.fill()
-        
-        // 节点边框
-        ctx.strokeStyle = '#ffffff'
-        ctx.lineWidth = 1.5 * node.scale
-        ctx.globalAlpha = alpha * 0.6
-        ctx.stroke()
-        
-        // 绘制文字
-        ctx.globalAlpha = alpha
-        ctx.font = `${fontSize}px "Microsoft YaHei", sans-serif`
-        ctx.fillStyle = '#ffffff'
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'top'
-        
-        // 文字阴影
-        ctx.shadowColor = 'rgba(0,0,0,0.8)'
-        ctx.shadowBlur = 4
-        ctx.fillText(node.name, node.screenX, node.screenY + size + 4)
-        ctx.shadowBlur = 0
-    })
-    
-    ctx.globalAlpha = 1
-    animationFrameId = requestAnimationFrame(draw)
+    const selectedName = selectedCharName.value
+    for (const node of netNodes) {
+        const size = node.isPlayer ? 10 : 6
+        const isSelected = node.id === selectedName
+
+        // 选中高亮环
+        if (isSelected) {
+            netCtx.beginPath()
+            netCtx.arc(node.x, node.y, size + 6, 0, Math.PI * 2)
+            netCtx.strokeStyle = '#FFD700'
+            netCtx.lineWidth = 2
+            netCtx.globalAlpha = 0.8
+            netCtx.stroke()
+            netCtx.globalAlpha = 1
+        }
+
+        // 外发光
+        const glowGrad = netCtx.createRadialGradient(node.x, node.y, size, node.x, node.y, size + 8)
+        glowGrad.addColorStop(0, node.color + '80')
+        glowGrad.addColorStop(1, 'transparent')
+        netCtx.beginPath()
+        netCtx.arc(node.x, node.y, size + 8, 0, Math.PI * 2)
+        netCtx.fillStyle = glowGrad
+        netCtx.fill()
+
+        // 节点圆
+        netCtx.beginPath()
+        netCtx.arc(node.x, node.y, size, 0, Math.PI * 2)
+        netCtx.fillStyle = node.color
+        netCtx.fill()
+        netCtx.strokeStyle = '#ffffff'
+        netCtx.lineWidth = 1.5
+        netCtx.globalAlpha = 0.6
+        netCtx.stroke()
+        netCtx.globalAlpha = 1
+
+        // 标签
+        const fontSize = Math.max(8, Math.min(13, 11 / zoomScale))
+        netCtx.font = `${fontSize}px "Microsoft YaHei", sans-serif`
+        netCtx.fillStyle = '#ffffff'
+        netCtx.textAlign = 'center'
+        netCtx.textBaseline = 'top'
+        netCtx.shadowColor = 'rgba(0,0,0,0.8)'
+        netCtx.shadowBlur = 4
+        netCtx.fillText(node.name, node.x, node.y + size + 4)
+        netCtx.shadowBlur = 0
+    }
+
+    netCtx.restore()
+    netAnimId = requestAnimationFrame(drawNetwork)
 }
 
-// 交互事件处理
+// 坐标转换：屏幕坐标 → 图坐标
+const screenToGraph = (clientX, clientY) => {
+    const rect = networkCanvasRef.value.getBoundingClientRect()
+    const width = rect.width
+    const height = rect.height
+    const cx = width / 2
+    const cy = height / 2
+    const sx = clientX - rect.left
+    const sy = clientY - rect.top
+    return {
+        x: (sx - cx - panOffsetX) / zoomScale,
+        y: (sy - cy - panOffsetY) / zoomScale
+    }
+}
+
+// 查找点击的节点
+const findNodeAt = (gx, gy) => {
+    // 反向遍历（后绘制的在上面）
+    for (let i = netNodes.length - 1; i >= 0; i--) {
+        const node = netNodes[i]
+        const size = node.isPlayer ? 10 : 6
+        const hitR = size + 6 // 扩大点击区域
+        const dx = gx - node.x
+        const dy = gy - node.y
+        if (dx * dx + dy * dy <= hitR * hitR) return node
+    }
+    return null
+}
+
+// 交互事件
 const handleStart = (e) => {
-    isDragging = true
     const clientX = e.touches ? e.touches[0].clientX : e.clientX
     const clientY = e.touches ? e.touches[0].clientY : e.clientY
-    lastMouseX = clientX
-    lastMouseY = clientY
+    mouseDownX = clientX
+    mouseDownY = clientY
+
+    const { x, y } = screenToGraph(clientX, clientY)
+    const hit = findNodeAt(x, y)
+
+    if (hit) {
+        dragNode = hit
+        dragNode.pinned = true
+        isGrabbing.value = true
+    } else {
+        isPanning = true
+        lastPanX = clientX
+        lastPanY = clientY
+        isGrabbing.value = true
+    }
 }
 
 const handleMove = (e) => {
-    if (!isDragging) return
     const clientX = e.touches ? e.touches[0].clientX : e.clientX
     const clientY = e.touches ? e.touches[0].clientY : e.clientY
-    
-    const deltaX = clientX - lastMouseX
-    const deltaY = clientY - lastMouseY
-    
-    rotationY += deltaX * 0.01
-    rotationX += deltaY * 0.01
-    
-    lastMouseX = clientX
-    lastMouseY = clientY
-    
-    if (e.cancelable) e.preventDefault() // 防止页面滚动
-}
 
-const handleEnd = () => {
-    isDragging = false
-}
-
-// 监听 selectedCharName 变化
-watch(selectedCharName, async (newVal) => {
-    if (newVal) {
-        await nextTick()
-        initGraphData()
-        initCanvas()
-        if (animationFrameId) cancelAnimationFrame(animationFrameId)
-        draw()
-    } else {
-        if (animationFrameId) cancelAnimationFrame(animationFrameId)
+    if (dragNode) {
+        const { x, y } = screenToGraph(clientX, clientY)
+        dragNode.x = x
+        dragNode.y = y
+        dragNode.vx = 0
+        dragNode.vy = 0
+    } else if (isPanning) {
+        panOffsetX += clientX - lastPanX
+        panOffsetY += clientY - lastPanY
+        lastPanX = clientX
+        lastPanY = clientY
     }
+
+    if (e.cancelable) e.preventDefault()
+}
+
+const handleEnd = (e) => {
+    const clientX = e.changedTouches ? e.changedTouches[0].clientX : e.clientX
+    const clientY = e.changedTouches ? e.changedTouches[0].clientY : e.clientY
+
+    // 判断是否为点击（位移很小）
+    const dx = clientX - mouseDownX
+    const dy = clientY - mouseDownY
+    if (Math.abs(dx) < 5 && Math.abs(dy) < 5) {
+        const { x, y } = screenToGraph(clientX, clientY)
+        const hit = findNodeAt(x, y)
+        if (hit && !hit.isPlayer) {
+            // 点击节点 → 跳转到该角色详情
+            selectedCharName.value = hit.id
+        }
+    }
+
+    if (dragNode) {
+        dragNode.pinned = false
+        dragNode = null
+    }
+    isPanning = false
+    isGrabbing.value = false
+}
+
+const handleWheel = (e) => {
+    const delta = e.deltaY > 0 ? 0.9 : 1.1
+    const newZoom = zoomScale * delta
+    if (newZoom < MIN_ZOOM || newZoom > MAX_ZOOM) return
+
+    // 以鼠标位置为中心缩放
+    const rect = networkCanvasRef.value.getBoundingClientRect()
+    const mx = e.clientX - rect.left - rect.width / 2 - panOffsetX
+    const my = e.clientY - rect.top - rect.height / 2 - panOffsetY
+    panOffsetX -= mx * (delta - 1)
+    panOffsetY -= my * (delta - 1)
+    zoomScale = newZoom
+}
+
+// 启动网络图
+const startNetwork = () => {
+    initNetworkData()
+    initCanvas()
+    if (netAnimId) cancelAnimationFrame(netAnimId)
+    // 重置视图
+    panOffsetX = 0
+    panOffsetY = 0
+    zoomScale = 1
+    drawNetwork()
+}
+
+// watch: 切换角色时更新高亮（不重建图）
+watch(selectedCharName, async (newVal, oldVal) => {
+    // 如果从详情返回列表，或首次进入详情，都需要确保图已初始化
+    if (newVal && netNodes.length === 0) {
+        await nextTick()
+        startNetwork()
+    }
+    // 高亮变化由 drawNetwork 自动处理（读取 selectedCharName.value）
 })
 
-// 监听数据变化以支持回溯刷新
-watch(() => currentChar.value?.fullData, (newVal) => {
-    if (selectedCharName.value && newVal) {
+// watch: 数据变化时重建图
+watch(() => gameStore.npcRelationships, () => {
+    if (selectedCharName.value) {
         nextTick(() => {
-            initGraphData()
+            initNetworkData()
+        })
+    }
+}, { deep: true })
+
+watch(charList, () => {
+    if (selectedCharName.value) {
+        nextTick(() => {
+            initNetworkData()
         })
     }
 }, { deep: true })
 
 onUnmounted(() => {
-    if (animationFrameId) cancelAnimationFrame(animationFrameId)
+    if (netAnimId) cancelAnimationFrame(netAnimId)
 })
 </script>
 
@@ -639,16 +774,17 @@ onUnmounted(() => {
           </div>
       </div>
 
-      <!-- 球形动态关系图 -->
+      <!-- 全局关系网络图 -->
       <div class="section graph-section">
           <div class="section-title">
             <span class="title-icon">🌐</span>
             人际关系网
-            <span class="section-hint">拖动旋转查看</span>
+            <span class="section-hint">拖动平移 · 滚轮缩放 · 点击角色跳转</span>
           </div>
-          <div 
-            class="canvas-wrapper" 
-            ref="sphereContainerRef"
+          <div
+            class="canvas-wrapper"
+            :class="{ grabbing: isGrabbing }"
+            ref="networkContainerRef"
             @mousedown="handleStart"
             @mousemove="handleMove"
             @mouseup="handleEnd"
@@ -656,8 +792,9 @@ onUnmounted(() => {
             @touchstart="handleStart"
             @touchmove="handleMove"
             @touchend="handleEnd"
+            @wheel.prevent="handleWheel"
           >
-              <canvas ref="canvasRef"></canvas>
+              <canvas ref="networkCanvasRef"></canvas>
               <div class="canvas-overlay"></div>
           </div>
           <div class="graph-legend">
@@ -676,6 +813,10 @@ onUnmounted(() => {
               <div class="legend-item">
                   <span class="dot red"></span>
                   <span>敌意</span>
+              </div>
+              <div class="legend-item">
+                  <span class="dot gold"></span>
+                  <span>玩家</span>
               </div>
           </div>
       </div>
@@ -1324,8 +1465,12 @@ onUnmounted(() => {
   border-radius: 16px;
   overflow: hidden;
   position: relative;
-  cursor: move;
+  cursor: grab;
   box-shadow: inset 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.canvas-wrapper.grabbing {
+  cursor: grabbing;
 }
 
 .canvas-wrapper canvas {
@@ -1368,4 +1513,5 @@ onUnmounted(() => {
 .dot.green { background: linear-gradient(135deg, #4ECDC4 0%, #4CAF50 100%); }
 .dot.pink { background: linear-gradient(135deg, #FF85B3 0%, #E91E63 100%); }
 .dot.red { background: linear-gradient(135deg, #FF6B6B 0%, #D32F2F 100%); }
+.dot.gold { background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%); }
 </style>

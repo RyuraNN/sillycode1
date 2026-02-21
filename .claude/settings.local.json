@@ -17,7 +17,9 @@
       "Bash(awk:*)",
       "Bash(grep:*)",
       "Bash(xargs cat:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(cmd.exe /c \"dir D:\\\\sillycode1\\\\school\\\\src /b\")",
+      "Bash(cmd.exe /c:*)"
     ]
   }
 }

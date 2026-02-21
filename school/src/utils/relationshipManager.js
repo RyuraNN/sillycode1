@@ -499,6 +499,41 @@ export function setRelationship(sourceName, targetName, relationData) {
 }
 
 /**
+ * 对 NPC→玩家 的正向关系增量应用玩家属性权重
+ * 基础修正系数 = eq/100 × 0.4 + charm/100 × 0.4 + mood/100 × 0.2（范围 0~1）
+ * 亲密/信赖: round(delta × (0.2 + 0.8 × modifier))  — 属性全满 100%
+ * 激情:      round(delta × (0.1 + 0.45 × modifier)) — 属性全满仅 55%，体现"心动难得"
+ * 敌意: 不受影响
+ * 只影响正向增量（delta > 0），负向变化原样返回
+ * @param {Object} delta - { intimacy?, trust?, passion?, hostility? }
+ * @param {Object} gameStore - gameStore 实例
+ * @returns {Object} 加权后的 delta
+ */
+export function applyRelationshipWeights(delta, gameStore) {
+  const attrs = gameStore.player?.attributes || {}
+  const eq = (attrs.eq ?? 50) / 100
+  const charm = (attrs.charm ?? 50) / 100
+  const mood = (attrs.mood ?? 50) / 100
+  const modifier = eq * 0.4 + charm * 0.4 + mood * 0.2
+
+  const result = { ...delta }
+
+  // 亲密和信赖
+  for (const key of ['intimacy', 'trust']) {
+    if (result[key] > 0) {
+      result[key] = Math.max(1, Math.round(result[key] * (0.2 + 0.8 * modifier)))
+    }
+  }
+  // 激情（更难增加）
+  if (result.passion > 0) {
+    result.passion = Math.max(1, Math.round(result.passion * (0.1 + 0.45 * modifier)))
+  }
+  // hostility 不受影响
+
+  return result
+}
+
+/**
  * 更新关系值（增量）
  * @param {string} sourceName - 源角色名
  * @param {string} targetName - 目标角色名
@@ -520,13 +555,36 @@ export function updateRelationshipDelta(sourceName, targetName, delta) {
     return
   }
   
-  // 增量更新
+  // 递减收益：当前值越接近极值，变化越小
+  function applyDiminishing(current, delta, max) {
+    if (delta === 0) return 0
+    if (delta > 0 && current >= 0) {
+      // 正向增量：越高越难涨
+      const ratio = current / max
+      const diminish = 1 - ratio * ratio
+      return Math.max(1, Math.round(delta * diminish))
+    }
+    if (delta < 0 && current >= 60) {
+      // 负向增量 + 高数值：深厚关系不易崩塌（衰减力度为正向的一半）
+      const ratio = current / max
+      const diminish = 1 - (ratio * ratio) * 0.5
+      return Math.min(-1, Math.round(delta * diminish))
+    }
+    return delta
+  }
+
+  const adjIntimacy = applyDiminishing(current.intimacy, delta.intimacy || 0, 100)
+  const adjTrust = applyDiminishing(current.trust, delta.trust || 0, 100)
+  const adjPassion = applyDiminishing(current.passion, delta.passion || 0, 100)
+  const adjHostility = applyDiminishing(current.hostility, delta.hostility || 0, 100)
+
+  // 增量更新（使用递减收益调整后的值）
   const updated = {
     ...current,
-    intimacy: clamp(current.intimacy + (delta.intimacy || 0), -100, 100),
-    trust: clamp(current.trust + (delta.trust || 0), -100, 100),
-    passion: clamp(current.passion + (delta.passion || 0), -100, 100),
-    hostility: clamp(current.hostility + (delta.hostility || 0), 0, 100)
+    intimacy: clamp(current.intimacy + adjIntimacy, -100, 100),
+    trust: clamp(current.trust + adjTrust, -100, 100),
+    passion: clamp(current.passion + adjPassion, -100, 100),
+    hostility: clamp(current.hostility + adjHostility, 0, 100)
   }
   
   setRelationship(sourceName, targetName, updated)

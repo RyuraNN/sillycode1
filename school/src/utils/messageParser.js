@@ -8,7 +8,7 @@ function getGameTimeString() {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
 import { saveForumToWorldbook, generatePostId } from './forumWorldbook'
-import { updateRelationshipDelta, addRelationshipEvent, getRelationship, setRelationship, lookupGender } from './relationshipManager'
+import { updateRelationshipDelta, addRelationshipEvent, getRelationship, setRelationship, lookupGender, applyRelationshipWeights } from './relationshipManager'
 import { getItemType } from './deliveryWorldbook'
 import { generateCharId } from '../data/relationshipData'
 
@@ -457,7 +457,10 @@ export async function parseSocialTags(rawText) {
     if (Object.keys(delta).length > 0) {
       // 确保源角色存在，如果不存在可能会创建默认值
       // 这里的 delta 包含增量
-      updateRelationshipDelta(sourceName, targetCharName, delta)
+      const finalDelta = (targetCharName === gameStore.player.name)
+        ? applyRelationshipWeights(delta, gameStore)
+        : delta
+      updateRelationshipDelta(sourceName, targetCharName, finalDelta)
     }
 
     // 处理标签更新 (如果只有标签更新，或者在数值更新后继续处理标签)
@@ -1185,7 +1188,10 @@ export function processNpcRelationshipUpdate(data) {
 
     // 1. 更新关系数值
     if (delta) {
-      updateRelationshipDelta(source, target, delta)
+      const finalDelta = (target === gameStore.player.name)
+        ? applyRelationshipWeights(delta, gameStore)
+        : delta
+      updateRelationshipDelta(source, target, finalDelta)
     }
 
     // 2. 添加标签和分组
