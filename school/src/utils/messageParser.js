@@ -1,5 +1,6 @@
 import { getSocialData, saveSocialData, saveMomentToWorldbook } from './socialWorldbook'
 import { useGameStore } from '../stores/gameStore'
+import { removeThinking } from './summaryManager'
 
 // 获取游戏内时间字符串 (HH:mm)
 function getGameTimeString() {
@@ -293,10 +294,7 @@ export async function parseSocialTags(rawText) {
   const gameStore = useGameStore()
   
   // 1. 预处理：移除思维链内容
-  // 移除 <think>...</think>, <thinking>...</thinking>, <think_nya~>...</think_nya~>, <extrathink>...</extrathink>
-  let text = rawText
-    .replace(/<(think|thinking|think_nya~)>[\s\S]*?<\/\1>/gi, '')
-    .replace(/<extrathink>[\s\S]*?<\/extrathink>/gi, '')
+  let text = removeThinking(rawText)
 
   // 2. 预处理：处理 <maintext> 标签
   // 如果存在 <maintext>，则只提取其中的内容（或者简单地移除标签保留内容，视需求而定）

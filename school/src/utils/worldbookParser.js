@@ -2039,14 +2039,14 @@ export async function optimizeWorldbook(socialData) {
 /**
  * 设置教师模式下的班级世界书条目（存档隔离）
  * @param {string[]} teachingClasses 教授的班级ID列表
- * @param {string|null} homeroomClassId 担任班主任的班级ID
+ * @param {string[]} homeroomClassIds 担任班主任的班级ID列表 (支持多班主任)
  * @param {string} playerName 玩家姓名
  * @param {string} runId 当前存档ID
- * @param {string[]} teachingSubjects 玩家教授的科目列表
+ * @param {Record<string, string[]>} classSubjectMap 按班级分配的学科 { '1-A': ['数学'] }
  * @param {string} playerGender 玩家性别
  * @returns {Promise<boolean>} 是否成功
  */
-export async function setupTeacherClassEntries(teachingClasses, homeroomClassId, playerName, runId, teachingSubjects = [], playerGender = 'unknown') {
+export async function setupTeacherClassEntries(teachingClasses, homeroomClassIds, playerName, runId, classSubjectMap = {}, playerGender = 'unknown') {
   if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
     console.warn('[WorldbookParser] Worldbook API not available')
     return false
@@ -2079,7 +2079,7 @@ export async function setupTeacherClassEntries(teachingClasses, homeroomClassId,
         if (!classData) continue
 
         // 如果是班主任班级，替换班主任名字
-        if (classId === homeroomClassId) {
+        if (Array.isArray(homeroomClassIds) ? homeroomClassIds.includes(classId) : classId === homeroomClassIds) {
           classData.headTeacher = {
             name: playerName,
             gender: playerGender,
@@ -2089,11 +2089,12 @@ export async function setupTeacherClassEntries(teachingClasses, homeroomClassId,
           }
         }
 
-        // 注入玩家为科任教师
-        if (teachingSubjects && teachingSubjects.length > 0) {
+        // 注入玩家为科任教师 (按班级分配学科)
+        const subjectsForClass = Array.isArray(classSubjectMap) ? classSubjectMap : (classSubjectMap[classId] || [])
+        if (subjectsForClass && subjectsForClass.length > 0) {
           if (!classData.teachers) classData.teachers = []
 
-          for (const subject of teachingSubjects) {
+          for (const subject of subjectsForClass) {
             const existingIdx = classData.teachers.findIndex(t => t.subject === subject)
 
             const playerTeacher = {

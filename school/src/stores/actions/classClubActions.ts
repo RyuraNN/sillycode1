@@ -666,10 +666,10 @@ export const classClubActions = {
     if (this.player.role === 'teacher' && this.player.teachingClasses && this.player.teachingClasses.length > 0) {
       await setupTeacherClassEntries(
         this.player.teachingClasses,
-        this.player.homeroomClassId,
+        this.player.homeroomClassIds || (this.player.homeroomClassId ? [this.player.homeroomClassId] : []),
         this.player.name,
         this.currentRunId,
-        this.player.teachingSubjects,
+        this.player.classSubjectMap || {},
         this.player.gender
       )
     } else if (this.player.classId) {
@@ -815,10 +815,10 @@ export const classClubActions = {
       await safeRebuildStep(
         () => setupTeacherClassEntries(
           this.player.teachingClasses,
-          this.player.homeroomClassId,
+          this.player.homeroomClassIds || (this.player.homeroomClassId ? [this.player.homeroomClassId] : []),
           this.player.name,
           this.currentRunId,
-          this.player.teachingSubjects,
+          this.player.classSubjectMap || {},
           this.player.gender
         ),
         'setupTeacherClassEntries', 15000
@@ -961,10 +961,10 @@ export const classClubActions = {
       await safeRebuildStep(
         () => setupTeacherClassEntries(
           this.player.teachingClasses,
-          this.player.homeroomClassId,
+          this.player.homeroomClassIds || (this.player.homeroomClassId ? [this.player.homeroomClassId] : []),
           this.player.name,
           this.currentRunId,
-          this.player.teachingSubjects,
+          this.player.classSubjectMap || {},
           this.player.gender
         ),
         'finalTeacherClassSetup', 15000

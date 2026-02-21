@@ -127,6 +127,14 @@ const availableEvents = computed(() => {
   }))
 })
 
+const availableClubs = computed(() => {
+  if (!gameStore.allClubs) return []
+  return Object.entries(gameStore.allClubs).map(([id, club]) => ({
+    id,
+    name: club.name || id
+  }))
+})
+
 // 初始化
 onMounted(async () => {
   // 确保事件数据已加载
@@ -934,13 +942,24 @@ const itemFromPoint = (x, y) => {
               <div class="input-with-action">
                 <select v-model="editingItem.unlockCondition">
                   <option value="无">无</option>
-                  <option 
-                    v-for="event in availableEvents" 
-                    :key="event.id" 
-                    :value="event.id"
-                  >
-                    {{ event.name }} ({{ event.id }})
-                  </option>
+                  <optgroup label="📋 事件触发">
+                    <option
+                      v-for="event in availableEvents"
+                      :key="event.id"
+                      :value="event.id"
+                    >
+                      {{ event.name }} ({{ event.id }})
+                    </option>
+                  </optgroup>
+                  <optgroup label="🏫 社团成员">
+                    <option
+                      v-for="club in availableClubs"
+                      :key="club.id"
+                      :value="club.name + '成员'"
+                    >
+                      {{ club.name }}成员
+                    </option>
+                  </optgroup>
                 </select>
                 <button class="action-icon-btn" @click="$emit('open-event-editor')" title="打开事件编辑器">
                   📝

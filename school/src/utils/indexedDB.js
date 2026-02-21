@@ -241,6 +241,29 @@ export async function requestPersistence() {
   return false
 }
 
+// Auto Schedule Checkpoint
+const SCHEDULE_CHECKPOINT_KEY = 'auto_schedule_checkpoint'
+
+export async function saveAutoScheduleCheckpoint(data) {
+  console.log('[IndexedDB] Saving auto schedule checkpoint...')
+  return setItem(SCHEDULE_CHECKPOINT_KEY, { ...data, timestamp: Date.now() })
+}
+
+export async function getAutoScheduleCheckpoint() {
+  const data = await getItem(SCHEDULE_CHECKPOINT_KEY)
+  if (!data) return null
+  // 1小时过期
+  if (Date.now() - (data.timestamp || 0) > 3600000) {
+    await removeItem(SCHEDULE_CHECKPOINT_KEY)
+    return null
+  }
+  return data
+}
+
+export async function clearAutoScheduleCheckpoint() {
+  return removeItem(SCHEDULE_CHECKPOINT_KEY)
+}
+
 // Migration Helper
 export async function migrateFromLocalStorage(keys) {
   console.log('[IndexedDB] Checking for migration...')

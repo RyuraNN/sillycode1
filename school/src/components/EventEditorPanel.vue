@@ -855,7 +855,7 @@ const eventStats = computed(() => {
   display: flex;
   justify-content: center;
   align-items: center;
-  z-index: 6000;
+  z-index: 100001;
   backdrop-filter: blur(4px);
   padding: 10px;
   box-sizing: border-box;

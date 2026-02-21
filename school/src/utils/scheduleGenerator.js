@@ -535,13 +535,18 @@ function getDateOfCurrentWeek(year, month, day, targetWeekday) {
 
 /**
  * 独立生成教师专属课表（不依赖学生课表，且处理假期避让）
- * @param {Object} teacherInfo 教师信息 { teachingClasses, homeroomClassId, teachingSubjects, teachingElectives, customCourses }
+ * @param {Object} teacherInfo 教师信息 { teachingClasses, homeroomClassIds, classSubjectMap, teachingElectives, customCourses }
  * @param {Object} currentDate 当前日期信息 { year, month, day }
  * @param {Object} allClassData 所有班级数据
  * @returns {Object} 教师周课表
  */
 export function generateIndependentTeacherSchedule(teacherInfo, currentDate, allClassData) {
-  const { teachingClasses, homeroomClassId, teachingSubjects, teachingElectives, customCourses } = teacherInfo
+  const { teachingClasses, teachingElectives, customCourses } = teacherInfo
+  // 兼容新旧数据结构
+  const homeroomClassIds = teacherInfo.homeroomClassIds || (teacherInfo.homeroomClassId ? [teacherInfo.homeroomClassId] : [])
+  const classSubjectMap = teacherInfo.classSubjectMap || {}
+  // 兼容旧版 teachingSubjects (全局学科列表)
+  const legacySubjects = teacherInfo.teachingSubjects || []
   const { year, month, day } = currentDate
   
   const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
@@ -565,11 +570,11 @@ export function generateIndependentTeacherSchedule(teacherInfo, currentDate, all
   }
 
   // 1. 优先安排班会课 (Homeroom) - 下午 Period 5-6 (Index 4-5)
-  // 规则：每周一节，默认周五下午。如果遇到假期，往前推一天。
-  if (homeroomClassId) {
+  // 规则：每个班主任班级每周一节，默认周五下午。如果遇到假期，往前推一天。
+  for (const homeroomClassId of homeroomClassIds) {
     let targetWeekdayIndex = 5 // Friday (1-5 for Mon-Fri)
     let assigned = false
-    
+
     // 从周五开始尝试，直到周一
     while (targetWeekdayIndex >= 1 && !assigned) {
       // 计算该天的日期
@@ -577,17 +582,27 @@ export function generateIndependentTeacherSchedule(teacherInfo, currentDate, all
       const tYear = targetDate.getFullYear()
       const tMonth = targetDate.getMonth() + 1
       const tDay = targetDate.getDate()
-      
+
       // 检查是否是假期
       const status = checkDayStatus(tMonth, tDay, tYear)
-      
+
       // 如果不是全天假期，且不是下午休假（班会通常在下午），则安排
       if (!status.isHoliday && status.holidayType !== 'pm_off' && status.holidayType !== 'exam') {
         const weekdayName = weekdays[targetWeekdayIndex - 1]
-        // 尝试安排在下午最后一节 (Period 6)，如果被占则 Period 5
-        // 教师课表此时是空的，所以肯定有空位
-        const slotIndex = 5 // Period 6 (Index 5)
-        
+        // 尝试安排在下午 Period 5-6，找空位
+        let slotIndex = -1
+        for (let si = 5; si >= 4; si--) {
+          if (schedule[weekdayName][si].isEmpty) {
+            slotIndex = si
+            break
+          }
+        }
+        if (slotIndex === -1) {
+          // 下午没空位，换一天
+          targetWeekdayIndex--
+          continue
+        }
+
         schedule[weekdayName][slotIndex].subject = '班会'
         schedule[weekdayName][slotIndex].className = allClassData[homeroomClassId]?.name || homeroomClassId
         // 班会通常在教室
@@ -596,17 +611,17 @@ export function generateIndependentTeacherSchedule(teacherInfo, currentDate, all
         schedule[weekdayName][slotIndex].locationId = location.locationId
         schedule[weekdayName][slotIndex].isEmpty = false
         schedule[weekdayName][slotIndex].isHomeroom = true
-        
+
         assigned = true
-        console.log(`[ScheduleGenerator] Homeroom assigned to ${weekdayName} Period 6 (Holiday check passed: ${tMonth}/${tDay})`)
+        console.log(`[ScheduleGenerator] Homeroom for ${homeroomClassId} assigned to ${weekdayName} Period ${slotIndex + 1}`)
       } else {
         console.log(`[ScheduleGenerator] Homeroom skipped on ${weekdays[targetWeekdayIndex-1]} due to holiday: ${status.eventInfo?.name}`)
         targetWeekdayIndex--
       }
     }
-    
+
     if (!assigned) {
-      console.warn('[ScheduleGenerator] Could not assign homeroom due to full week holiday!')
+      console.warn(`[ScheduleGenerator] Could not assign homeroom for ${homeroomClassId} due to full week holiday!`)
     }
   }
   
@@ -631,9 +646,14 @@ export function generateIndependentTeacherSchedule(teacherInfo, currentDate, all
 
   // 获取所有需要安排的课程实例
   const requiredTasks = []
-  if (teachingClasses && teachingClasses.length > 0 && teachingSubjects && teachingSubjects.length > 0) {
+  if (teachingClasses && teachingClasses.length > 0) {
     teachingClasses.forEach(classId => {
-      teachingSubjects.forEach(subject => {
+      // 优先使用 classSubjectMap，回退到 legacySubjects
+      const subjects = (classSubjectMap[classId] && classSubjectMap[classId].length > 0)
+        ? classSubjectMap[classId]
+        : legacySubjects
+      if (!subjects || subjects.length === 0) return
+      subjects.forEach(subject => {
         // 如果该科目是选修课，跳过必修课排课逻辑
         if (electiveNames.has(subject)) return
 

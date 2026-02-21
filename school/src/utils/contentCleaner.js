@@ -4,6 +4,7 @@
  */
 
 import { useGameStore } from '../stores/gameStore'
+import { removeThinking } from './summaryManager'
 
 /**
  * 清洗系统标签
@@ -12,7 +13,7 @@ import { useGameStore } from '../stores/gameStore'
  */
 export const cleanSystemTags = (text) => {
   const gameStore = useGameStore()
-  let cleaned = text
+  let cleaned = removeThinking(text)
 
   // 0. 移除 <safe> 标签及其内容
   cleaned = cleaned.replace(/<safe>[\s\S]*?<\/safe>/gi, '')
@@ -28,7 +29,7 @@ export const cleanSystemTags = (text) => {
     'ul', 'ol', 'li', 'table', 'tr', 'td', 'th', 'thead', 'tbody', 'img', 'a', 'hr', 'small', 'big',
     'ruby', 'rt', 'rp', 'htmlcontent'
   ]
-  const keepTags = ['think', 'thought', 'thinking', 'generate_image', ...contentTags, ...htmlTags]
+  const keepTags = ['generate_image', ...contentTags, ...htmlTags]
   const keepPattern = keepTags.join('|')
 
   // 1. 移除已知系统标签
@@ -37,7 +38,6 @@ export const cleanSystemTags = (text) => {
     /<image_think>[\s\S]*?<\/image_think>/gi,
     /<imgthink[\s\S]*?<\/imgthink>/g,
     /<imgthink\s*\/?>/g,
-    /<extrathink>[\s\S]*?<\/extrathink>/gi,
     /<tucao>[\s\S]*?<\/tucao>/gi,
     /<social_msg[\s\S]*?<\/social_msg>/g,
     /<add_friend[\s\S]*?<\/add_friend>/g,

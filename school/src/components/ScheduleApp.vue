@@ -133,7 +133,7 @@
       <div class="schedule-footer">
         <div class="class-info">
           <span class="label">{{ gameStore.player.role === 'teacher' ? '班主任：' : '班级：' }}</span>
-          <span class="value">{{ gameStore.player.role === 'teacher' ? (gameStore.player.homeroomClassId || '未担任') : (playerClass || '未分配') }}</span>
+          <span class="value">{{ gameStore.player.role === 'teacher' ? (gameStore.player.homeroomClassIds?.length > 0 ? gameStore.player.homeroomClassIds.join(', ') : (gameStore.player.homeroomClassId || '未担任')) : (playerClass || '未分配') }}</span>
         </div>
         <div class="week-info" v-if="!isVacation">
           <span class="label">{{ termName }} </span>
@@ -683,7 +683,7 @@
             <template v-if="gameStore.player.role === 'teacher'">
               <div class="info-row">
                 <span class="info-label">班主任</span>
-                <span class="info-value">{{ gameStore.player.homeroomClassId || '无' }}</span>
+                <span class="info-value">{{ gameStore.player.homeroomClassIds?.length > 0 ? gameStore.player.homeroomClassIds.join(', ') : (gameStore.player.homeroomClassId || '无') }}</span>
               </div>
               <div class="info-row">
                 <span class="info-label">教工号</span>

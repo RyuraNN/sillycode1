@@ -83,20 +83,84 @@ export function cleanImageTags(content) {
     .replace(/<div[^>]*class="[^"]*image-error[^"]*"[^>]*>[\s\S]*?<\/div>/gi, '')
 }
 
+// 已知的指令标签列表（这些标签不应该以孤立闭合标签形式出现在正文中）
+const INSTRUCTION_TAGS = [
+  'social_msg', 'group_msg', 'add_friend', 'social_status',
+  'moment_post', 'moment_action', 'moment_comment', 'moment_like',
+  'forum_post', 'forum_reply', 'forum_like',
+  'join_club', 'leave_club', 'reject_club', 'advise_club',
+  'club_invite_accept', 'club_invite_reject', 'join_group',
+  'add_calendar_event', 'event_involved',
+  'add_item', 'remove_item', 'use_item',
+  'update_impression', 'image', 'generate_image',
+  'minor_summary', 'major_summary', 'super_summary'
+]
+
+/**
+ * 移除没有对应开标签的孤立闭合标签
+ * 思维块内未闭合的指令标签被移除后，其闭合标签可能残留在正文中
+ * @param {string} text
+ * @returns {string}
+ */
+function removeOrphanedClosingTags(text) {
+  for (const tag of INSTRUCTION_TAGS) {
+    const closeRegex = new RegExp(`<\\/${tag}>`, 'gi')
+    const openRegex = new RegExp(`<${tag}[\\s>]`, 'gi')
+
+    const opens = [...text.matchAll(openRegex)]
+    const closes = [...text.matchAll(closeRegex)]
+
+    if (closes.length > opens.length) {
+      let excess = closes.length - opens.length
+      text = text.replace(closeRegex, (match) => {
+        if (excess > 0) {
+          excess--
+          return ''
+        }
+        return match
+      })
+    }
+  }
+  return text
+}
+
+// 已知的思维链标签变体
+const THINKING_TAGS = [
+  'think', 'thinking', 'thought', 'extrathink', 'think_nya~',
+  'reasoning', 'reflect', 'reflection',
+  'inner_thought', 'internal_thought',
+  'scratchpad', 'chain_of_thought'
+]
+
 /**
  * 移除AI响应中的思维链内容
+ * 处理闭合标签、未闭合标签和孤立闭合标签三种情况
  * @param {string} content AI响应内容
  * @returns {string} 清理后的内容
  */
 export function removeThinking(content) {
   if (!content) return ''
-  // 移除常见的思维链标签及其内容
-  return content
-    .replace(/<think>[\s\S]*?<\/think>/gi, '')
-    .replace(/<thought>[\s\S]*?<\/thought>/gi, '')
-    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
-    .replace(/<extrathink>[\s\S]*?<\/extrathink>/gi, '')
-    .trim()
+
+  let cleaned = content
+
+  // 第一轮：移除正常闭合的思维标签
+  for (const tag of THINKING_TAGS) {
+    const escapedTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const regex = new RegExp(`<${escapedTag}>[\\s\\S]*?<\\/${escapedTag}>`, 'gi')
+    cleaned = cleaned.replace(regex, '')
+  }
+
+  // 第二轮：移除未闭合的思维标签（从开标签到字符串末尾）
+  for (const tag of THINKING_TAGS) {
+    const escapedTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const regex = new RegExp(`<${escapedTag}>[\\s\\S]*$`, 'gi')
+    cleaned = cleaned.replace(regex, '')
+  }
+
+  // 第三轮：清理孤立的闭合标签（思维块内未闭合指令标签的残留）
+  cleaned = removeOrphanedClosingTags(cleaned)
+
+  return cleaned.trim()
 }
 
 /**
@@ -879,20 +943,40 @@ export async function generateBatchSummaries(chatLog, batchSize, onProgress) {
 
   // 3. 逐批处理
   const totalBatches = batches.length
-  
+  const currentFloor = chatLog.length
+  const settings = gameStore.settings.summarySystem
+
   for (let i = 0; i < totalBatches; i++) {
     const batch = batches[i]
     if (onProgress) {
       onProgress(i + 1, totalBatches)
     }
-    
-    // 构建 Prompt
-    const floorsText = batch
-      .map(item => `【第${item.floor}层】\n${item.content}`)
-      .join('\n\n')
-      
-    // 使用大总结模板，稍微修改一下提示词
-    const prompt = `[任务：批量生成剧情总结]
+
+    // 根据楼层距离和批次大小判断应生成的总结类型：
+    // - 单个楼层，或所有楼层都在 minor 距离范围内 → 逐个生成 minor 总结
+    // - 多个连续楼层且已在 major 距离范围内 → 生成一个 major 总结
+    const shouldUseMinor = batch.length === 1 ||
+      batch.every(item => (currentFloor - item.floor) < settings.majorSummaryStartFloor)
+
+    if (shouldUseMinor) {
+      // 逐个楼层生成 minor 总结（复用已有的 generateMinorSummary）
+      console.log(`[SummaryManager] Batch generating ${batch.length} minor summaries for floors: ${batch.map(b => b.floor).join(',')}`)
+      for (const item of batch) {
+        try {
+          await generateMinorSummary(cleanImageTags(item.content), item.floor, true)
+        } catch (e) {
+          console.error(`[SummaryManager] Error generating minor summary for floor ${item.floor}:`, e)
+        }
+      }
+    } else {
+      // 生成一个 major 总结覆盖整个批次
+      console.log(`[SummaryManager] Batch generating major summary for floors: ${batch.map(b => b.floor).join(',')}`)
+
+      const floorsText = batch
+        .map(item => `【第${item.floor}层】\n${cleanImageTags(item.content)}`)
+        .join('\n\n')
+
+      const prompt = `[任务：批量生成剧情总结]
 请阅读以下连续的剧情片段（来自楼层 ${batch[0].floor} 到 ${batch[batch.length - 1].floor}），将其直接整合成一个连贯的大总结。
 
 要求：
@@ -907,42 +991,39 @@ ${floorsText}
 请用以下格式输出（必须严格遵循格式）：
 <major_summary>你的合并总结</major_summary>`
 
-    try {
-      // 使用纯总结模式调用辅助AI
-      let response
-      if (gameStore.settings.summarySystem.useAssistantForSummary) {
-        response = await callAssistantAI(prompt, { systemPrompt: SUMMARY_AI_SYSTEM_PROMPT })
-      } else if (window.generate) {
-        // 备用
-        response = await window.generate({
-          user_input: prompt,
-          should_silence: true,
-          max_chat_history: 0
-        })
-      } else {
-        response = `<major_summary>（Mock批量总结）覆盖楼层 ${batch.map(b => b.floor).join(', ')}</major_summary>`
-      }
-
-      const summaryContent = extractSummary(response, 'major')
-      
-      if (summaryContent) {
-        const coveredBatchFloors = batch.map(b => b.floor)
-        const summary = {
-          floor: Math.max(...coveredBatchFloors),
-          type: 'major',
-          content: summaryContent,
-          coveredFloors: coveredBatchFloors,
-          timestamp: Date.now()
+      try {
+        let response
+        if (settings.useAssistantForSummary) {
+          response = await callAssistantAI(prompt, { systemPrompt: SUMMARY_AI_SYSTEM_PROMPT })
+        } else if (window.generate) {
+          response = await window.generate({
+            user_input: prompt,
+            should_silence: true,
+            max_chat_history: 0
+          })
+        } else {
+          response = `<major_summary>（Mock批量总结）覆盖楼层 ${batch.map(b => b.floor).join(', ')}</major_summary>`
         }
-        addSummary(summary)
-        console.log(`[SummaryManager] Batch generated major summary for floors: ${coveredBatchFloors.join(',')}`)
-      } else {
-        console.warn(`[SummaryManager] Failed to extract summary for batch ${i}`)
+
+        const summaryContent = extractSummary(response, 'major')
+
+        if (summaryContent) {
+          const coveredBatchFloors = batch.map(b => b.floor)
+          const summary = {
+            floor: Math.max(...coveredBatchFloors),
+            type: 'major',
+            content: summaryContent,
+            coveredFloors: coveredBatchFloors,
+            timestamp: Date.now()
+          }
+          addSummary(summary)
+          console.log(`[SummaryManager] Batch generated major summary for floors: ${coveredBatchFloors.join(',')}`)
+        } else {
+          console.warn(`[SummaryManager] Failed to extract summary for batch ${i}`)
+        }
+      } catch (e) {
+        console.error(`[SummaryManager] Error processing batch ${i}:`, e)
       }
-      
-    } catch (e) {
-      console.error(`[SummaryManager] Error processing batch ${i}:`, e)
-      // 继续处理下一个批次
     }
   }
 }

@@ -20,10 +20,12 @@ export const IMAGE_ANALYSIS_PROMPT = `你是一位专业的AI画师助手。你�
 - 这是你唯一的工作对象
 - 所有插画指令必须且只能基于这部分内容生成
 
-[Character Data]（角色数据，如有提供）
-- 包含角色的固定外貌特征描述
-- 生成 prompt 时必须参照此数据，确保角色外观一致性
-- 如未提供角色数据，则根据正文中的描写推断外貌
+[Character Data]（角色外貌锚定数据，如有提供）
+- 格式为「角色名: 外貌标签」，每行一个角色
+- 这些标签是该角色的固定外貌特征，生成 prompt 时必须原样引用
+- 当画面中出现已锚定的角色时，将其对应标签完整写入 prompt 的「角色外观」部分
+- 禁止修改、省略或自行发挥已锚定角色的外貌描述
+- 未锚定的角色则根据正文描写推断外貌
 
 {userStylePrompt}（用户自定义画风词，如有）
 - 将这些词作为每个 prompt 的前缀，置于最开头
@@ -383,9 +385,10 @@ ${mainAIResponse}
 /**
  * 调用生图分析AI
  * @param {string} storyContent 故事正文
+ * @param {Record<string, string>} characterAnchors 角色外貌锚定数据
  * @returns {Promise<string>} 分析结果
  */
-export async function callImageAnalysisAI(storyContent) {
+export async function callImageAnalysisAI(storyContent, characterAnchors = {}) {
   const gameStore = useGameStore()
   const { apiUrl, apiKey, model, temperature } = gameStore.settings.assistantAI
   const { imageGenerationPrompt, customImageAnalysisPrompt } = gameStore.settings
@@ -401,10 +404,19 @@ export async function callImageAnalysisAI(storyContent) {
   const template = customImageAnalysisPrompt || IMAGE_ANALYSIS_PROMPT
   let systemPrompt = template.replace('{userStylePrompt}', imageGenerationPrompt || '')
 
+  // 构建用户消息，拼接角色锚定数据
+  let userContent = `[Story Content]\n${storyContent}`
+
+  const anchorEntries = Object.entries(characterAnchors).filter(([_, v]) => v?.trim())
+  if (anchorEntries.length > 0) {
+    const charDataStr = anchorEntries.map(([name, tags]) => `${name}: ${tags}`).join('\n')
+    userContent += `\n\n[Character Data]\n${charDataStr}`
+  }
+
   // 构建请求
   const messages = [
     { role: 'system', content: systemPrompt },
-    { role: 'user', content: `[Story Content]\n${storyContent}` },
+    { role: 'user', content: userContent },
     { role: 'assistant', content: ASSISTANT_PREFILL }
   ]
 

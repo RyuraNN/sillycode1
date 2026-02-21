@@ -149,7 +149,9 @@ export function createInitialState(): GameState {
       role: 'student',
       teachingClasses: [],
       homeroomClassId: null,
+      homeroomClassIds: [],
       teachingSubjects: [],
+      classSubjectMap: {},
       teachingElectives: [],
       advisorClubs: []
     },
@@ -198,6 +200,7 @@ export function createInitialState(): GameState {
       imageGenerationPrompt: '',
       imageContextDepth: 0,
       customImageAnalysisPrompt: '',
+      imageCharacterAnchors: {},
       customInstructionsPrompt: null,
       customStylePrompt: null,
       customCoreRulesPrompt: null,

@@ -69,6 +69,35 @@ const resetImageSystemPrompt = () => {
   }
 }
 
+// 角色外貌锚定
+const newAnchorName = ref('')
+const newAnchorTags = ref('')
+const isAddingAnchor = ref(false)
+
+const addCharacterAnchor = () => {
+  const name = newAnchorName.value.trim()
+  const tags = newAnchorTags.value.trim()
+  if (!name) return
+  if (!gameStore.settings.imageCharacterAnchors) {
+    gameStore.settings.imageCharacterAnchors = {}
+  }
+  gameStore.settings.imageCharacterAnchors[name] = tags
+  newAnchorName.value = ''
+  newAnchorTags.value = ''
+  isAddingAnchor.value = false
+  gameStore.saveToStorage()
+}
+
+const removeCharacterAnchor = (name) => {
+  delete gameStore.settings.imageCharacterAnchors[name]
+  gameStore.saveToStorage()
+}
+
+const updateCharacterAnchor = (name, tags) => {
+  gameStore.settings.imageCharacterAnchors[name] = tags
+  gameStore.saveToStorage()
+}
+
 const addContentTag = () => {
   if (!newContentTag.value) return
   
@@ -594,6 +623,41 @@ const handleHomeClick = () => {
                         <p class="hint">发送给生图AI的历史对话数量。</p>
 
                         <div class="input-row" style="margin-top: 10px;">
+                          <label>角色外貌锚定</label>
+                          <p class="hint" style="margin: 2px 0 8px 0;">为角色设定固定外貌标签，确保同一角色在不同插图中外观一致。</p>
+                          <div v-if="gameStore.settings.imageCharacterAnchors && Object.keys(gameStore.settings.imageCharacterAnchors).length > 0" class="phone-anchor-list">
+                            <div v-for="(tags, name) in gameStore.settings.imageCharacterAnchors" :key="name" class="phone-anchor-item">
+                              <span class="phone-anchor-name">{{ name }}</span>
+                              <input
+                                type="text"
+                                :value="tags"
+                                placeholder="例如: black hair, blue eyes"
+                                @change="updateCharacterAnchor(name, $event.target.value)"
+                              >
+                              <button class="phone-anchor-remove" @click="removeCharacterAnchor(name)" title="删除">×</button>
+                            </div>
+                          </div>
+                          <div v-if="isAddingAnchor" class="phone-anchor-add-row">
+                            <input
+                              type="text"
+                              v-model="newAnchorName"
+                              placeholder="角色名"
+                              @keyup.enter="addCharacterAnchor"
+                              style="width: 70px; flex-shrink: 0;"
+                            >
+                            <input
+                              type="text"
+                              v-model="newAnchorTags"
+                              placeholder="外貌标签"
+                              @keyup.enter="addCharacterAnchor"
+                              style="flex: 1;"
+                            >
+                            <button class="phone-anchor-confirm" @click="addCharacterAnchor" title="确认">✓</button>
+                          </div>
+                          <button v-if="!isAddingAnchor" class="text-btn" style="margin-top: 4px;" @click="isAddingAnchor = true">+ 添加角色</button>
+                        </div>
+
+                        <div class="input-row" style="margin-top: 10px;">
                           <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
                             <label>系统指令 (高级)</label>
                             <button class="text-btn" @click="resetImageSystemPrompt" v-if="gameStore.settings.customImageAnalysisPrompt">恢复默认</button>
@@ -713,7 +777,7 @@ const handleHomeClick = () => {
                       <div class="credits-body">
                         <p>原作者：墨沈</p>
                         <p>重置：Elyrene</p>
-                        <p>版本号 V2.1</p>
+                        <p>版本号 V2.1EX</p>
                         <p>免费发布于DC类脑社区</p>
                       </div>
                     </div>
@@ -1683,5 +1747,78 @@ const handleHomeClick = () => {
   height: 100%;
   background: #007aff;
   transition: width 0.3s ease;
+}
+
+/* 角色外貌锚定 */
+.phone-anchor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 6px;
+  width: 100%;
+}
+.phone-anchor-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+.phone-anchor-name {
+  min-width: 55px;
+  font-size: 12px;
+  color: #e0e0e0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.phone-anchor-item input {
+  flex: 1;
+  font-size: 11px;
+  padding: 3px 6px;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 4px;
+  color: white;
+}
+.phone-anchor-remove {
+  background: none;
+  border: none;
+  color: #e74c3c;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  opacity: 0.7;
+}
+.phone-anchor-remove:hover {
+  opacity: 1;
+}
+.phone-anchor-add-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-bottom: 4px;
+}
+.phone-anchor-add-row input {
+  font-size: 11px;
+  padding: 3px 6px;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 4px;
+  color: white;
+}
+.phone-anchor-confirm {
+  background: none;
+  border: none;
+  color: #2ecc71;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  opacity: 0.7;
+}
+.phone-anchor-confirm:hover {
+  opacity: 1;
 }
 </style>

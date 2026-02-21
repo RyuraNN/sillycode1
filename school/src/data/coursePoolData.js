@@ -1421,3 +1421,31 @@ export function registerCustomCourse(courseData) {
   
   return newCourse
 }
+
+/**
+ * 获取所有科目名称（去重）
+ * @returns {string[]}
+ */
+export function getAllSubjectNames() {
+  const names = new Set()
+  const addCourses = (courses) => {
+    if (Array.isArray(courses)) {
+      courses.forEach(c => { if (c.name) names.add(c.name) })
+    }
+  }
+
+  addCourses(UNIVERSAL_ELECTIVES)
+  addCourses(GRADE_1_COURSES.required)
+  addCourses(GRADE_1_COURSES.electives)
+  addCourses(GRADE_2_COURSES.required)
+  addCourses(GRADE_2_COURSES.electives)
+  addCourses(GRADE_3_COURSES.required)
+  addCourses(GRADE_3_COURSES.electives)
+
+  Object.values(CUSTOM_CLASS_COURSES).forEach(data => {
+    addCourses(data.required)
+    addCourses(data.electives)
+  })
+
+  return Array.from(names)
+}

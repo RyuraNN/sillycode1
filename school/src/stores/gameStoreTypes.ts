@@ -304,8 +304,10 @@ export interface PlayerStats {
   // 教师系统
   role: 'student' | 'teacher'
   teachingClasses: string[]          // 教授的班级ID列表 (1~5个)
-  homeroomClassId: string | null     // 担任班主任的班级ID (最多1个)
-  teachingSubjects: string[]         // 教授的必修学科列表
+  homeroomClassId: string | null     // [兼容] 旧版单班主任
+  homeroomClassIds: string[]         // 担任班主任的班级ID列表 (支持多班主任)
+  teachingSubjects: string[]         // [兼容] 旧版全局学科列表
+  classSubjectMap: Record<string, string[]>  // 按班级分配学科 { '1-A': ['数学'], '1-B': ['英语'] }
   teachingElectives: string[]        // 教授的选修课ID列表
   advisorClubs: string[]             // 担任指导老师的社团ID列表
 }
@@ -633,6 +635,7 @@ export interface GameState {
     imageGenerationPrompt: string
     imageContextDepth: number
     customImageAnalysisPrompt: string
+    imageCharacterAnchors: Record<string, string>
     customInstructionsPrompt: string | null
     customStylePrompt: string | null
     customCoreRulesPrompt: string | null

@@ -1505,8 +1505,8 @@ ${player.name}邀请"${targetName}"加入"${clubName}"(社团ID: ${clubId})。
     teacherStatusPrompt = `
 Role: Teacher
 Teaching Classes: ${player.teachingClasses ? player.teachingClasses.join(', ') : 'None'}
-Homeroom: ${player.homeroomClassId || 'None'}
-Teaching Subjects: ${player.teachingSubjects ? player.teachingSubjects.join(', ') : 'None'}
+Homeroom: ${player.homeroomClassIds?.length > 0 ? player.homeroomClassIds.join(', ') : (player.homeroomClassId || 'None')}
+Teaching Subjects: ${player.classSubjectMap ? Object.entries(player.classSubjectMap).map(([cls, subjs]) => `${cls}: ${subjs.join(', ')}`).join('; ') : (player.teachingSubjects ? player.teachingSubjects.join(', ') : 'None')}
 `
   }
 
@@ -1514,13 +1514,20 @@ Teaching Subjects: ${player.teachingSubjects ? player.teachingSubjects.join(', '
   let teacherGuidePrompt = ''
   if (player.role === 'teacher' && player.newGameGuideTurns > 0) {
     const teachingClasses = player.teachingClasses || []
+    const classSubjectMap = player.classSubjectMap || {}
     const subjects = player.teachingSubjects || []
-    const homeroom = player.homeroomClassId
-    
+    const homeroomClassIds = player.homeroomClassIds?.length > 0 ? player.homeroomClassIds : (player.homeroomClassId ? [player.homeroomClassId] : [])
+
+    // 构建各班授课信息
+    const classSubjectInfo = teachingClasses.map(cls => {
+      const clsSubjects = classSubjectMap[cls]?.length > 0 ? classSubjectMap[cls] : subjects
+      return `${cls}: ${clsSubjects.join('、') || '未分配'}`
+    }).join('；')
+
     teacherGuidePrompt = `\n[新入职引导] 你是天华高级中学的新任教师。
 你负责教授的班级有：${teachingClasses.join('、')}。
-你的授课科目是：${subjects.join('、')}。
-${homeroom ? `你是 ${homeroom} 的班主任，请多关注该班级学生的情况。` : '你目前没有担任班主任。'}
+你的各班授课科目：${classSubjectInfo}。
+${homeroomClassIds.length > 0 ? `你是 ${homeroomClassIds.join('、')} 的班主任，请多关注这些班级学生的情况。` : '你目前没有担任班主任。'}
 今天是开学第一天，请前往教务处报到，或者去你的班级看看。祝你教学工作顺利！\n`
   }
 

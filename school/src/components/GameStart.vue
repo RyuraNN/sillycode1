@@ -57,8 +57,10 @@ const formData = ref({
 // 教师模式专用数据
 const teacherData = ref({
   teachingClasses: [],      // 教授的班级ID列表 (1~5)
-  homeroomClassId: '',      // 担任班主任的班级ID
-  teachingSubjects: [],     // 教授的必修学科
+  homeroomClassIds: [],     // 担任班主任的班级ID列表 (支持多班主任)
+  homeroomClassId: '',      // [兼容] 旧版单班主任
+  classSubjectMap: {},      // 按班级分配学科 { '1-A': ['数学'], '1-B': ['英语'] }
+  teachingSubjects: [],     // [兼容] 旧版全局学科
   teachingElectives: [],    // 教授的选修课ID
   customCourses: []         // 自定义课程列表
 })
@@ -125,6 +127,22 @@ const applyPreset = async (preset) => {
     
     // 恢复教师数据
     teacherData.value = JSON.parse(JSON.stringify(data.teacherData))
+
+    // 旧预设兼容迁移
+    if (teacherData.value.homeroomClassId && !teacherData.value.homeroomClassIds) {
+      teacherData.value.homeroomClassIds = teacherData.value.homeroomClassId ? [teacherData.value.homeroomClassId] : []
+    }
+    if (!teacherData.value.homeroomClassIds) {
+      teacherData.value.homeroomClassIds = []
+    }
+    if (!teacherData.value.classSubjectMap) {
+      teacherData.value.classSubjectMap = {}
+    }
+    if (teacherData.value.teachingSubjects?.length > 0 && Object.keys(teacherData.value.classSubjectMap).length === 0) {
+      teacherData.value.teachingClasses.forEach(classId => {
+        teacherData.value.classSubjectMap[classId] = [...teacherData.value.teachingSubjects]
+      })
+    }
     
     // 恢复自定义数据
     const restoredCustom = JSON.parse(JSON.stringify(data.customData))
@@ -192,8 +210,14 @@ const addCustomCourse = () => {
       teacherData.value.teachingElectives.push(pendingId)
     }
   } else {
-    if (!teacherData.value.teachingSubjects.includes(newCourseForm.value.name)) {
-      teacherData.value.teachingSubjects.push(newCourseForm.value.name)
+    // 必修课：为所有已选班级添加该学科
+    for (const classId of teacherData.value.teachingClasses) {
+      if (!teacherData.value.classSubjectMap[classId]) {
+        teacherData.value.classSubjectMap[classId] = []
+      }
+      if (!teacherData.value.classSubjectMap[classId].includes(newCourseForm.value.name)) {
+        teacherData.value.classSubjectMap[classId].push(newCourseForm.value.name)
+      }
     }
   }
   
@@ -215,9 +239,14 @@ const removeCustomCourse = (idx) => {
       id => !(id.startsWith('pending_custom_') && id.endsWith(`_${course.name}`))
     )
   } else {
-    // 必修课：从 teachingSubjects 中移除
-    const subjIdx = teacherData.value.teachingSubjects.indexOf(course.name)
-    if (subjIdx > -1) teacherData.value.teachingSubjects.splice(subjIdx, 1)
+    // 必修课：从所有班级的 classSubjectMap 中移除
+    for (const classId of Object.keys(teacherData.value.classSubjectMap)) {
+      const arr = teacherData.value.classSubjectMap[classId]
+      if (arr) {
+        const subjIdx = arr.indexOf(course.name)
+        if (subjIdx > -1) arr.splice(subjIdx, 1)
+      }
+    }
   }
 
   // 从 customCourses 中移除
@@ -274,25 +303,70 @@ const toggleTeachingClass = (classId) => {
   if (idx > -1) {
     teacherData.value.teachingClasses.splice(idx, 1)
     // 如果该班级是班主任班级，也取消
-    if (teacherData.value.homeroomClassId === classId) {
-      teacherData.value.homeroomClassId = ''
+    const hIdx = teacherData.value.homeroomClassIds.indexOf(classId)
+    if (hIdx > -1) {
+      teacherData.value.homeroomClassIds.splice(hIdx, 1)
     }
+    // 清理该班级的学科分配
+    delete teacherData.value.classSubjectMap[classId]
   } else {
     if (teacherData.value.teachingClasses.length >= 5) {
       alert('最多只能选择5个班级！')
       return
     }
     teacherData.value.teachingClasses.push(classId)
+    // 初始化该班级的学科分配为空数组
+    if (!teacherData.value.classSubjectMap[classId]) {
+      teacherData.value.classSubjectMap[classId] = []
+    }
   }
 }
 
-// 切换教授学科 (存储中文名称)
-const toggleTeachingSubject = (label) => {
-  const idx = teacherData.value.teachingSubjects.indexOf(label)
+// 切换班主任班级 (多选)
+const toggleHomeroomClass = (classId) => {
+  const idx = teacherData.value.homeroomClassIds.indexOf(classId)
   if (idx > -1) {
-    teacherData.value.teachingSubjects.splice(idx, 1)
+    teacherData.value.homeroomClassIds.splice(idx, 1)
   } else {
-    teacherData.value.teachingSubjects.push(label)
+    teacherData.value.homeroomClassIds.push(classId)
+  }
+}
+
+// 获取所有班级中已选学科的去重合集 (用于兼容旧字段 teachingSubjects)
+const getAllSelectedSubjects = () => {
+  const set = new Set()
+  for (const subjects of Object.values(teacherData.value.classSubjectMap)) {
+    subjects.forEach(s => set.add(s))
+  }
+  return [...set]
+}
+
+// 切换某个班级的教授学科
+const toggleClassSubject = (classId, label) => {
+  if (!teacherData.value.classSubjectMap[classId]) {
+    teacherData.value.classSubjectMap[classId] = []
+  }
+  const arr = teacherData.value.classSubjectMap[classId]
+  const idx = arr.indexOf(label)
+  if (idx > -1) {
+    arr.splice(idx, 1)
+  } else {
+    arr.push(label)
+  }
+}
+
+// [兼容] 旧版全局切换 — 仅用于自定义必修课添加时的回退
+const toggleTeachingSubject = (label) => {
+  // 新逻辑：为所有已选班级添加/移除该学科
+  for (const classId of teacherData.value.teachingClasses) {
+    if (!teacherData.value.classSubjectMap[classId]) {
+      teacherData.value.classSubjectMap[classId] = []
+    }
+    const arr = teacherData.value.classSubjectMap[classId]
+    const idx = arr.indexOf(label)
+    if (idx === -1) {
+      arr.push(label)
+    }
   }
 }
 
@@ -327,7 +401,9 @@ watch(playerRole, (newRole) => {
   } else {
     // 清空教师专属数据
     teacherData.value.teachingClasses = []
+    teacherData.value.homeroomClassIds = []
     teacherData.value.homeroomClassId = ''
+    teacherData.value.classSubjectMap = {}
     teacherData.value.teachingSubjects = []
     teacherData.value.teachingElectives = []
   }
@@ -752,13 +828,15 @@ const confirmSignature = async () => {
   // 教师模式数据保存
   if (playerRole.value === 'teacher') {
     gameStore.player.teachingClasses = teacherData.value.teachingClasses
-    gameStore.player.homeroomClassId = teacherData.value.homeroomClassId || null
-    gameStore.player.teachingSubjects = teacherData.value.teachingSubjects
+    gameStore.player.homeroomClassIds = teacherData.value.homeroomClassIds || []
+    gameStore.player.homeroomClassId = teacherData.value.homeroomClassIds[0] || null  // 兼容旧字段
+    gameStore.player.classSubjectMap = JSON.parse(JSON.stringify(teacherData.value.classSubjectMap || {}))
+    gameStore.player.teachingSubjects = getAllSelectedSubjects()  // 兼容旧字段：合并所有班级学科
     gameStore.player.teachingElectives = teacherData.value.teachingElectives
-    
+
     // 如果是教师，不需要设置单一班级，但如果担任班主任，可以作为主要班级
-    if (teacherData.value.homeroomClassId) {
-      gameStore.player.classId = teacherData.value.homeroomClassId
+    if (teacherData.value.homeroomClassIds.length > 0) {
+      gameStore.player.classId = teacherData.value.homeroomClassIds[0]
     }
 
     // 注册自定义课程
@@ -803,8 +881,9 @@ const confirmSignature = async () => {
     // 构造完整的教师信息对象
     const fullTeacherInfo = {
       teachingClasses: teacherData.value.teachingClasses,
-      homeroomClassId: teacherData.value.homeroomClassId,
-      teachingSubjects: teacherData.value.teachingSubjects,
+      homeroomClassIds: teacherData.value.homeroomClassIds,
+      classSubjectMap: teacherData.value.classSubjectMap,
+      teachingSubjects: getAllSelectedSubjects(),
       teachingElectives: teacherData.value.teachingElectives,
       customCourses: teacherData.value.customCourses
     }
@@ -819,10 +898,10 @@ const confirmSignature = async () => {
     // 调用世界书更新函数
     await setupTeacherClassEntries(
       teacherData.value.teachingClasses,
-      teacherData.value.homeroomClassId,
+      teacherData.value.homeroomClassIds,
       formData.value.name,
       gameStore.currentRunId,
-      teacherData.value.teachingSubjects,
+      teacherData.value.classSubjectMap,
       formData.value.gender
     )
 
@@ -1290,46 +1369,39 @@ const confirmSignature = async () => {
             </div>
             <p class="hint-text">请选择1~5个教授的班级</p>
 
-            <div class="form-row" v-if="teacherData.teachingClasses.length > 0">
+            <div class="form-row" style="align-items: flex-start;" v-if="teacherData.teachingClasses.length > 0">
               <label>担任班主任：</label>
-              <select v-model="teacherData.homeroomClassId" class="input-field">
-                <option value="">(不担任)</option>
-                <option v-for="id in teacherData.teachingClasses" :key="id" :value="id">
+              <div class="multi-select-container">
+                <div
+                  v-for="id in teacherData.teachingClasses"
+                  :key="id"
+                  class="select-chip"
+                  :class="{ active: teacherData.homeroomClassIds.includes(id) }"
+                  @click="toggleHomeroomClass(id)"
+                >
                   {{ gameStore.allClassData[id]?.name }}
-                </option>
-              </select>
+                </div>
+              </div>
             </div>
 
-            <div class="form-row" style="align-items: flex-start;">
-              <label>教授学科：</label>
-              <div class="subject-selection-area" style="flex: 1;">
-                <!-- 已选学科展示 -->
-                <div class="multi-select-container selected-subjects">
-                  <div 
-                    v-for="subj in teacherData.teachingSubjects" 
-                    :key="subj"
-                    class="select-chip active"
-                    @click="toggleTeachingSubject(subj)"
-                  >
-                    {{ subj }} <span class="remove-x">×</span>
+            <div class="form-row" style="align-items: flex-start;" v-if="teacherData.teachingClasses.length > 0">
+              <label>各班教授学科：</label>
+              <div class="per-class-subject-area" style="flex: 1;">
+                <div v-for="classId in teacherData.teachingClasses" :key="classId" class="class-subject-group">
+                  <div class="class-subject-header">{{ gameStore.allClassData[classId]?.name || classId }}</div>
+                  <div class="multi-select-container">
+                    <div
+                      v-for="subj in subjectOptions"
+                      :key="subj.key"
+                      class="select-chip"
+                      :class="{ active: (teacherData.classSubjectMap[classId] || []).includes(subj.label) }"
+                      @click="toggleClassSubject(classId, subj.label)"
+                    >
+                      {{ subj.label }}
+                    </div>
                   </div>
-                  <span v-if="teacherData.teachingSubjects.length === 0" class="placeholder-text">请选择或添加学科...</span>
                 </div>
-
-                <!-- 快速选择 -->
-                <div class="quick-select-label">快速选择：</div>
-                <div class="multi-select-container">
-                  <div 
-                    v-for="subj in subjectOptions" 
-                    :key="subj.key"
-                    class="select-chip"
-                    :class="{ disabled: teacherData.teachingSubjects.includes(subj.label) }"
-                    @click="!teacherData.teachingSubjects.includes(subj.label) && toggleTeachingSubject(subj.label)"
-                  >
-                    {{ subj.label }}
-                  </div>
-                  <button class="add-custom-btn" @click="openAddCourseModal">+ 自定义课程</button>
-                </div>
+                <button class="add-custom-btn" @click="openAddCourseModal" style="margin-top: 8px;">+ 自定义课程</button>
                 <!-- 已添加的自定义课程 -->
                 <div v-if="teacherData.customCourses && teacherData.customCourses.length > 0" class="custom-courses-list">
                   <div v-for="(course, idx) in teacherData.customCourses" :key="idx" class="select-chip active">
@@ -2269,5 +2341,25 @@ const confirmSignature = async () => {
   margin-top: -10px;
   margin-bottom: 15px;
   margin-left: 80px;
+}
+
+.per-class-subject-area {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.class-subject-group {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fafafa;
+}
+
+.class-subject-header {
+  font-size: 0.9rem;
+  font-weight: bold;
+  margin-bottom: 6px;
+  color: #333;
 }
 </style>

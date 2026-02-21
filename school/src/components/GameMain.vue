@@ -58,7 +58,7 @@ const gameStore = useGameStore()
 
 // Composables
 const { imageCacheMap, queueImageLoad, saveAndCache, cleanup: cleanupImageCache } = useImageCache()
-const { autoScrollEnabled, showNewMessageTip, scrollToBottom, handleNewContent, handleUserScroll, resetAutoScroll } = useScrollControl()
+const { autoScrollEnabled, showNewMessageTip, scrollToBottom, handleNewContent, handleUserScroll, resetAutoScroll, handleNewMessageTipClick } = useScrollControl()
 const { danmakuList, showDanmaku } = useDanmaku()
 const { currentEvent, isBannerCollapsed } = useEventCarousel({ manageLifecycle: true })
 
@@ -519,10 +519,15 @@ const sendMessage = async () => {
   const startTagRegex = new RegExp(`<(${allowedTags.join('|')})(?:\\s+[^>]*)?>`, 'i')
 
   const blockSystemTags = [
-    'social_msg', 'add_friend', 'social_status', 
-    'moment_post', 'moment_action', 'moment_comment', 
+    'social_msg', 'add_friend', 'social_status',
+    'moment_post', 'moment_action', 'moment_comment',
     'forum_post', 'forum_reply',
-    'image', 'imgthink'
+    'image', 'imgthink',
+    // 思维链标签 - 静默消费
+    'think', 'thinking', 'thought', 'extrathink',
+    'reasoning', 'reflect', 'reflection',
+    'inner_thought', 'internal_thought',
+    'scratchpad', 'chain_of_thought'
   ]
   const inlineSystemTags = [
     'add_calendar_event', 'moment_like', 'join_club', 
@@ -914,7 +919,7 @@ const processAIResponse = async (response) => {
           }
         }
         
-        promises.push(callImageAnalysisAI(imageAnalysisContent))
+        promises.push(callImageAnalysisAI(imageAnalysisContent, gameStore.settings.imageCharacterAnchors))
       }
 
       const results = await Promise.allSettled(promises)
@@ -1637,10 +1642,10 @@ const handleRestore = async (snapshot) => {
     if (gameStore.player.role === 'teacher' && gameStore.player.teachingClasses?.length > 0) {
       await setupTeacherClassEntries(
         gameStore.player.teachingClasses,
-        gameStore.player.homeroomClassId,
+        gameStore.player.homeroomClassIds || (gameStore.player.homeroomClassId ? [gameStore.player.homeroomClassId] : []),
         gameStore.player.name,
         gameStore.currentRunId,
-        gameStore.player.teachingSubjects,
+        gameStore.player.classSubjectMap || {},
         gameStore.player.gender
       )
     }
@@ -1743,9 +1748,12 @@ onMounted(async () => {
     loadImagesFromLog(gameLog.value)
     
     nextTick(() => {
-      if (contentAreaRef.value) {
-        contentAreaRef.value.scrollTop = contentAreaRef.value.scrollHeight
-      }
+      setTimeout(() => {
+        if (contentAreaRef.value) {
+          autoScrollEnabled.value = true
+          contentAreaRef.value.scrollTop = contentAreaRef.value.scrollHeight
+        }
+      }, 100)
     })
   }
 
@@ -1863,6 +1871,7 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
           :style="{ paddingBottom: inputBarHeight + 'px' }"
           @wheel="handleScrollEvent"
           @touchmove="handleScrollEvent"
+          @scroll="handleScrollEvent"
         >
           <!-- 加载更多 -->
           <div v-if="gameLog.length > visibleCount" class="load-more-container">

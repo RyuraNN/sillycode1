@@ -28,7 +28,34 @@ const resetImageSystemPrompt = () => {
   }
 }
 
-// 提示词编辑
+// 角色外貌锚定
+const newAnchorName = ref('')
+const newAnchorTags = ref('')
+const isAddingAnchor = ref(false)
+
+const addCharacterAnchor = () => {
+  const name = newAnchorName.value.trim()
+  const tags = newAnchorTags.value.trim()
+  if (!name) return
+  if (!gameStore.settings.imageCharacterAnchors) {
+    gameStore.settings.imageCharacterAnchors = {}
+  }
+  gameStore.settings.imageCharacterAnchors[name] = tags
+  newAnchorName.value = ''
+  newAnchorTags.value = ''
+  isAddingAnchor.value = false
+  gameStore.saveToStorage()
+}
+
+const removeCharacterAnchor = (name) => {
+  delete gameStore.settings.imageCharacterAnchors[name]
+  gameStore.saveToStorage()
+}
+
+const updateCharacterAnchor = (name, tags) => {
+  gameStore.settings.imageCharacterAnchors[name] = tags
+  gameStore.saveToStorage()
+}
 const showPromptEditor = ref(false)
 
 const promptDefaults = {
@@ -611,6 +638,44 @@ const loadModels = async () => {
                 </div>
 
                 <div class="input-group">
+                  <label class="input-label">角色外貌锚定</label>
+                  <p class="setting-hint" style="margin-top: 2px; margin-bottom: 8px;">
+                    为角色设定固定外貌标签，确保同一角色在不同插图中外观一致。
+                  </p>
+                  <div v-if="gameStore.settings.imageCharacterAnchors && Object.keys(gameStore.settings.imageCharacterAnchors).length > 0" class="anchor-list">
+                    <div v-for="(tags, name) in gameStore.settings.imageCharacterAnchors" :key="name" class="anchor-item">
+                      <span class="anchor-name">{{ name }}</span>
+                      <input
+                        type="text"
+                        class="text-input anchor-tags-input"
+                        :value="tags"
+                        placeholder="例如: black hair, blue eyes, school uniform"
+                        @change="updateCharacterAnchor(name, $event.target.value)"
+                      >
+                      <button class="anchor-remove-btn" @click="removeCharacterAnchor(name)" title="删除">×</button>
+                    </div>
+                  </div>
+                  <div v-if="isAddingAnchor" class="anchor-add-row">
+                    <input
+                      type="text"
+                      class="text-input anchor-name-input"
+                      v-model="newAnchorName"
+                      placeholder="角色名"
+                      @keyup.enter="addCharacterAnchor"
+                    >
+                    <input
+                      type="text"
+                      class="text-input anchor-tags-input"
+                      v-model="newAnchorTags"
+                      placeholder="外貌标签，如: black hair, blue eyes"
+                      @keyup.enter="addCharacterAnchor"
+                    >
+                    <button class="anchor-confirm-btn" @click="addCharacterAnchor" title="确认">✓</button>
+                  </div>
+                  <button v-if="!isAddingAnchor" class="text-btn" style="margin-top: 6px;" @click="isAddingAnchor = true">+ 添加角色</button>
+                </div>
+
+                <div class="input-group">
                   <div style="display: flex; justify-content: space-between; align-items: center;">
                     <label class="input-label">生图系统指令 (高级)</label>
                     <button class="text-btn" @click="resetImageSystemPrompt" v-if="gameStore.settings.customImageAnalysisPrompt">恢复默认</button>
@@ -757,7 +822,7 @@ const loadModels = async () => {
           <div class="card-body credits-body">
             <p>原作者：墨沈</p>
             <p @click="handleCreditsClick" style="cursor: pointer; user-select: none;">重置：Elyrene</p>
-            <p>版本号 V2.1</p>
+            <p>版本号 V2.1EX</p>
             <p>免费发布于DC类脑社区</p>
           </div>
         </div>
@@ -1502,5 +1567,69 @@ const loadModels = async () => {
 
 .text-btn:hover {
   color: white;
+}
+
+/* 角色外貌锚定 */
+.anchor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.anchor-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.anchor-name {
+  min-width: 70px;
+  font-size: 13px;
+  color: #e0e0e0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.anchor-tags-input {
+  flex: 1;
+  font-size: 12px !important;
+  padding: 4px 8px !important;
+}
+.anchor-remove-btn {
+  background: none;
+  border: none;
+  color: #e74c3c;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0.7;
+}
+.anchor-remove-btn:hover {
+  opacity: 1;
+}
+.anchor-add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.anchor-name-input {
+  width: 80px;
+  flex-shrink: 0;
+  font-size: 12px !important;
+  padding: 4px 8px !important;
+}
+.anchor-confirm-btn {
+  background: none;
+  border: none;
+  color: #2ecc71;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0.7;
+}
+.anchor-confirm-btn:hover {
+  opacity: 1;
 }
 </style>

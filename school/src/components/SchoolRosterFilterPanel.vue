@@ -6,7 +6,7 @@ import { useRosterData } from '../composables/useRosterData'
 import { useCharacterPool } from '../composables/useCharacterPool'
 import { useBatchComplete } from '../composables/useBatchComplete'
 import { useAIImport } from '../composables/useAIImport'
-import { saveRosterBackup, saveFullCharacterPool } from '../utils/indexedDB'
+import { saveRosterBackup, saveFullCharacterPool, getSnapshotData, saveSnapshotData } from '../utils/indexedDB'
 import { updateClassDataInWorldbook, updateAcademicDataInWorldbook, updateStaffRosterInWorldbook, ensureClubExistsInWorldbook, syncClubWorldbookState } from '../utils/worldbookParser'
 import { saveSocialData } from '../utils/socialRelationshipsWorldbook'
 import { saveImpressionDataImmediate } from '../utils/impressionWorldbook'
@@ -29,6 +29,7 @@ import ClubEditorPanel from './ClubEditorPanel.vue'
 import ClubEditModal from './ClubEditModal.vue'
 import RelationshipEditorPanel from './RelationshipEditorPanel.vue'
 import RelationshipEditModal from './RelationshipEditModal.vue'
+import AutoSchedulePanel from './AutoSchedulePanel.vue'
 import { getItem } from '../data/mapData'
 
 const emit = defineEmits(['close'])
@@ -72,7 +73,7 @@ const {
 } = useAIImport()
 
 // ==================== 状态管理 ====================
-const activeTab = ref('filter') // 'filter' | 'composer' | 'characterEditor' | 'clubEditor' | 'relationshipEditor'
+const activeTab = ref('filter') // 'filter' | 'composer' | 'characterEditor' | 'clubEditor' | 'relationshipEditor' | 'autoSchedule'
 const filterSubTab = ref('student') // 'student' | 'teacher'
 const saving = ref(false)
 const isLocked = ref(false)
@@ -166,6 +167,11 @@ const mapEditorContext = ref('class') // 'class' | 'club'
 
 // 关系编辑器状态
 const showRelationshipEditor = ref(false)
+// 存档关系数据编辑状态
+const snapshotRelSource = ref('') // 当前加载的存档 ID，空字符串表示使用当前运行时数据
+const snapshotRelData = ref(null) // 缓存加载的完整存档数据（用于回写时保留其他字段）
+const runtimeRelBackup = ref(null) // 加载存档前备份的运行时关系数据（用于恢复）
+const isLoadingSnapshot = ref(false)
 const editingRelSource = ref('')
 const editingRelTarget = ref('')
 const relationshipEditForm = ref({
@@ -252,6 +258,91 @@ const showWorldbookSync = ref(false)
 const showMessage = (msg) => {
   messageContent.value = msg
   showMessageModal.value = true
+}
+
+// ==================== 存档关系数据编辑 ====================
+const formatSnapshotTime = (snap) => {
+  if (!snap.gameTime) return ''
+  const t = snap.gameTime
+  return `${t.year}/${t.month}/${t.day} ${t.hour}:00`
+}
+
+const getSnapshotLabel = (id) => {
+  const snap = gameStore.saveSnapshots.find(s => s.id === id)
+  return snap?.label || id
+}
+
+// 从备份恢复运行时关系数据，并重新写入 IndexedDB
+const restoreRuntimeRelationships = async () => {
+  if (runtimeRelBackup.value) {
+    gameStore.npcRelationships = JSON.parse(JSON.stringify(runtimeRelBackup.value))
+    runtimeRelBackup.value = null
+    await flushPendingSocialData()
+  }
+  snapshotRelSource.value = ''
+  snapshotRelData.value = null
+}
+
+// 从存档加载关系数据到当前编辑器
+const loadRelationshipsFromSnapshot = async (snapshotId) => {
+  if (!snapshotId) {
+    await restoreRuntimeRelationships()
+    showMessage('已恢复为当前运行时数据')
+    return
+  }
+  isLoadingSnapshot.value = true
+  try {
+    const details = await getSnapshotData(snapshotId)
+    if (!details?.gameState?.npcRelationships) {
+      alert('该存档中没有关系数据')
+      return
+    }
+    if (!snapshotRelSource.value && !runtimeRelBackup.value) {
+      runtimeRelBackup.value = JSON.parse(JSON.stringify(gameStore.npcRelationships))
+    }
+    snapshotRelData.value = details
+    gameStore.npcRelationships = JSON.parse(JSON.stringify(details.gameState.npcRelationships))
+    snapshotRelSource.value = snapshotId
+    showMessage('已加载存档关系数据，编辑后点击「保存到存档」回写')
+  } catch (e) {
+    console.error('[RelEditor] Load snapshot failed:', e)
+    alert('加载存档失败: ' + e.message)
+  } finally {
+    isLoadingSnapshot.value = false
+  }
+}
+
+// 将当前编辑的关系数据回写到来源存档
+const saveRelationshipsToSnapshot = async () => {
+  const sid = snapshotRelSource.value
+  if (!sid || !snapshotRelData.value) return
+  try {
+    const updatedData = snapshotRelData.value
+    updatedData.gameState.npcRelationships = JSON.parse(JSON.stringify(gameStore.npcRelationships))
+    await saveSnapshotData(sid, updatedData)
+    showMessage('关系数据已保存到存档')
+  } catch (e) {
+    console.error('[RelEditor] Save to snapshot failed:', e)
+    alert('保存到存档失败: ' + e.message)
+  }
+}
+
+// 放弃存档编辑，恢复运行时数据
+const discardSnapshotEdit = async () => {
+  await restoreRuntimeRelationships()
+  showMessage('已恢复为当前运行时数据')
+}
+
+// 关闭面板时的安全检查
+const handleClose = async () => {
+  if (snapshotRelSource.value) {
+    const choice = confirm('你正在编辑存档的关系数据，是否保存到存档？\n\n确定 = 保存后关闭\n取消 = 放弃修改并关闭')
+    if (choice) {
+      await saveRelationshipsToSnapshot()
+    }
+    await restoreRuntimeRelationships()
+  }
+  emit('close')
 }
 
 // 将面板编辑的关系数据同步回 [Social_Data] 世界书
@@ -1470,7 +1561,7 @@ const handleSaveComposer = async () => {
             <button class="btn-save" @click="handleSave" :disabled="saving">
               {{ saving ? '保存中...' : '💾 保存' }}
             </button>
-            <button class="btn-close" @click="$emit('close')">✕</button>
+            <button class="btn-close" @click="handleClose">✕</button>
           </div>
         </div>
 
@@ -1505,6 +1596,12 @@ const handleSaveComposer = async () => {
             @click="activeTab = 'relationshipEditor'"
           >
             🔗 关系编辑器
+          </button>
+          <button
+            :class="{ active: activeTab === 'autoSchedule' }"
+            @click="activeTab = 'autoSchedule'"
+          >
+            🤖 自动排班
           </button>
         </div>
 
@@ -1610,6 +1707,30 @@ const handleSaveComposer = async () => {
 
           <!-- 标签页5：关系编辑器 -->
           <div v-if="activeTab === 'relationshipEditor'" class="tab-content">
+            <!-- 存档数据源选择 -->
+            <div class="snapshot-rel-toolbar">
+              <div class="snapshot-selector">
+                <label>数据来源：</label>
+                <select
+                  :value="snapshotRelSource"
+                  @change="loadRelationshipsFromSnapshot($event.target.value)"
+                  :disabled="isLoadingSnapshot"
+                >
+                  <option value="">当前运行时数据</option>
+                  <option
+                    v-for="snap in gameStore.saveSnapshots"
+                    :key="snap.id"
+                    :value="snap.id"
+                  >{{ snap.label }} ({{ formatSnapshotTime(snap) }})</option>
+                </select>
+                <span v-if="isLoadingSnapshot" class="loading-hint">加载中...</span>
+              </div>
+              <div v-if="snapshotRelSource" class="snapshot-actions">
+                <span class="snapshot-hint">⚠️ 正在编辑存档「{{ getSnapshotLabel(snapshotRelSource) }}」的关系数据</span>
+                <button class="btn-action btn-save" @click="saveRelationshipsToSnapshot">💾 保存到存档</button>
+                <button class="btn-action btn-cancel" @click="discardSnapshotEdit">↩️ 放弃修改</button>
+              </div>
+            </div>
             <RelationshipEditorPanel
               :npc-relationships="gameStore.npcRelationships"
               @edit-relationship="handleEditRelationship"
@@ -1619,6 +1740,20 @@ const handleSaveComposer = async () => {
               @clear-char-impressions="handleClearCharImpressions"
               @remove-character="handleRemoveCharacter"
               @clear-ghost-references="handleClearGhostReferences"
+            />
+          </div>
+
+          <!-- 标签页6：自动排班 -->
+          <div v-if="activeTab === 'autoSchedule'" class="tab-content">
+            <AutoSchedulePanel
+              :character-pool="characterPool"
+              :full-roster-snapshot="fullRosterSnapshot"
+              :current-roster-state="currentRosterState"
+              :origin-groups="originGroups"
+              :game-store="gameStore"
+              @save="handleSave"
+              @show-message="showMessage"
+              @sync-pool="saveCharacterPool"
             />
           </div>
         </div>
@@ -2078,5 +2213,46 @@ const handleSaveComposer = async () => {
 
 .btn-form-cancel:hover {
   background: #555;
+}
+
+.snapshot-rel-toolbar {
+  padding: 8px 12px;
+  background: rgba(255, 193, 7, 0.08);
+  border-bottom: 1px solid rgba(255, 193, 7, 0.2);
+}
+.snapshot-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.snapshot-selector label {
+  font-size: 13px;
+  white-space: nowrap;
+}
+.snapshot-selector select {
+  flex: 1;
+  min-width: 150px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(0,0,0,0.3);
+  color: white;
+}
+.snapshot-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.snapshot-hint {
+  font-size: 12px;
+  color: #ffc107;
+}
+.loading-hint {
+  font-size: 12px;
+  color: #aaa;
 }
 </style>

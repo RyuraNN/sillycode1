@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { BASE_RANGES, POTENTIAL_MAP, SUBJECT_TRAITS } from '../data/academicData'
 import { setRelationship, getRelationship } from '../utils/relationshipManager'
+import { removeThinking } from '../utils/summaryManager'
 
 export function useBatchComplete() {
   const batchProcessing = ref(false)
@@ -79,7 +80,7 @@ export function useBatchComplete() {
 
     let charListStr = chars.map(c => `- ${c.name} (${c.origin || '未知作品'}) [身份: ${c.role === 'teacher' ? '教师' : '学生'}]`).join('\n')
 
-    return `你是一个角色数据补全助手。请根据提供的角色列表，基于其原作设定补充详细属性。
+    return `你是一个角色数据补全助手。请根据提供的角色列表，基于其原作设定补充完整的详细属性。
 
 任务目标：
 ${requestDesc}
@@ -92,7 +93,7 @@ ${charListStr}
 2. 即使角色信息不全，也请根据名字和原作进行合理推断。
 3. 性格四维轴：order(秩序感,-100混乱~100守序), altruism(利他性,-100利己~100利他), tradition(传统性,-100革新~100传统), peace(和平性,-100好斗~100温和)
 4. 学力评估：level(${academicLevelKeys}), potential(${academicPotentialKeys}), traits(${traitKeys}，可多选)
-5. 关系：仅列出与列表中其他角色或知名原作角色的重要关系。
+5. 关系：仅列出与列表中角色或知名原作角色尽可能多的全部关系（如果有关系的话，如果角色间没有直接关系或者交集很少的话也不要强行加上。）
 
 返回格式：
 <roster_update>
@@ -110,7 +111,7 @@ ${charListStr}
   const parseBatchResponse = (text, originalChars) => {
     // 预处理：移除可能的包裹标签和干扰内容
     text = text.replace(/<\/?content[^>]*>/gi, '')
-    text = text.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+    text = removeThinking(text)
     text = text.replace(/<\/?response[^>]*>/gi, '')
     text = text.replace(/```xml\s*/gi, '').replace(/```\s*/gi, '')
 

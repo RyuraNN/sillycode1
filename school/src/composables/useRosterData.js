@@ -180,7 +180,6 @@ export function useRosterData() {
 
       for (const [classId, classInfo] of Object.entries(backupData)) {
         const students = Array.isArray(classInfo.students) ? classInfo.students : []
-        if (students.length === 0) continue
 
         const currentClassInfo = currentData[classId]
         const currentStudentNames = new Set(

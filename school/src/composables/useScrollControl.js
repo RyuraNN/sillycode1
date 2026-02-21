@@ -104,7 +104,7 @@ export function useScrollControl() {
     // 根据距离底部的距离决定是否显示/隐藏按钮
     if (el) {
       const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-      if (distFromBottom < 50) {
+      if (distFromBottom < 150) {
         showNewMessageTip.value = false
       } else if (distFromBottom > 300) {
         showNewMessageTip.value = true

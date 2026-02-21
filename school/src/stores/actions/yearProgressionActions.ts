@@ -526,6 +526,14 @@ export const yearProgressionActions = {
         if (idx !== -1) {
           this.player.teachingClasses[idx] = newClassId
         }
+        // 多班主任：更新 homeroomClassIds
+        if (Array.isArray(this.player.homeroomClassIds)) {
+          const hIdx = this.player.homeroomClassIds.indexOf(oldClassId)
+          if (hIdx !== -1) {
+            this.player.homeroomClassIds[hIdx] = newClassId
+          }
+        }
+        // 兼容旧版 homeroomClassId
         if (this.player.homeroomClassId === oldClassId) {
           this.player.homeroomClassId = newClassId
           // 如果教师绑定了 classId，也更新
@@ -533,9 +541,13 @@ export const yearProgressionActions = {
             this.player.classId = newClassId
           }
         }
+        // classSubjectMap：迁移旧key到新key
+        if (this.player.classSubjectMap && this.player.classSubjectMap[oldClassId]) {
+          this.player.classSubjectMap[newClassId] = this.player.classSubjectMap[oldClassId]
+          delete this.player.classSubjectMap[oldClassId]
+        }
       }
 
-      // 移动到新班级键
       allClassData[newClassId] = classInfo
       delete allClassData[oldClassId]
     }
@@ -559,18 +571,31 @@ export const yearProgressionActions = {
         this.player.gradeYear = 2
         console.log(`[YearProgression] Player upgraded to ${newClassId}`)
       }
-      
+
       // 教师模式：更新 teachingClasses
       if (this.player.role === 'teacher') {
         const idx = this.player.teachingClasses.indexOf(oldClassId)
         if (idx !== -1) {
           this.player.teachingClasses[idx] = newClassId
         }
+        // 多班主任：更新 homeroomClassIds
+        if (Array.isArray(this.player.homeroomClassIds)) {
+          const hIdx = this.player.homeroomClassIds.indexOf(oldClassId)
+          if (hIdx !== -1) {
+            this.player.homeroomClassIds[hIdx] = newClassId
+          }
+        }
+        // 兼容旧版 homeroomClassId
         if (this.player.homeroomClassId === oldClassId) {
           this.player.homeroomClassId = newClassId
           if (this.player.classId === oldClassId) {
             this.player.classId = newClassId
           }
+        }
+        // classSubjectMap：迁移旧key到新key
+        if (this.player.classSubjectMap && this.player.classSubjectMap[oldClassId]) {
+          this.player.classSubjectMap[newClassId] = this.player.classSubjectMap[oldClassId]
+          delete this.player.classSubjectMap[oldClassId]
         }
       }
 
@@ -949,7 +974,8 @@ export const yearProgressionActions = {
       this.player.schedule = generateIndependentTeacherSchedule(
         {
           teachingClasses: this.player.teachingClasses,
-          homeroomClassId: this.player.homeroomClassId,
+          homeroomClassIds: this.player.homeroomClassIds || (this.player.homeroomClassId ? [this.player.homeroomClassId] : []),
+          classSubjectMap: this.player.classSubjectMap || {},
           teachingSubjects: this.player.teachingSubjects,
           teachingElectives: this.player.teachingElectives,
           customCourses: this.player.customCourses || []

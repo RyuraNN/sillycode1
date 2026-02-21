@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { ELECTIVE_PREFERENCES } from '../data/coursePoolData'
 import { DEFAULT_TEMPLATES } from '../utils/npcScheduleSystem'
 import { BASE_RANGES, POTENTIAL_MAP, SUBJECT_TRAITS } from '../data/academicData'
+import { removeThinking } from '../utils/summaryManager'
 
 export function useAIImport() {
   const aiImportLoading = ref(false)
@@ -89,7 +90,7 @@ ${querySection}`
   const parseAIImportResponse = (text) => {
     // 预处理：移除可能的包裹标签和干扰内容
     text = text.replace(/<\/?content[^>]*>/gi, '') // 移除 <content> 标签
-    text = text.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '') // 移除 <thinking> 标签
+    text = removeThinking(text) // 移除思维链标签
     text = text.replace(/<\/?response[^>]*>/gi, '') // 移除 <response> 标签
     text = text.replace(/```xml\s*/gi, '').replace(/```\s*/gi, '') // 移除代码块标记
 

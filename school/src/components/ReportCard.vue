@@ -64,7 +64,11 @@ const selectedExam = computed(() => {
 const teacherClasses = computed(() => {
   if (!isTeacher.value) return []
   const classes = new Set()
-  if (gameStore.player.homeroomClassId) classes.add(gameStore.player.homeroomClassId)
+  if (gameStore.player.homeroomClassIds?.length > 0) {
+    gameStore.player.homeroomClassIds.forEach(c => classes.add(c))
+  } else if (gameStore.player.homeroomClassId) {
+    classes.add(gameStore.player.homeroomClassId)
+  }
   if (gameStore.player.teachingClasses) {
     gameStore.player.teachingClasses.forEach(c => classes.add(c))
   }
@@ -403,9 +407,9 @@ function selectStudent(name) {
           <div class="scroll-fade-wrapper">
             <div class="class-chips">
               <button v-for="cls in teacherClasses" :key="cls" class="class-chip"
-                :class="{ active: activeClassId === cls, homeroom: cls === gameStore.player.homeroomClassId }"
+                :class="{ active: activeClassId === cls, homeroom: (gameStore.player.homeroomClassIds || []).includes(cls) || cls === gameStore.player.homeroomClassId }"
                 @click="selectedClassId = cls; selectedStudent = null">
-                {{ cls }}{{ cls === gameStore.player.homeroomClassId ? '(班主任)' : '' }}
+                {{ cls }}{{ ((gameStore.player.homeroomClassIds || []).includes(cls) || cls === gameStore.player.homeroomClassId) ? '(班主任)' : '' }}
               </button>
             </div>
           </div>
