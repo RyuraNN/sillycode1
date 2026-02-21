@@ -253,14 +253,16 @@ ${charListStr}
       return { success: false, message: 'AI生成接口不可用' }
     }
 
+    const processedCount = chunks.slice(0, startFromChunk).reduce((sum, c) => sum + c.length, 0)
     batchProcessing.value = true
-    batchProgress.value = { current: startFromChunk * 10, total: candidates.length, status: '准备中...' }
+    batchProgress.value = { current: processedCount, total: candidates.length, status: '准备中...' }
 
     try {
       for (let i = startFromChunk; i < chunks.length; i++) {
         const chunk = chunks[i]
+        const processed = chunks.slice(0, i).reduce((sum, c) => sum + c.length, 0)
         batchProgress.value = {
-          current: i * 10,
+          current: processed,
           total: candidates.length,
           status: `正在处理第 ${i + 1}/${chunks.length} 批 (${chunk.length}人)...`
         }
