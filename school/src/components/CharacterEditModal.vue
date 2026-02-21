@@ -359,6 +359,17 @@ const handleSave = () => {
   font-size: 16px;
 }
 
+.form-section textarea {
+  width: 100%;
+  padding: 10px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 14px;
+  resize: vertical;
+}
+
 .form-row {
   margin-bottom: 15px;
 }

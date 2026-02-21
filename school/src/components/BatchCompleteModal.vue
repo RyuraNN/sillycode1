@@ -13,10 +13,11 @@
           <div class="selection-section">
             <label>补全范围：</label>
             <select v-model="localSelection.mode" :disabled="processing">
-              <option value="missing_academic">缺失学力档案的学生</option>
-              <option value="missing_personality">缺失性格数据的角色</option>
+              <option value="missing_academic">缺失学力档案的学生（{{ candidateCounts?.missing_academic ?? '?' }}人）</option>
+              <option value="missing_personality">缺失性格数据的角色（{{ candidateCounts?.missing_personality ?? '?' }}人）</option>
               <option value="class">指定班级全员</option>
-              <option value="all">全部角色</option>
+              <option value="by_class">按班级逐班补全（{{ candidateCounts?.by_class ?? '?' }}人 / {{ Object.keys(classes || {}).length }}班）</option>
+              <option value="all">全部角色（{{ candidateCounts?.all ?? '?' }}人）</option>
             </select>
 
             <select
@@ -25,7 +26,7 @@
               :disabled="processing"
             >
               <option v-for="(classInfo, classId) in classes" :key="classId" :value="classId">
-                {{ classInfo.name || classId }}
+                {{ classInfo.name || classId }}（{{ candidateCounts?.classCounts?.[classId] ?? '?' }}人）
               </option>
             </select>
           </div>
@@ -119,7 +120,8 @@ const props = defineProps({
   progress: Object,
   results: Array,
   resumeIndex: Number,
-  classes: Object
+  classes: Object,
+  candidateCounts: Object
 })
 
 const emit = defineEmits(['close', 'start', 'resume', 'apply', 'update:selection'])

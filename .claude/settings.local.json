@@ -16,7 +16,8 @@
       "Bash(exit 0)",
       "Bash(awk:*)",
       "Bash(grep:*)",
-      "Bash(xargs cat:*)"
+      "Bash(xargs cat:*)",
+      "Bash(python:*)"
     ]
   }
 }

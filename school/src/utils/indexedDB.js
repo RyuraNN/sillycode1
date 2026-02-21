@@ -222,6 +222,15 @@ export async function clearAllData() {
   }
 }
 
+// NPC Relationships (per-run isolation)
+export async function saveNpcRelationships(runId, data) {
+  return setItem(`npc_rel_${runId}`, data)
+}
+
+export async function getNpcRelationships(runId) {
+  return getItem(`npc_rel_${runId}`)
+}
+
 // Storage Persistence Helper
 export async function requestPersistence() {
   if (navigator.storage && navigator.storage.persist) {

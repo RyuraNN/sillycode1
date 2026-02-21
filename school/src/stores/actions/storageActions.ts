@@ -242,6 +242,21 @@ export const storageActions = {
   async initializeNpcRelationships(this: any) {
     console.log('[GameStore] Initializing NPC relationships...')
 
+    // 0. 优先从 IndexedDB 加载（按 currentRunId 隔离）
+    try {
+      const { getNpcRelationships } = await import('../../utils/indexedDB')
+      if (this.currentRunId) {
+        const saved = await getNpcRelationships(this.currentRunId)
+        if (saved && typeof saved === 'object' && Object.keys(saved).length > 0) {
+          console.log('[GameStore] Loaded NPC relationships from IndexedDB for run:', this.currentRunId)
+          this.npcRelationships = saved
+          return  // IndexedDB 有数据，直接使用，不再从世界书读取
+        }
+      }
+    } catch (e) {
+      console.warn('[GameStore] Failed to load relationships from IndexedDB, falling back to worldbook:', e)
+    }
+
     // 1. 尝试从世界书 [Social_Data] 读取
     let socialData: Record<string, any> = {}
     try {

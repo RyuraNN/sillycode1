@@ -47,6 +47,13 @@ export function useBatchComplete() {
       candidates = characterPool.filter(c =>
         !c.personality || (c.personality.order === 0 && c.personality.altruism === 0 && c.personality.tradition === 0 && c.personality.peace === 50)
       )
+    } else if (mode === 'by_class') {
+      // by_class 模式下返回所有班级的全部角色（扁平列表）
+      for (const classInfo of Object.values(fullRosterSnapshot)) {
+        if (classInfo.headTeacher?.name) candidates.push(classInfo.headTeacher)
+        if (Array.isArray(classInfo.teachers)) candidates.push(...classInfo.teachers)
+        if (Array.isArray(classInfo.students)) candidates.push(...classInfo.students)
+      }
     } else if (mode === 'all') {
       candidates = [...characterPool]
     }
@@ -217,10 +224,21 @@ ${charListStr}
         return { success: false, message: '未找到符合条件的角色' }
       }
 
-      const CHUNK_SIZE = 10
       chunks = []
-      for (let i = 0; i < candidates.length; i += CHUNK_SIZE) {
-        chunks.push(candidates.slice(i, i + CHUNK_SIZE))
+      if (selection.mode === 'by_class') {
+        // 按班级分块：每个班级一个 chunk
+        for (const [classId, classInfo] of Object.entries(fullRosterSnapshot)) {
+          const classChunk = []
+          if (classInfo.headTeacher?.name) classChunk.push(classInfo.headTeacher)
+          if (Array.isArray(classInfo.teachers)) classChunk.push(...classInfo.teachers)
+          if (Array.isArray(classInfo.students)) classChunk.push(...classInfo.students)
+          if (classChunk.length > 0) chunks.push(classChunk)
+        }
+      } else {
+        const CHUNK_SIZE = 10
+        for (let i = 0; i < candidates.length; i += CHUNK_SIZE) {
+          chunks.push(candidates.slice(i, i + CHUNK_SIZE))
+        }
       }
 
       batchCandidatesCache.value = candidates

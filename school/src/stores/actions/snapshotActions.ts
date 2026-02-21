@@ -247,7 +247,22 @@ export const snapshotActions = {
 
     await this.rebuildWorldbookState()
     this.checkAndNotifyDeliveries()
-    
+
+    // 恢复后将关系数据保存到 IndexedDB，确保存档隔离
+    try {
+      const { saveNpcRelationships } = await import('../../utils/indexedDB')
+      const { clearPendingSocialData } = await import('../../utils/relationshipManager')
+      clearPendingSocialData()  // 清空旧存档的 pending 写入
+      if (this.currentRunId && this.npcRelationships) {
+        await saveNpcRelationships(
+          this.currentRunId,
+          JSON.parse(JSON.stringify(this.npcRelationships))
+        )
+      }
+    } catch (e) {
+      console.warn('[snapshotActions] Failed to save relationships to IndexedDB:', e)
+    }
+
     // 确保所有 NPC 都被初始化（处理旧存档只有本班 NPC 的情况）
     if (this.initializeAllClassNpcs) {
       this.initializeAllClassNpcs()

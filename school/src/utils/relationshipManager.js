@@ -12,46 +12,40 @@ import {
 } from '../data/relationshipData'
 import { saveImpressionData, saveImpressionDataImmediate } from './impressionWorldbook'
 import { ensureSocialDataWorldbook, fetchSocialData, saveSocialData } from './socialRelationshipsWorldbook'
+import { saveNpcRelationships } from './indexedDB'
 
-// ========== 防抖写入世界书 ==========
-let _pendingSocialData = null
+// ========== 防抖写入 IndexedDB ==========
 let _debounceSaveTimer = null
 const DEBOUNCE_DELAY = 500 // ms
 
 /**
- * 防抖保存社交数据到世界书
+ * 防抖保存社交数据到 IndexedDB（按 currentRunId 隔离）
  * 将短时间内的多次写入合并为一次
- * @param {Object} partialData 要合并的部分数据
+ * @param {Object} _partialData 参数保留以兼容调用方签名，但不再做增量合并
  */
-function debounceSaveSocialData(partialData) {
-  // 合并到待写入缓冲区
-  if (!_pendingSocialData) {
-    _pendingSocialData = {}
-  }
-  // 简单深度合并
-  for (const key of Object.keys(partialData)) {
-    if (!_pendingSocialData[key]) {
-      _pendingSocialData[key] = {}
-    }
-    Object.assign(_pendingSocialData[key], partialData[key])
-  }
-  
-  // 重置定时器
+function debounceSaveSocialData(_partialData) {
   if (_debounceSaveTimer) {
     clearTimeout(_debounceSaveTimer)
   }
   _debounceSaveTimer = setTimeout(() => {
-    const dataToSave = _pendingSocialData
-    _pendingSocialData = null
     _debounceSaveTimer = null
-    if (dataToSave) {
-      saveSocialData(dataToSave).catch(e => console.error('[RelationshipManager] Debounced save failed:', e))
+    try {
+      const gameStore = useGameStore()
+      const runId = gameStore.currentRunId
+      if (runId && gameStore.npcRelationships) {
+        const snapshot = JSON.parse(JSON.stringify(gameStore.npcRelationships))
+        saveNpcRelationships(runId, snapshot).catch(e =>
+          console.error('[RelationshipManager] IndexedDB save failed:', e)
+        )
+      }
+    } catch (e) {
+      console.error('[RelationshipManager] Debounced save failed:', e)
     }
   }, DEBOUNCE_DELAY)
 }
 
 /**
- * 立即刷新待写入的社交数据到世界书
+ * 立即刷新待写入的社交数据到 IndexedDB
  * 用于在关闭编辑器或确认保存前确保数据不丢失
  * @returns {Promise<void>}
  */
@@ -60,14 +54,26 @@ export async function flushPendingSocialData() {
     clearTimeout(_debounceSaveTimer)
     _debounceSaveTimer = null
   }
-  if (_pendingSocialData) {
-    const dataToSave = _pendingSocialData
-    _pendingSocialData = null
-    try {
-      await saveSocialData(dataToSave)
-    } catch (e) {
-      console.error('[RelationshipManager] Flush save failed:', e)
+  try {
+    const gameStore = useGameStore()
+    const runId = gameStore.currentRunId
+    if (runId && gameStore.npcRelationships) {
+      const snapshot = JSON.parse(JSON.stringify(gameStore.npcRelationships))
+      await saveNpcRelationships(runId, snapshot)
     }
+  } catch (e) {
+    console.error('[RelationshipManager] Flush save failed:', e)
+  }
+}
+
+/**
+ * 清空防抖 timer（不执行写入）
+ * 用于存档恢复前丢弃旧存档的 pending 写入，防止旧数据回写
+ */
+export function clearPendingSocialData() {
+  if (_debounceSaveTimer) {
+    clearTimeout(_debounceSaveTimer)
+    _debounceSaveTimer = null
   }
 }
 

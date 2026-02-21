@@ -32,7 +32,7 @@
         class="tab-item"
         :class="{ active: activeTab === 'grades' }"
         @click="activeTab = 'grades'"
-        v-if="gameStore.player.role !== 'teacher'"
+
       >
         <span class="tab-icon">📊</span>
         <span class="tab-label">成绩</span>

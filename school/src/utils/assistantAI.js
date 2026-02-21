@@ -117,6 +117,11 @@ anchor 是插图在正文中的定位锚点，决定图片插入的位置。
            warm lighting, dramatic lighting, 等
    - 氛围词：cinematic, atmospheric, moody, peaceful, vibrant, 等
 
+7. NSFW
+   - 例词：nsfw, nude, erotic, pussy, 等
+   - 仅在正文有明确的亲密/NSFW场景时使用
+   - 描述越具体越好，避免模糊词（如 "sexy"）导致生成不准确
+
 Prompt 编写注意事项：
 - 总长度控制在 40~100 个英文单词之间
 - 用逗号分隔各描述词，不要写完整英文句子

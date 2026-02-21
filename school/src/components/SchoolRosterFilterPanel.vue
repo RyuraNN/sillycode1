@@ -180,6 +180,46 @@ const batchSelection = ref({
   }
 })
 
+// 各模式待补全角色数量
+const candidateCounts = computed(() => {
+  const pool = characterPool.value || []
+  const roster = fullRosterSnapshot.value || {}
+
+  const missingAcademic = pool.filter(c =>
+    c.role === 'student' &&
+    (!c.academicProfile || (c.academicProfile.level === 'avg' && c.academicProfile.potential === 'medium' && (!c.academicProfile.traits || c.academicProfile.traits.length === 0)))
+  ).length
+
+  const missingPersonality = pool.filter(c =>
+    !c.personality || (c.personality.order === 0 && c.personality.altruism === 0 && c.personality.tradition === 0 && c.personality.peace === 50)
+  ).length
+
+  const classCounts = {}
+  for (const [classId, classInfo] of Object.entries(roster)) {
+    let count = 0
+    if (classInfo.headTeacher?.name) count++
+    if (Array.isArray(classInfo.teachers)) count += classInfo.teachers.length
+    if (Array.isArray(classInfo.students)) count += classInfo.students.length
+    classCounts[classId] = count
+  }
+
+  const unique = new Map()
+  pool.forEach(c => { if (c.name) unique.set(c.name, c) })
+
+  let byClassTotal = 0
+  for (const count of Object.values(classCounts)) {
+    byClassTotal += count
+  }
+
+  return {
+    missing_academic: missingAcademic,
+    missing_personality: missingPersonality,
+    all: unique.size,
+    classCounts,
+    by_class: byClassTotal
+  }
+})
+
 // AI导入状态
 const showAIImportInput = ref(false)
 const showAIImportResult = ref(false)
@@ -1446,6 +1486,7 @@ const handleSaveComposer = async () => {
       :results="batchResults"
       :resume-index="batchResumeIndex"
       :classes="fullRosterSnapshot"
+      :candidate-counts="candidateCounts"
       @close="showBatchCompleteModal = false"
       @start="handleStartBatchProcess"
       @resume="handleResumeBatchProcess"
