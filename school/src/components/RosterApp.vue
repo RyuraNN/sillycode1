@@ -180,9 +180,9 @@ let mouseDownX = 0, mouseDownY = 0
 const isGrabbing = ref(false)
 
 // 力导向参数
-const REPULSION = 5000
+const REPULSION = 8000
 const SPRING_K = 0.005
-const SPRING_LEN = 120
+const SPRING_LEN = 160
 const DAMPING = 0.85
 const CENTER_GRAVITY = 0.01
 const MAX_VELOCITY = 8
@@ -199,97 +199,116 @@ const getRosterNames = () => {
     return names
 }
 
-// 初始化全局网络数据
+// 初始化焦点关系网络数据（星形拓扑）
 const initNetworkData = () => {
     netNodes = []
     netEdges = []
-    const rosterNames = getRosterNames()
     const playerName = gameStore.player.name
+    const focusName = selectedCharName.value || playerName
+    const playerGender = gameStore.player.gender || 'male'
 
-    // 收集所有有关系数据的角色名
-    const allNames = new Set()
+    // 收集与焦点角色有直接关系的角色（正向查找）
+    const focusRelations = getCharRelations(focusName)
+    const connectedNames = new Set()
+    for (const [targetName, relData] of Object.entries(focusRelations)) {
+        if (!relData) continue
+        const { intimacy = 0, trust = 0, passion = 0, hostility = 0 } = relData
+        if (intimacy === 0 && trust === 0 && passion === 0 && hostility === 0) continue
+        connectedNames.add(targetName)
+    }
+
+    // 反向查找：其他角色关系中指向焦点的
+    const rosterNames = getRosterNames()
     for (const name of rosterNames) {
-        allNames.add(name)
-    }
-    // 也从 npcRelationships 和 DEFAULT_RELATIONSHIPS 中收集
-    for (const name of Object.keys(gameStore.npcRelationships || {})) {
-        if (rosterNames.has(name)) allNames.add(name)
-    }
-    for (const name of Object.keys(DEFAULT_RELATIONSHIPS || {})) {
-        if (rosterNames.has(name)) allNames.add(name)
+        if (name === focusName) continue
+        const rels = getCharRelations(name)
+        const relToFocus = rels[focusName]
+        if (!relToFocus) continue
+        const { intimacy = 0, trust = 0, passion = 0, hostility = 0 } = relToFocus
+        if (intimacy === 0 && trust === 0 && passion === 0 && hostility === 0) continue
+        connectedNames.add(name)
     }
 
-    // 只保留名册中的角色
-    const nameList = [...allNames].filter(n => rosterNames.has(n))
+    // 过滤只保留名册中的角色，排除焦点自身
+    const neighbors = [...connectedNames].filter(n => rosterNames.has(n) && n !== focusName)
+    if (neighbors.length === 0) return
 
-    // 创建节点（随机圆形分布）
-    const count = nameList.length
     const nameToIdx = {}
-    nameList.forEach((name, i) => {
-        const angle = (2 * Math.PI * i) / count + (Math.random() - 0.5) * 0.3
-        const r = 80 + Math.random() * 60
-        const isPlayer = name === playerName
-        // 获取与玩家的关系来决定颜色
-        const rel = getCharRelations(name)[playerName] || getCharRelations(playerName)[name]
-        netNodes.push({
-            id: name,
-            name,
-            x: Math.cos(angle) * r,
-            y: Math.sin(angle) * r,
-            vx: 0, vy: 0,
-            pinned: false,
-            color: isPlayer ? '#FFD700' : getNodeColor(rel || { intimacy: 0, trust: 0, passion: 0, hostility: 0 }),
-            isPlayer
-        })
-        nameToIdx[name] = i
+
+    // 焦点节点固定在中心
+    const focusRel = getCharRelations(playerName)[focusName] || getCharRelations(focusName)[playerName]
+    nameToIdx[focusName] = 0
+    netNodes.push({
+        id: focusName, name: focusName,
+        x: 0, y: 0, vx: 0, vy: 0,
+        pinned: true, isFocus: true,
+        color: '#FFD700',
+        score: focusRel ? calculateRelationshipScore(focusRel) : 0,
+        emotionText: '',
+        radius: 28
     })
 
-    // 收集所有边（去重）
-    const edgeSet = new Set()
-    for (const sourceName of nameList) {
-        const relations = getCharRelations(sourceName)
-        for (const [targetName, relData] of Object.entries(relations)) {
-            if (!rosterNames.has(targetName)) continue
-            const si = nameToIdx[sourceName]
-            const ti = nameToIdx[targetName]
-            if (si === undefined || ti === undefined) continue
-            const key = Math.min(si, ti) + '-' + Math.max(si, ti)
-            if (edgeSet.has(key)) continue
-            edgeSet.add(key)
-            netEdges.push({
-                source: sourceName,
-                target: targetName,
-                sourceIdx: si,
-                targetIdx: ti,
-                color: getEdgeColor(relData),
-                width: getEdgeWidth(relData)
-            })
-        }
+    // 其他节点环形分布
+    const count = neighbors.length
+    neighbors.forEach((name, i) => {
+        const angle = (2 * Math.PI * i) / count
+        const r = SPRING_LEN + 20
+        const rel = focusRelations[name] || getCharRelations(name)[focusName]
+        const score = rel ? calculateRelationshipScore(rel) : 0
+        const npcGender = gameStore.npcRelationships[name]?.gender || 'unknown'
+        const emotionText = rel ? getEmotionalState(rel, playerGender, npcGender).text : '陌生'
+        const nodeRadius = Math.max(20, name.length * 7)
+
+        nameToIdx[name] = netNodes.length
+        netNodes.push({
+            id: name, name,
+            x: Math.cos(angle) * r, y: Math.sin(angle) * r,
+            vx: 0, vy: 0,
+            pinned: false, isFocus: false,
+            color: getNodeColor(rel),
+            score, emotionText, radius: nodeRadius
+        })
+    })
+
+    // 边：只连接焦点与周围节点（星形拓扑）
+    for (const name of neighbors) {
+        const si = nameToIdx[focusName]
+        const ti = nameToIdx[name]
+        if (si === undefined || ti === undefined) continue
+        const rel = focusRelations[name] || getCharRelations(name)[focusName]
+        const style = getEdgeStyle(rel)
+        netEdges.push({
+            source: focusName, target: name,
+            sourceIdx: si, targetIdx: ti,
+            color: style.color, width: style.width,
+            dashPattern: style.dashPattern,
+            label: style.label, score: style.score
+        })
     }
 }
 
 const getNodeColor = (rel) => {
-    if (!rel) return '#96CEB4'
-    if (rel.hostility > 50) return '#FF6B6B'
-    if (rel.passion > 50) return '#FF85B3'
-    if (rel.trust > 60) return '#4ECDC4'
-    if (rel.intimacy > 60) return '#45B7D1'
-    return '#96CEB4'
+    if (!rel) return '#94a3b8'
+    const score = calculateRelationshipScore(rel)
+    const hostility = rel.hostility || 0
+    const passion = rel.passion || 0
+    if (hostility >= 50) return '#EF4444'
+    if (passion >= 50 && hostility < 20) return '#EC4899'
+    if (score >= 60) return '#3B82F6'
+    if (score >= 30) return '#10B981'
+    if (score >= 0) return '#94a3b8'
+    return '#F97316'
 }
 
-const getEdgeColor = (rel) => {
-    if (!rel) return '#A8E6CF'
-    if (rel.hostility > 50) return '#FF6B6B'
-    if (rel.passion > 50) return '#FF85B3'
-    if (rel.trust > 60) return '#4ECDC4'
-    if (rel.intimacy > 60) return '#45B7D1'
-    return '#A8E6CF'
-}
-
-const getEdgeWidth = (rel) => {
-    if (!rel) return 1
-    const score = Math.max(rel.intimacy || 0, rel.trust || 0, rel.passion || 0, rel.hostility || 0)
-    return 1 + (score / 100) * 2.5
+const getEdgeStyle = (rel) => {
+    const color = getNodeColor(rel)
+    const score = rel ? calculateRelationshipScore(rel) : 0
+    const absScore = Math.abs(score)
+    const width = 1.5 + (absScore / 100) * 2.5
+    const dashPattern = score < 10 ? [4, 4] : []
+    const playerGender = gameStore.player.gender || 'male'
+    const label = rel ? getEmotionalState(rel, playerGender).text : '陌生'
+    return { color, width, dashPattern, label, score }
 }
 
 // 力导向物理模拟
@@ -364,20 +383,22 @@ const initCanvas = () => {
 }
 
 // 绘制网络图
+let _breathT = 0
 const drawNetwork = () => {
     if (!netCtx || !networkCanvasRef.value) return
     const width = networkCanvasRef.value.width / (window.devicePixelRatio || 1)
     const height = networkCanvasRef.value.height / (window.devicePixelRatio || 1)
     const cx = width / 2
     const cy = height / 2
+    _breathT += 0.03
 
     // 物理模拟
     simulateForces()
 
-    // 清除 + 背景
+    // 清除 + 浅色背景
     const gradient = netCtx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(width, height) / 2)
-    gradient.addColorStop(0, '#1a2a3a')
-    gradient.addColorStop(1, '#0d1520')
+    gradient.addColorStop(0, '#f8fafc')
+    gradient.addColorStop(1, '#e2e8f0')
     netCtx.fillStyle = gradient
     netCtx.fillRect(0, 0, width, height)
 
@@ -389,13 +410,15 @@ const drawNetwork = () => {
     for (const edge of netEdges) {
         const a = netNodes[edge.sourceIdx]
         const b = netNodes[edge.targetIdx]
-        // 外发光
+        // 外发光（浅色背景下降低透明度）
+        netCtx.save()
+        netCtx.setLineDash(edge.dashPattern || [])
         netCtx.beginPath()
         netCtx.moveTo(a.x, a.y)
         netCtx.lineTo(b.x, b.y)
         netCtx.strokeStyle = edge.color
         netCtx.lineWidth = edge.width + 3
-        netCtx.globalAlpha = 0.15
+        netCtx.globalAlpha = 0.08
         netCtx.stroke()
         // 主线
         netCtx.beginPath()
@@ -403,58 +426,108 @@ const drawNetwork = () => {
         netCtx.lineTo(b.x, b.y)
         netCtx.strokeStyle = edge.color
         netCtx.lineWidth = edge.width
-        netCtx.globalAlpha = 0.7
+        netCtx.globalAlpha = 0.75
         netCtx.stroke()
+        netCtx.setLineDash([])
+        netCtx.restore()
+
+        // 边中点标签
+        if (edge.label) {
+            const mx = (a.x + b.x) / 2
+            const my = (a.y + b.y) / 2
+            netCtx.save()
+            netCtx.font = '9px "Microsoft YaHei", sans-serif'
+            const tw = netCtx.measureText(edge.label).width
+            const pad = 4
+            // 白色背景圆角矩形
+            const bx = mx - tw / 2 - pad
+            const by = my - 6 - pad
+            const bw = tw + pad * 2
+            const bh = 12 + pad * 2
+            const br = 4
+            netCtx.globalAlpha = 0.85
+            netCtx.fillStyle = '#ffffff'
+            netCtx.beginPath()
+            netCtx.moveTo(bx + br, by)
+            netCtx.lineTo(bx + bw - br, by)
+            netCtx.quadraticCurveTo(bx + bw, by, bx + bw, by + br)
+            netCtx.lineTo(bx + bw, by + bh - br)
+            netCtx.quadraticCurveTo(bx + bw, by + bh, bx + bw - br, by + bh)
+            netCtx.lineTo(bx + br, by + bh)
+            netCtx.quadraticCurveTo(bx, by + bh, bx, by + bh - br)
+            netCtx.lineTo(bx, by + br)
+            netCtx.quadraticCurveTo(bx, by, bx + br, by)
+            netCtx.closePath()
+            netCtx.fill()
+            // 文字
+            netCtx.globalAlpha = 1
+            netCtx.fillStyle = edge.color
+            netCtx.textAlign = 'center'
+            netCtx.textBaseline = 'middle'
+            netCtx.fillText(edge.label, mx, my)
+            netCtx.restore()
+        }
     }
     netCtx.globalAlpha = 1
 
     // 绘制节点
-    const selectedName = selectedCharName.value
     for (const node of netNodes) {
-        const size = node.isPlayer ? 10 : 6
-        const isSelected = node.id === selectedName
+        const r = node.radius || 20
 
-        // 选中高亮环
-        if (isSelected) {
+        // 焦点节点呼吸光环
+        if (node.isFocus) {
+            const breathR = r + 6 + Math.sin(_breathT) * 3
+            const haloGrad = netCtx.createRadialGradient(node.x, node.y, r, node.x, node.y, breathR + 4)
+            haloGrad.addColorStop(0, 'rgba(255,215,0,0.35)')
+            haloGrad.addColorStop(1, 'rgba(255,215,0,0)')
             netCtx.beginPath()
-            netCtx.arc(node.x, node.y, size + 6, 0, Math.PI * 2)
-            netCtx.strokeStyle = '#FFD700'
-            netCtx.lineWidth = 2
-            netCtx.globalAlpha = 0.8
-            netCtx.stroke()
-            netCtx.globalAlpha = 1
+            netCtx.arc(node.x, node.y, breathR + 4, 0, Math.PI * 2)
+            netCtx.fillStyle = haloGrad
+            netCtx.fill()
         }
-
-        // 外发光
-        const glowGrad = netCtx.createRadialGradient(node.x, node.y, size, node.x, node.y, size + 8)
-        glowGrad.addColorStop(0, node.color + '80')
-        glowGrad.addColorStop(1, 'transparent')
-        netCtx.beginPath()
-        netCtx.arc(node.x, node.y, size + 8, 0, Math.PI * 2)
-        netCtx.fillStyle = glowGrad
-        netCtx.fill()
 
         // 节点圆
         netCtx.beginPath()
-        netCtx.arc(node.x, node.y, size, 0, Math.PI * 2)
+        netCtx.arc(node.x, node.y, r, 0, Math.PI * 2)
         netCtx.fillStyle = node.color
         netCtx.fill()
-        netCtx.strokeStyle = '#ffffff'
+        netCtx.strokeStyle = 'rgba(255,255,255,0.3)'
         netCtx.lineWidth = 1.5
-        netCtx.globalAlpha = 0.6
         netCtx.stroke()
-        netCtx.globalAlpha = 1
 
-        // 标签
-        const fontSize = Math.max(8, Math.min(13, 11 / zoomScale))
-        netCtx.font = `${fontSize}px "Microsoft YaHei", sans-serif`
-        netCtx.fillStyle = '#ffffff'
+        // 名字绘制
+        const name = node.name
+        let fontSize = 10
+        let drawInside = true
+        if (name.length > 6) {
+            fontSize = 8
+            drawInside = false
+        } else if (name.length > 4) {
+            fontSize = 8
+        }
+        netCtx.font = `bold ${fontSize}px "Microsoft YaHei", sans-serif`
         netCtx.textAlign = 'center'
-        netCtx.textBaseline = 'top'
-        netCtx.shadowColor = 'rgba(0,0,0,0.8)'
-        netCtx.shadowBlur = 4
-        netCtx.fillText(node.name, node.x, node.y + size + 4)
-        netCtx.shadowBlur = 0
+        if (drawInside) {
+            netCtx.fillStyle = '#ffffff'
+            netCtx.textBaseline = 'middle'
+            netCtx.fillText(name, node.x, node.y)
+        } else {
+            netCtx.fillStyle = '#334155'
+            netCtx.textBaseline = 'top'
+            netCtx.fillText(name, node.x, node.y + r + 3)
+        }
+
+        // emotionText 显示在节点下方
+        if (node.emotionText && !node.isFocus) {
+            const etY = drawInside ? node.y + r + 3 : node.y + r + 3 + fontSize + 2
+            netCtx.font = '8px "Microsoft YaHei", sans-serif'
+            netCtx.fillStyle = node.color
+            netCtx.globalAlpha = 0.7
+            netCtx.textAlign = 'center'
+            netCtx.textBaseline = 'top'
+            netCtx.fillText(node.emotionText, node.x, etY)
+            netCtx.globalAlpha = 1
+        }
     }
 
     netCtx.restore()
@@ -481,8 +554,7 @@ const findNodeAt = (gx, gy) => {
     // 反向遍历（后绘制的在上面）
     for (let i = netNodes.length - 1; i >= 0; i--) {
         const node = netNodes[i]
-        const size = node.isPlayer ? 10 : 6
-        const hitR = size + 6 // 扩大点击区域
+        const hitR = (node.radius || 20) + 6
         const dx = gx - node.x
         const dy = gy - node.y
         if (dx * dx + dy * dy <= hitR * hitR) return node
@@ -542,7 +614,7 @@ const handleEnd = (e) => {
     if (Math.abs(dx) < 5 && Math.abs(dy) < 5) {
         const { x, y } = screenToGraph(clientX, clientY)
         const hit = findNodeAt(x, y)
-        if (hit && !hit.isPlayer) {
+        if (hit && !hit.isFocus) {
             // 点击节点 → 跳转到该角色详情
             selectedCharName.value = hit.id
         }
@@ -582,14 +654,14 @@ const startNetwork = () => {
     drawNetwork()
 }
 
-// watch: 切换角色时更新高亮（不重建图）
-watch(selectedCharName, async (newVal, oldVal) => {
-    // 如果从详情返回列表，或首次进入详情，都需要确保图已初始化
-    if (newVal && netNodes.length === 0) {
-        await nextTick()
+// watch: 切换角色时重建图（焦点过滤）
+watch(selectedCharName, async (newVal) => {
+    await nextTick()
+    if (netNodes.length === 0) {
         startNetwork()
+    } else {
+        initNetworkData()
     }
-    // 高亮变化由 drawNetwork 自动处理（读取 selectedCharName.value）
 })
 
 // watch: 数据变化时重建图
@@ -798,26 +870,11 @@ onUnmounted(() => {
               <div class="canvas-overlay"></div>
           </div>
           <div class="graph-legend">
-              <div class="legend-item">
-                  <span class="dot blue"></span>
-                  <span>亲密</span>
-              </div>
-              <div class="legend-item">
-                  <span class="dot green"></span>
-                  <span>信赖</span>
-              </div>
-              <div class="legend-item">
-                  <span class="dot pink"></span>
-                  <span>激情</span>
-              </div>
-              <div class="legend-item">
-                  <span class="dot red"></span>
-                  <span>敌意</span>
-              </div>
-              <div class="legend-item">
-                  <span class="dot gold"></span>
-                  <span>玩家</span>
-              </div>
+              <div class="legend-item"><span class="legend-line solid blue"></span><span>亲密好友</span></div>
+              <div class="legend-item"><span class="legend-line solid green"></span><span>友好</span></div>
+              <div class="legend-item"><span class="legend-line solid pink"></span><span>浪漫</span></div>
+              <div class="legend-item"><span class="legend-line solid red"></span><span>敌对</span></div>
+              <div class="legend-item"><span class="legend-line dashed gray"></span><span>普通/冷淡</span></div>
           </div>
       </div>
     </div>
@@ -1461,12 +1518,13 @@ onUnmounted(() => {
 
 .canvas-wrapper {
   width: 100%;
-  height: 280px;
+  height: 340px;
   border-radius: 16px;
   overflow: hidden;
   position: relative;
   cursor: grab;
-  box-shadow: inset 0 2px 10px rgba(0,0,0,0.1);
+  border: 1px solid #e2e8f0;
+  box-shadow: inset 0 2px 10px rgba(0,0,0,0.05);
 }
 
 .canvas-wrapper.grabbing {
@@ -1484,7 +1542,7 @@ onUnmounted(() => {
   inset: 0;
   pointer-events: none;
   border-radius: 16px;
-  box-shadow: inset 0 0 40px rgba(0,0,0,0.15);
+  box-shadow: inset 0 0 30px rgba(0,0,0,0.05);
 }
 
 .graph-legend {
@@ -1502,16 +1560,19 @@ onUnmounted(() => {
   color: #64748b;
 }
 
-.dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+.legend-line {
+  display: inline-block;
+  width: 20px;
+  height: 3px;
+  border-radius: 2px;
 }
 
-.dot.blue { background: linear-gradient(135deg, #45B7D1 0%, #2196F3 100%); }
-.dot.green { background: linear-gradient(135deg, #4ECDC4 0%, #4CAF50 100%); }
-.dot.pink { background: linear-gradient(135deg, #FF85B3 0%, #E91E63 100%); }
-.dot.red { background: linear-gradient(135deg, #FF6B6B 0%, #D32F2F 100%); }
-.dot.gold { background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%); }
+.legend-line.solid { border: none; }
+.legend-line.dashed { border-top: 2px dashed; height: 0; background: none !important; }
+
+.legend-line.blue { background: #3B82F6; border-color: #3B82F6; }
+.legend-line.green { background: #10B981; border-color: #10B981; }
+.legend-line.pink { background: #EC4899; border-color: #EC4899; }
+.legend-line.red { background: #EF4444; border-color: #EF4444; }
+.legend-line.gray { background: #94a3b8; border-color: #94a3b8; }
 </style>
