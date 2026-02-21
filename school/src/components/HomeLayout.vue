@@ -2,6 +2,8 @@
 import { ref, defineAsyncComponent } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { switchSaveSlot, restoreWorldbookFromStore } from '../utils/socialWorldbook'
+import { clearAllData } from '../utils/indexedDB'
+import { getAllBookNames } from '../utils/worldbookHelper'
 
 // 使用异步组件以优化首屏加载性能
 const GameStart = defineAsyncComponent(() => import('./GameStart.vue'))
@@ -17,6 +19,9 @@ const currentView = ref('menu') // 'menu', 'start', 'load', 'settings', 'game'
 const showMapEditor = ref(false)
 const showEventEditor = ref(false)
 const showScheduleEditor = ref(false)
+const showResetModal = ref(false)
+const resetConfirmText = ref('')
+const isResetting = ref(false)
 
 const showMenu = () => {
   currentView.value = 'menu'
@@ -66,6 +71,69 @@ const onGeminiModeChange = () => {
   }
   gameStore.saveToStorage()
 }
+
+async function clearRunIdWorldbookEntries() {
+  if (typeof window.deleteWorldbookEntries !== 'function') return
+
+  const runIdPrefixes = ['[Social:', '[Moment:', '[Impression:', '[Forum:', '[Jobs:']
+  const electivePrefix = '[Elective:'
+
+  const bookNames = getAllBookNames()
+  for (const bookName of bookNames) {
+    try {
+      await window.deleteWorldbookEntries(bookName, (entry) => {
+        if (!entry.name) return false
+
+        for (const prefix of runIdPrefixes) {
+          if (entry.name.startsWith(prefix)) return true
+        }
+
+        if (entry.name.startsWith(electivePrefix)) return true
+
+        if (entry.name.startsWith('[Class:')) {
+          const inner = entry.name.slice(7)
+          const closeBracket = inner.indexOf(']')
+          const content = closeBracket > -1 ? inner.substring(0, closeBracket) : inner
+          if (content.includes(':')) return true
+        }
+
+        if (entry.name.startsWith('[Club:')) {
+          const inner = entry.name.slice(6)
+          const closeBracket = inner.indexOf(']')
+          const content = closeBracket > -1 ? inner.substring(0, closeBracket) : inner
+          if (content.includes(':')) return true
+        }
+
+        return false
+      })
+    } catch (e) {
+      console.warn(`[HomeLayout] Failed to clear worldbook entries from ${bookName}:`, e)
+    }
+  }
+}
+
+async function resetGame() {
+  if (resetConfirmText.value !== '确认重置') return
+  isResetting.value = true
+  try {
+    await clearRunIdWorldbookEntries()
+    await clearAllData()
+
+    const keysToRemove = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && key.startsWith('school_game_')) keysToRemove.push(key)
+    }
+    keysToRemove.forEach(key => localStorage.removeItem(key))
+    localStorage.removeItem('batchProgress')
+
+    window.location.reload()
+  } catch (e) {
+    console.error('[HomeLayout] Reset failed:', e)
+    alert('重置失败，请尝试手动清除浏览器缓存。')
+    isResetting.value = false
+  }
+}
 </script>
 
 <template>
@@ -95,6 +163,12 @@ const onGeminiModeChange = () => {
       <button class="fullscreen-circle-btn" @click="toggleFullscreen" title="切换全屏">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
           <path fill-rule="evenodd" d="M5.828 10.172a.5.5 0 0 0-.707 0l-4.096 4.096V11.5a.5.5 0 0 0-1 0v3.975a.5.5 0 0 0 .5.5H4.5a.5.5 0 0 0 0-1H1.732l4.096-4.096a.5.5 0 0 0 0-.707zm4.344-4.344a.5.5 0 0 0 .707 0l4.096-4.096V4.5a.5.5 0 1 0 1 0V.525a.5.5 0 0 0-.5-.5H11.5a.5.5 0 0 0 0 1h2.768l-4.096 4.096a.5.5 0 0 0 0 .707z"/>
+        </svg>
+      </button>
+      <button v-if="currentView === 'menu'" class="fullscreen-circle-btn reset-btn" @click="showResetModal = true" title="重置游戏">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+          <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+          <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
         </svg>
       </button>
     </div>
@@ -146,6 +220,24 @@ const onGeminiModeChange = () => {
       v-if="showScheduleEditor"
       @close="showScheduleEditor = false"
     />
+
+    <!-- 重置确认弹窗 -->
+    <div v-if="showResetModal" class="reset-modal-overlay" @click.self="showResetModal = false">
+      <div class="reset-modal">
+        <h3>⚠️ 重置游戏</h3>
+        <p>此操作将清除所有游戏数据，包括存档、设置和世界书动态条目。此操作不可撤销。</p>
+        <p>请输入「<strong>确认重置</strong>」以继续：</p>
+        <input v-model="resetConfirmText" placeholder="请输入 确认重置" :disabled="isResetting" />
+        <div class="reset-modal-actions">
+          <button @click="showResetModal = false; resetConfirmText = ''" :disabled="isResetting">取消</button>
+          <button class="reset-confirm-btn"
+            :disabled="resetConfirmText !== '确认重置' || isResetting"
+            @click="resetGame">
+            {{ isResetting ? '重置中...' : '确认重置' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -440,5 +532,112 @@ const onGeminiModeChange = () => {
 
 .gemini-mode-toggle:hover {
   color: rgba(255, 248, 220, 0.8);
+}
+
+.reset-btn {
+  background: linear-gradient(135deg, rgba(139, 40, 40, 0.4) 0%, rgba(160, 50, 50, 0.5) 100%);
+  border-color: rgba(220, 80, 80, 0.4);
+}
+
+.reset-btn:hover {
+  background: linear-gradient(135deg, rgba(200, 60, 60, 0.5) 0%, rgba(180, 40, 40, 0.6) 100%);
+  border-color: rgba(255, 100, 100, 0.6);
+  box-shadow: 0 6px 20px rgba(200, 60, 60, 0.3);
+}
+
+.reset-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  backdrop-filter: blur(4px);
+}
+
+.reset-modal {
+  background: linear-gradient(135deg, #2a1f1f 0%, #1a1215 100%);
+  border: 1px solid rgba(220, 80, 80, 0.4);
+  border-radius: 12px;
+  padding: 28px 32px;
+  max-width: 420px;
+  width: 90%;
+  color: rgba(255, 240, 240, 0.9);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+}
+
+.reset-modal h3 {
+  margin: 0 0 16px 0;
+  font-size: 1.3rem;
+  color: rgba(255, 180, 180, 0.95);
+}
+
+.reset-modal p {
+  margin: 0 0 12px 0;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: rgba(255, 220, 220, 0.8);
+}
+
+.reset-modal input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid rgba(220, 80, 80, 0.3);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  color: rgba(255, 240, 240, 0.9);
+  font-size: 1rem;
+  outline: none;
+  box-sizing: border-box;
+  margin-bottom: 20px;
+  transition: border-color 0.3s ease;
+}
+
+.reset-modal input:focus {
+  border-color: rgba(220, 80, 80, 0.6);
+}
+
+.reset-modal input:disabled {
+  opacity: 0.5;
+}
+
+.reset-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.reset-modal-actions button {
+  padding: 8px 20px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 240, 240, 0.8);
+  cursor: pointer;
+  font-size: 0.95rem;
+  transition: all 0.3s ease;
+}
+
+.reset-modal-actions button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.reset-modal-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.reset-confirm-btn {
+  background: rgba(200, 60, 60, 0.4) !important;
+  border-color: rgba(220, 80, 80, 0.5) !important;
+  color: rgba(255, 200, 200, 0.95) !important;
+}
+
+.reset-confirm-btn:hover:not(:disabled) {
+  background: rgba(200, 60, 60, 0.6) !important;
 }
 </style>
