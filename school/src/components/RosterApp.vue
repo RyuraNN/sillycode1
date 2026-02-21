@@ -178,13 +178,16 @@ let zoomScale = 1
 const MIN_ZOOM = 0.3, MAX_ZOOM = 3
 let mouseDownX = 0, mouseDownY = 0
 const isGrabbing = ref(false)
+let lastDragX = 0, lastDragY = 0
+let lastDragTime = 0
+let dragVelocityX = 0, dragVelocityY = 0
 
 // 力导向参数
 const REPULSION = 8000
-const SPRING_K = 0.005
-const SPRING_LEN = 160
+const SPRING_K = 0.008
+const SPRING_LEN = 200
 const DAMPING = 0.85
-const CENTER_GRAVITY = 0.01
+const CENTER_GRAVITY = 0.003
 const MAX_VELOCITY = 8
 
 // 构建名册白名单
@@ -252,7 +255,7 @@ const initNetworkData = () => {
     const count = neighbors.length
     neighbors.forEach((name, i) => {
         const angle = (2 * Math.PI * i) / count
-        const r = SPRING_LEN + 20
+        const r = SPRING_LEN * 1.2
         const rel = focusRelations[name] || getCharRelations(name)[focusName]
         const score = rel ? calculateRelationshipScore(rel) : 0
         const npcGender = gameStore.npcRelationships[name]?.gender || 'unknown'
@@ -531,6 +534,53 @@ const drawNetwork = () => {
     }
 
     netCtx.restore()
+
+    // 离屏焦点箭头指示器
+    const focusNode = netNodes.find(n => n.isFocus)
+    if (focusNode) {
+        const sx = cx + panOffsetX + focusNode.x * zoomScale
+        const sy = cy + panOffsetY + focusNode.y * zoomScale
+        const margin = 40
+        if (sx < -20 || sx > width + 20 || sy < -20 || sy > height + 20) {
+            const dx = sx - cx, dy = sy - cy
+            const angle = Math.atan2(dy, dx)
+            let edgeX = cx, edgeY = cy
+            const cosA = Math.cos(angle), sinA = Math.sin(angle)
+            const tRight = cosA > 0 ? (width - margin - cx) / cosA : Infinity
+            const tLeft = cosA < 0 ? (margin - cx) / cosA : Infinity
+            const tBottom = sinA > 0 ? (height - margin - cy) / sinA : Infinity
+            const tTop = sinA < 0 ? (margin - cy) / sinA : Infinity
+            const t = Math.min(
+                tRight > 0 ? tRight : Infinity,
+                tLeft > 0 ? tLeft : Infinity,
+                tBottom > 0 ? tBottom : Infinity,
+                tTop > 0 ? tTop : Infinity
+            )
+            if (t < Infinity) { edgeX = cx + cosA * t; edgeY = cy + sinA * t }
+            netCtx.save()
+            netCtx.translate(edgeX, edgeY)
+            netCtx.rotate(angle)
+            const arrowSize = 12
+            netCtx.globalAlpha = 0.3
+            netCtx.beginPath()
+            netCtx.arc(0, 0, arrowSize + 4, 0, Math.PI * 2)
+            netCtx.fillStyle = '#FFD700'
+            netCtx.fill()
+            netCtx.globalAlpha = 0.9
+            netCtx.beginPath()
+            netCtx.moveTo(arrowSize, 0)
+            netCtx.lineTo(-arrowSize / 2, -arrowSize / 2)
+            netCtx.lineTo(-arrowSize / 2, arrowSize / 2)
+            netCtx.closePath()
+            netCtx.fillStyle = '#FFD700'
+            netCtx.fill()
+            netCtx.strokeStyle = 'rgba(0,0,0,0.2)'
+            netCtx.lineWidth = 1
+            netCtx.stroke()
+            netCtx.restore()
+        }
+    }
+
     netAnimId = requestAnimationFrame(drawNetwork)
 }
 
@@ -576,6 +626,10 @@ const handleStart = (e) => {
         dragNode = hit
         dragNode.pinned = true
         isGrabbing.value = true
+        const { x, y } = screenToGraph(clientX, clientY)
+        lastDragX = x; lastDragY = y
+        lastDragTime = performance.now()
+        dragVelocityX = 0; dragVelocityY = 0
     } else {
         isPanning = true
         lastPanX = clientX
@@ -590,6 +644,14 @@ const handleMove = (e) => {
 
     if (dragNode) {
         const { x, y } = screenToGraph(clientX, clientY)
+        const now = performance.now()
+        const dt = now - lastDragTime
+        if (dt > 0) {
+            const alpha = 0.4
+            dragVelocityX = alpha * (x - lastDragX) / (dt / 16) + (1 - alpha) * dragVelocityX
+            dragVelocityY = alpha * (y - lastDragY) / (dt / 16) + (1 - alpha) * dragVelocityY
+        }
+        lastDragX = x; lastDragY = y; lastDragTime = now
         dragNode.x = x
         dragNode.y = y
         dragNode.vx = 0
@@ -621,7 +683,13 @@ const handleEnd = (e) => {
     }
 
     if (dragNode) {
-        dragNode.pinned = false
+        const timeSinceLastMove = performance.now() - lastDragTime
+        if (timeSinceLastMove < 150) {
+            const maxFlick = MAX_VELOCITY * 2
+            dragNode.vx = Math.max(-maxFlick, Math.min(maxFlick, dragVelocityX))
+            dragNode.vy = Math.max(-maxFlick, Math.min(maxFlick, dragVelocityY))
+        }
+        if (!dragNode.isFocus) dragNode.pinned = false
         dragNode = null
     }
     isPanning = false
@@ -656,12 +724,10 @@ const startNetwork = () => {
 
 // watch: 切换角色时重建图（焦点过滤）
 watch(selectedCharName, async (newVal) => {
+    if (!newVal) return
     await nextTick()
-    if (netNodes.length === 0) {
-        startNetwork()
-    } else {
-        initNetworkData()
-    }
+    await nextTick()
+    startNetwork()
 })
 
 // watch: 数据变化时重建图
