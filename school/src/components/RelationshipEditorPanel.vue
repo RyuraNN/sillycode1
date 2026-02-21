@@ -1,6 +1,6 @@
 <!-- 关系编辑器面板 - 左右分栏布局 -->
 <template>
-  <div class="rel-editor-panel">
+  <div class="rel-editor-panel" :class="{ 'has-selection': !!selectedChar }">
     <!-- 左侧：角色列表 -->
     <div class="left-panel">
       <div class="panel-toolbar">
@@ -38,6 +38,7 @@
         <!-- 角色信息头 -->
         <div class="char-header">
           <div class="char-info">
+            <button class="btn-back-mobile" @click="selectedChar = ''">←</button>
             <span class="gender-icon large">{{ selectedCharData.gender === 'male' ? '♂' : selectedCharData.gender === 'female' ? '♀' : '?' }}</span>
             <h3>{{ selectedChar }}</h3>
             <span class="rel-count">{{ selectedRelations.length }} 条关系</span>
@@ -507,4 +508,56 @@ function getBarStyle(axisKey, val) {
   border-bottom: 1px solid #333; flex-shrink: 0;
 }
 .ghost-notice p { margin: 0; }
+
+/* 宽屏隐藏返回按钮 */
+.btn-back-mobile { display: none; }
+
+@media (max-width: 768px) {
+  .rel-editor-panel { flex-direction: column; }
+
+  .left-panel {
+    width: 100%; min-width: unset;
+    border-right: none; border-bottom: 1px solid #444;
+  }
+
+  .right-panel { min-height: 0; }
+
+  /* 选中角色后：隐藏列表，详情全屏 */
+  .rel-editor-panel.has-selection .left-panel { display: none; }
+
+  /* 返回按钮 */
+  .btn-back-mobile {
+    display: inline-flex; align-items: center;
+    background: none; border: 1px solid #444; color: #ccc;
+    padding: 4px 10px; border-radius: 5px; cursor: pointer;
+    font-size: 13px; margin-right: 4px;
+  }
+  .btn-back-mobile:hover { background: #333; color: #fff; }
+
+  /* 角色信息头纵向 */
+  .char-header { flex-direction: column; align-items: flex-start; padding: 10px 12px; }
+  .char-info { width: 100%; }
+  .char-info h3 { font-size: 16px; }
+
+  /* 操作按钮 2×2 网格 */
+  .char-actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .btn-action { font-size: 11px; padding: 6px 8px; text-align: center; }
+
+  /* 工具栏和列表紧凑化 */
+  .rel-toolbar { padding: 6px 10px; }
+  .rel-list { padding: 6px 10px; }
+  .rel-card { padding: 8px 10px; }
+  .rel-card-header { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .rel-card-actions { align-self: flex-end; margin-top: -20px; }
+
+  /* 数值条标签 */
+  .axis-label { width: 28px; font-size: 10px; }
+
+  /* 搜索栏 */
+  .panel-toolbar { padding: 8px; gap: 4px; }
+  .filter-select { max-width: 100px; font-size: 11px; }
+
+  /* 反向关系 */
+  .reverse-section { padding: 6px 10px; }
+}
 </style>

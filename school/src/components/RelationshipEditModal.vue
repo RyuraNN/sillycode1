@@ -282,4 +282,34 @@ function handleSave() {
   border-radius: 6px; cursor: pointer; font-size: 14px;
 }
 .btn-cancel:hover { background: #555; }
+
+@media (max-width: 768px) {
+  .rel-edit-modal {
+    width: 100%; max-width: 100%; max-height: 100vh;
+    height: 100vh; border-radius: 0;
+  }
+  .modal-header { padding: 12px 14px; }
+  .modal-header h3 { font-size: 16px; }
+  .modal-body { padding: 12px 14px; }
+  .form-section { padding: 10px; margin-bottom: 10px; }
+  .char-pair { flex-wrap: wrap; }
+  .target-select { width: 100%; flex: unset; }
+
+  /* 滑块触控优化 */
+  .axis-slider { height: 8px; }
+  .axis-slider::-webkit-slider-thumb { width: 22px; height: 22px; }
+
+  /* 分组复选框触控区 */
+  .group-checkbox { padding: 6px 10px; font-size: 13px; }
+
+  /* 标签输入 */
+  .tag-input-row { flex-direction: column; gap: 8px; }
+  .tag-input-row input { padding: 10px; font-size: 14px; }
+  .btn-add-tag { padding: 10px; font-size: 14px; }
+
+  /* 底部按钮 */
+  .modal-footer { padding: 12px 14px; }
+  .btn-save, .btn-cancel { padding: 12px 20px; font-size: 15px; }
+  .btn-save { flex: 1; }
+}
 </style>
