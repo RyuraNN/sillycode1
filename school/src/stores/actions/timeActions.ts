@@ -75,8 +75,13 @@ export const timeActions = {
       // 更新NPC位置（每小时更新一次，内部有缓存机制）
       this.updateNpcLocations()
 
-      const delivered = this.checkDeliveries()
-      if (delivered && delivered.length > 0) {
+      let delivered: any[] = []
+      try {
+        delivered = this.checkDeliveries() || []
+      } catch (e) {
+        console.error('[GameStore] Error checking deliveries:', e)
+      }
+      if (delivered.length > 0) {
         delivered.forEach((order: any) => {
           const itemNames = order.items.map((i: any) => i.productName).join(', ')
           this.addCommand(`[系统] 外卖已送达: ${itemNames}`)

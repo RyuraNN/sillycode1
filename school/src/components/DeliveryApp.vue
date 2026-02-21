@@ -94,29 +94,25 @@ const deliveryTimeOptions = computed(() => {
   const options = []
   const { year, month, day, hour } = gameStore.gameTime
   const minHours = earliestDeliveryHours.value
-  
-  // 从最小送达时间开始，生成24个可选时间点
+
   for (let i = 0; i < 24; i++) {
     const totalHours = minHours + i
-    let targetHour = hour + totalHours
-    let targetDay = day
-    
-    while (targetHour >= 24) {
-      targetHour -= 24
-      targetDay++
-    }
-    
-    // 只显示 8:00-22:00 的时间
-    if (targetHour >= 8 && targetHour <= 22) {
-      const dayLabel = targetDay === day ? '今天' : (targetDay === day + 1 ? '明天' : `${targetDay}日`)
+    const target = new Date(year, month - 1, day, hour + totalHours, 0)
+    const tYear = target.getFullYear()
+    const tMonth = target.getMonth() + 1
+    const tDay = target.getDate()
+    const tHour = target.getHours()
+
+    if (tHour >= 8 && tHour <= 22) {
+      const dayDiff = Math.round((target.getTime() - new Date(year, month - 1, day).getTime()) / 86400000)
+      const dayLabel = dayDiff === 0 ? '今天' : (dayDiff === 1 ? '明天' : `${tMonth}月${tDay}日`)
       options.push({
-        label: `${dayLabel} ${String(targetHour).padStart(2, '0')}:00`,
-        value: { day: targetDay, hour: targetHour }
+        label: `${dayLabel} ${String(tHour).padStart(2, '0')}:00`,
+        value: { year: tYear, month: tMonth, day: tDay, hour: tHour }
       })
     }
   }
-  
-  return options.slice(0, 12) // 最多显示12个选项
+  return options.slice(0, 12)
 })
 
 // 点击商品
@@ -173,7 +169,13 @@ const openOrderPanel = () => {
 // 确认下单
 const confirmOrder = () => {
   if (!selectedDeliveryTime.value) return
-  
+
+  // 余额二次校验
+  if (cartTotal.value > gameStore.player.money) {
+    alert('余额不足，无法下单！')
+    return
+  }
+
   // 扣款
   gameStore.player.money -= cartTotal.value
   
@@ -425,9 +427,9 @@ const doDrag = (e) => {
         <div class="delivery-time-list">
           <div 
             v-for="option in deliveryTimeOptions" 
-            :key="`${option.value.day}-${option.value.hour}`"
+            :key="`${option.value.year}-${option.value.month}-${option.value.day}-${option.value.hour}`"
             class="time-option"
-            :class="{ selected: selectedDeliveryTime?.day === option.value.day && selectedDeliveryTime?.hour === option.value.hour }"
+            :class="{ selected: selectedDeliveryTime?.year === option.value.year && selectedDeliveryTime?.month === option.value.month && selectedDeliveryTime?.day === option.value.day && selectedDeliveryTime?.hour === option.value.hour }"
             @click="selectedDeliveryTime = option.value"
           >
             {{ option.label }}
@@ -438,7 +440,7 @@ const doDrag = (e) => {
           <div class="order-summary">
             <div>商品总计：¥{{ cartTotal }}</div>
             <div v-if="selectedDeliveryTime">
-              送达时间：{{ deliveryTimeOptions.find(o => o.value.day === selectedDeliveryTime.day && o.value.hour === selectedDeliveryTime.hour)?.label }}
+              送达时间：{{ deliveryTimeOptions.find(o => o.value.year === selectedDeliveryTime.year && o.value.month === selectedDeliveryTime.month && o.value.day === selectedDeliveryTime.day && o.value.hour === selectedDeliveryTime.hour)?.label }}
             </div>
           </div>
           <button 

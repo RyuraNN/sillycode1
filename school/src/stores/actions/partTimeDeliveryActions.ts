@@ -35,25 +35,33 @@ export const partTimeDeliveryActions = {
   checkDeliveries(this: any) {
     const { year, month, day, hour } = this.gameTime
     const deliveredOrders: PendingDelivery[] = []
+    const currentTime = new Date(year, month - 1, day, hour, 0)
 
     for (let i = this.player.pendingDeliveries.length - 1; i >= 0; i--) {
       const order = this.player.pendingDeliveries[i]
       if (order.status === 'pending') {
-        const currentTime = new Date(year, month - 1, day, hour, 0)
-        
-        const orderYear = order.orderTime?.year || year
-        const orderMonth = order.orderTime?.month || month
-        const orderDate = new Date(orderYear, orderMonth - 1, order.deliveryTime.day, order.deliveryTime.hour, 0)
-        
-        const orderTimeDate = new Date(orderYear, orderMonth - 1, order.orderTime?.day || day, order.orderTime?.hour || hour, 0)
-        if (orderDate < orderTimeDate) {
-          orderDate.setMonth(orderDate.getMonth() + 1)
+        let deliveryDate: Date
+
+        if (order.deliveryTime.year != null && order.deliveryTime.month != null) {
+          // 新格式：完整绝对时间
+          deliveryDate = new Date(
+            order.deliveryTime.year, order.deliveryTime.month - 1,
+            order.deliveryTime.day, order.deliveryTime.hour, 0
+          )
+        } else {
+          // 旧格式兼容：用 orderTime 的 year/month 作基准，Date 自动归一化处理 day 溢出
+          const baseYear = order.orderTime?.year || year
+          const baseMonth = order.orderTime?.month || month
+          deliveryDate = new Date(
+            baseYear, baseMonth - 1,
+            order.deliveryTime.day, order.deliveryTime.hour, 0
+          )
         }
-        
-        if (currentTime >= orderDate) {
+
+        if (currentTime >= deliveryDate) {
           order.status = 'delivered'
           deliveredOrders.push(order)
-          
+
           for (const item of order.items) {
             this.addItem({
               id: item.productId,
@@ -69,12 +77,12 @@ export const partTimeDeliveryActions = {
               productData: item.product
             })
           }
-          
+
           this.player.pendingDeliveries.splice(i, 1)
         }
       }
     }
-    
+
     return deliveredOrders
   },
 

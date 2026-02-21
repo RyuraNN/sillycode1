@@ -100,6 +100,8 @@ export interface PendingDelivery {
     hour: number
   }
   deliveryTime: {
+    year?: number
+    month?: number
     day: number
     hour: number
   }
