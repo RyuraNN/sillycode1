@@ -10,6 +10,8 @@ import { saveRosterBackup, saveFullCharacterPool } from '../utils/indexedDB'
 import { updateClassDataInWorldbook, updateAcademicDataInWorldbook, updateStaffRosterInWorldbook, ensureClubExistsInWorldbook, syncClubWorldbookState } from '../utils/worldbookParser'
 import { saveSocialData } from '../utils/socialRelationshipsWorldbook'
 import { saveImpressionDataImmediate } from '../utils/impressionWorldbook'
+import { getRelationship, setRelationship, removeRelationship, removeCharacter as removeCharacterFromRelations, flushPendingSocialData } from '../utils/relationshipManager'
+import { RELATIONSHIP_GROUPS } from '../data/relationshipData'
 
 // 导入子组件
 import BatchCompleteModal from './BatchCompleteModal.vue'
@@ -25,6 +27,8 @@ import MapEditorPanel from './MapEditorPanel.vue'
 import WorldbookSyncPanel from './WorldbookSyncPanel.vue'
 import ClubEditorPanel from './ClubEditorPanel.vue'
 import ClubEditModal from './ClubEditModal.vue'
+import RelationshipEditorPanel from './RelationshipEditorPanel.vue'
+import RelationshipEditModal from './RelationshipEditModal.vue'
 import { getItem } from '../data/mapData'
 
 const emit = defineEmits(['close'])
@@ -68,7 +72,7 @@ const {
 } = useAIImport()
 
 // ==================== 状态管理 ====================
-const activeTab = ref('filter') // 'filter' | 'composer' | 'characterEditor' | 'clubEditor'
+const activeTab = ref('filter') // 'filter' | 'composer' | 'characterEditor' | 'clubEditor' | 'relationshipEditor'
 const filterSubTab = ref('student') // 'student' | 'teacher'
 const saving = ref(false)
 const isLocked = ref(false)
@@ -159,6 +163,24 @@ const clubEditForm = ref({
   customId: ''
 })
 const mapEditorContext = ref('class') // 'class' | 'club'
+
+// 关系编辑器状态
+const showRelationshipEditor = ref(false)
+const editingRelSource = ref('')
+const editingRelTarget = ref('')
+const relationshipEditForm = ref({
+  intimacy: 0, trust: 0, passion: 0, hostility: 0,
+  groups: [], tags: []
+})
+
+const relationshipAvailableTargets = computed(() => {
+  if (!editingRelSource.value || !gameStore.npcRelationships) return []
+  const charData = gameStore.npcRelationships[editingRelSource.value]
+  const existingTargets = new Set(Object.keys(charData?.relations || {}))
+  return Object.keys(gameStore.npcRelationships)
+    .filter(n => n !== editingRelSource.value && !existingTargets.has(n))
+    .sort((a, b) => a.localeCompare(b, 'zh'))
+})
 
 const clubLocationName = computed(() => {
   const locId = clubEditForm.value.location
@@ -1297,6 +1319,83 @@ const handleDeleteClub = async (clubId) => {
   showMessage(`社团"${club.name}"已删除`)
 }
 
+// ==================== 关系编辑器事件处理 ====================
+const handleEditRelationship = (source, target) => {
+  const rel = getRelationship(source, target)
+  if (!rel) return
+  editingRelSource.value = source
+  editingRelTarget.value = target
+  relationshipEditForm.value = {
+    intimacy: rel.intimacy ?? 0, trust: rel.trust ?? 0,
+    passion: rel.passion ?? 0, hostility: rel.hostility ?? 0,
+    groups: [...(rel.groups || [])], tags: [...(rel.tags || [])]
+  }
+  showRelationshipEditor.value = true
+}
+
+const handleAddRelationship = (source) => {
+  editingRelSource.value = source
+  editingRelTarget.value = ''
+  relationshipEditForm.value = {
+    intimacy: 0, trust: 0, passion: 0, hostility: 0, groups: [], tags: []
+  }
+  showRelationshipEditor.value = true
+}
+
+const handleSaveRelationship = async (formData) => {
+  const source = editingRelSource.value
+  const target = formData.targetName || editingRelTarget.value
+  if (!source || !target) return
+  setRelationship(source, target, {
+    intimacy: formData.intimacy, trust: formData.trust,
+    passion: formData.passion, hostility: formData.hostility,
+    groups: formData.groups, tags: formData.tags
+  })
+  await flushPendingSocialData()
+  showRelationshipEditor.value = false
+  showMessage(`关系 ${source} → ${target} 已保存`)
+}
+
+const handleDeleteRelationship = async (source, target) => {
+  if (!confirm(`确定删除 ${source} ↔ ${target} 的双向关系？`)) return
+  removeRelationship(source, target)
+  await flushPendingSocialData()
+  showMessage(`已删除 ${source} ↔ ${target} 的关系`)
+}
+
+const handleClearCharRelations = async (charName) => {
+  if (!confirm(`确定清空「${charName}」的所有关系数据？\n（保留性格/目标，仅清除关系列表）`)) return
+  const charData = gameStore.npcRelationships[charName]
+  if (charData) charData.relations = {}
+  // 清除其他角色对该角色的关系
+  for (const otherName in gameStore.npcRelationships) {
+    if (otherName === charName) continue
+    const otherRels = gameStore.npcRelationships[otherName]?.relations
+    if (otherRels?.[charName]) delete otherRels[charName]
+  }
+  await flushPendingSocialData()
+  await saveImpressionDataImmediate()
+  showMessage(`已清空「${charName}」的所有关系`)
+}
+
+const handleClearCharImpressions = async (charName) => {
+  if (!confirm(`确定清除所有角色对「${charName}」的印象标签？`)) return
+  for (const otherName in gameStore.npcRelationships) {
+    const rel = gameStore.npcRelationships[otherName]?.relations?.[charName]
+    if (rel && rel.tags) rel.tags = []
+  }
+  await flushPendingSocialData()
+  await saveImpressionDataImmediate()
+  showMessage(`已清除所有角色对「${charName}」的印象标签`)
+}
+
+const handleRemoveCharacter = async (charName) => {
+  if (!confirm(`⚠️ 确定完全移除「${charName}」？\n将从关系数据中彻底删除该角色及所有相关关系。`)) return
+  removeCharacterFromRelations(charName, true)
+  await flushPendingSocialData()
+  showMessage(`已移除角色「${charName}」`)
+}
+
 const handleSaveComposer = async () => {
   const classId = composerTargetClass.value
   if (!classId) return
@@ -1365,6 +1464,12 @@ const handleSaveComposer = async () => {
             @click="activeTab = 'clubEditor'"
           >
             🏫 社团编辑器
+          </button>
+          <button
+            :class="{ active: activeTab === 'relationshipEditor' }"
+            @click="activeTab = 'relationshipEditor'"
+          >
+            🔗 关系编辑器
           </button>
         </div>
 
@@ -1467,6 +1572,19 @@ const handleSaveComposer = async () => {
               @delete-club="handleDeleteClub"
             />
           </div>
+
+          <!-- 标签页5：关系编辑器 -->
+          <div v-if="activeTab === 'relationshipEditor'" class="tab-content">
+            <RelationshipEditorPanel
+              :npc-relationships="gameStore.npcRelationships"
+              @edit-relationship="handleEditRelationship"
+              @delete-relationship="handleDeleteRelationship"
+              @add-relationship="handleAddRelationship"
+              @clear-char-relations="handleClearCharRelations"
+              @clear-char-impressions="handleClearCharImpressions"
+              @remove-character="handleRemoveCharacter"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -1535,6 +1653,18 @@ const handleSaveComposer = async () => {
       @close="showClubEditor = false"
       @save="handleSaveClub"
       @select-location="handleClubSelectLocation"
+    />
+
+    <RelationshipEditModal
+      :show="showRelationshipEditor"
+      :source-name="editingRelSource"
+      :target-name="editingRelTarget"
+      v-model:form="relationshipEditForm"
+      :is-editing="!!editingRelTarget"
+      :available-characters="relationshipAvailableTargets"
+      :relationship-groups="RELATIONSHIP_GROUPS"
+      @close="showRelationshipEditor = false"
+      @save="handleSaveRelationship"
     />
 
     <MapEditorPanel
