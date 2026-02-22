@@ -36,6 +36,7 @@
                 <option value="student">学生</option>
                 <option value="teacher">教师</option>
                 <option value="staff">职工</option>
+                <option value="external">校外人员</option>
               </select>
             </div>
           </div>
@@ -114,6 +115,28 @@
             <div class="form-row">
               <label>工作地点</label>
               <input v-model="localForm.workplace" placeholder="如：医务室、门卫室" />
+            </div>
+          </div>
+
+          <!-- 校外人员专属 -->
+          <div v-if="localForm.role === 'external'" class="form-section">
+            <h4>校外人员信息</h4>
+            <div class="form-row">
+              <label>职业/身份</label>
+              <input v-model="localForm.staffTitle" placeholder="如：咖啡店店员、书店老板" />
+            </div>
+            <div class="form-row">
+              <label>活动中心（工作地点）</label>
+              <div class="workplace-selector">
+                <span class="workplace-display">{{ localForm.workplace || '未选择' }}</span>
+                <button type="button" class="btn-map-select" @click="openWorkplaceMapEditor">
+                  📍 选择地点
+                </button>
+              </div>
+            </div>
+            <div class="form-row">
+              <label>日程模板</label>
+              <input v-model="localForm.scheduleTag" placeholder="留空使用默认 (external_normal)" />
             </div>
           </div>
 
@@ -242,7 +265,7 @@ const props = defineProps({
   classes: Object
 })
 
-const emit = defineEmits(['close', 'save', 'update:form'])
+const emit = defineEmits(['close', 'save', 'update:form', 'select-workplace'])
 
 const localForm = computed({
   get: () => props.form,
@@ -269,6 +292,10 @@ const toggleTrait = (traitKey) => {
   } else {
     traits.push(traitKey)
   }
+}
+
+const openWorkplaceMapEditor = () => {
+  emit('select-workplace')
 }
 
 const handleSave = () => {
@@ -494,5 +521,36 @@ const handleSave = () => {
 
 .btn-secondary:hover {
   background: #555;
+}
+
+.workplace-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workplace-display {
+  flex: 1;
+  padding: 6px 10px;
+  background: #333;
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: #ccc;
+  font-size: 13px;
+}
+
+.btn-map-select {
+  padding: 6px 12px;
+  background: #4a6fa5;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.btn-map-select:hover {
+  background: #5a7fb5;
 }
 </style>

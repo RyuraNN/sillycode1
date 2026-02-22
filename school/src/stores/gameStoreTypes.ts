@@ -157,19 +157,22 @@ export interface ProductStock {
 /** 总结数据 */
 export interface SummaryData {
   floor: number
-  type: 'minor' | 'major' | 'super'
+  type: 'minor' | 'major' | 'super' | 'diary'  // diary: 每日日记，保留 major/super 兼容旧数据
   content: string
   coveredFloors: number[]
   timestamp: number
+  gameDate?: string  // 'YYYY-MM-DD' 格式，diary 必填，minor 建议填
 }
 
 /** 总结系统设置 */
 export interface SummarySystemSettings {
   enabled: boolean
   minorSummaryStartFloor: number
-  majorSummaryStartFloor: number
-  minorCountForMajor: number
-  majorCountForSuper: number
+  // 保留旧字段兼容（不删除，不再用于新生成）
+  majorSummaryStartFloor?: number
+  minorCountForMajor?: number
+  majorCountForSuper?: number
+  enableSuperSummary?: boolean
   useAssistantForSummary?: boolean
 }
 
@@ -470,7 +473,7 @@ export interface NpcStats {
   isAlive: boolean
   aliveRemaining?: number
   location: string
-  role?: 'student' | 'teacher' | 'staff' | 'other'
+  role?: 'student' | 'teacher' | 'staff' | 'external' | 'other'
   staffTitle?: string
   workplace?: string
   mood?: NpcMoodType
@@ -563,7 +566,7 @@ export interface SchoolRule {
   status: 'active' | 'paused'   // 生效/暂停
   targets: {
     gender: ('male' | 'female')[]           // 性别适用范围
-    roles: ('student' | 'teacher' | 'staff')[]  // 角色类型适用范围
+    roles: ('student' | 'teacher' | 'staff' | 'external')[]  // 角色类型适用范围
   }
   createdAt: number             // 创建时间戳
   createdFloor: number          // 创建时的聊天楼层

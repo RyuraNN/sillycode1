@@ -1344,6 +1344,63 @@ export const DEFAULT_TEMPLATES = {
       { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
       { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
     ]
+  },
+  external_normal: {
+    id: 'external_normal',
+    name: '校外人员',
+    slots: [
+      // 工作日：以 {workplace} 为中心
+      { period: 'early_morning', weekdays: ['weekday'], locations: [
+        { id: 'home', weight: 80 }, { id: '{workplace}', weight: 20 }
+      ]},
+      { period: 'morning', weekdays: ['weekday'], locations: [
+        { id: '{workplace}', weight: 90 }, { id: 'home', weight: 10 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekday'], locations: [
+        { id: '{workplace}', weight: 95 }, { id: 'shopping_street', weight: 5 }
+      ]},
+      { period: 'lunch', weekdays: ['weekday'], locations: [
+        { id: '{workplace}', weight: 40 }, { id: 'cafeteria', weight: 20 },
+        { id: 'convenience_store', weight: 20 }, { id: 'shopping_street', weight: 20 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekday'], locations: [
+        { id: '{workplace}', weight: 95 }, { id: 'shopping_street', weight: 5 }
+      ]},
+      { period: 'club_time', weekdays: ['weekday'], locations: [
+        { id: '{workplace}', weight: 60 }, { id: 'shopping_street', weight: 20 },
+        { id: 'home', weight: 20 }
+      ]},
+      // 周末：休闲为主
+      { period: 'early_morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 100 }
+      ]},
+      { period: 'morning', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 60 }, { id: 'shopping_street', weight: 40 }
+      ]},
+      { period: 'morning_class', weekdays: ['weekend'], locations: [
+        { id: 'shopping_street', weight: 30 }, { id: '{workplace}', weight: 30 },
+        { id: 'central_park', weight: 20 }, { id: 'home', weight: 20 }
+      ]},
+      { period: 'lunch', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 40 }, { id: 'shopping_street', weight: 30 },
+        { id: 'cafe_maisy', weight: 30 }
+      ]},
+      { period: 'afternoon_class', weekdays: ['weekend'], locations: [
+        { id: 'shopping_street', weight: 30 }, { id: 'central_park', weight: 20 },
+        { id: 'home', weight: 30 }, { id: '{workplace}', weight: 20 }
+      ]},
+      { period: 'club_time', weekdays: ['weekend'], locations: [
+        { id: 'home', weight: 50 }, { id: 'shopping_street', weight: 30 },
+        { id: 'cafe_maisy', weight: 20 }
+      ]},
+      // 通用
+      { period: 'evening', weekdays: ['all'], locations: [
+        { id: 'home', weight: 60 }, { id: 'shopping_street', weight: 30 },
+        { id: '{workplace}', weight: 10 }
+      ]},
+      { period: 'night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] },
+      { period: 'late_night', weekdays: ['all'], locations: [{ id: 'home', weight: 100 }] }
+    ]
   }
 }
 
@@ -1354,6 +1411,7 @@ export const DEFAULT_ROLE_TEMPLATE_MAP = {
   student: 'student_normal',
   teacher: 'teacher',
   staff: 'staff_normal',
+  external: 'external_normal',
   other: 'student_normal'
 }
 

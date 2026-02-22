@@ -55,6 +55,8 @@ export function useBatchComplete() {
         if (Array.isArray(classInfo.teachers)) candidates.push(...classInfo.teachers)
         if (Array.isArray(classInfo.students)) candidates.push(...classInfo.students)
       }
+    } else if (mode === 'external') {
+      candidates = characterPool.filter(c => c.role === 'external')
     } else if (mode === 'all') {
       candidates = [...characterPool]
     }
@@ -78,7 +80,12 @@ export function useBatchComplete() {
     if (options.personality) requestDesc += `- 性格四维倾向 (order/altruism/tradition/peace)\n`
     if (options.relationships) requestDesc += `- 与其他角色的关系 (relationships)\n`
 
-    let charListStr = chars.map(c => `- ${c.name} (${c.origin || '未知作品'}) [身份: ${c.role === 'teacher' ? '教师' : '学生'}]`).join('\n')
+    const roleMap = { student: '学生', teacher: '教师', staff: '职工', external: '校外人员' }
+    let charListStr = chars.map(c => {
+      const roleLabel = roleMap[c.role] || c.role || '未知'
+      const extra = c.staffTitle ? ` 职务:${c.staffTitle}` : ''
+      return `- ${c.name} (${c.origin || '未知作品'}) [身份: ${roleLabel}${extra}]`
+    }).join('\n')
 
     return `你是一个角色数据补全助手。请根据提供的角色列表，基于其原作设定补充完整的详细属性。
 

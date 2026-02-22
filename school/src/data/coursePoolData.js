@@ -1390,7 +1390,7 @@ export function registerCustomCourse(courseData) {
     name: courseData.name,
     teacher: courseData.teacher,
     teacherGender: courseData.teacherGender || 'female',
-    origin: '玩家自定义',
+    origin: courseData.origin || '玩家自定义',
     location: courseData.location || 'classroom', // 使用传入的location
     type: courseData.type, // 'required' | 'elective'
     availableFor: [],

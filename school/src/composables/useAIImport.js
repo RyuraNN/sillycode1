@@ -57,11 +57,12 @@ export function useAIImport() {
 5. 选课倾向可选值：${prefKeys}
 6. 日程模板可选值：${templateKeys}
 7. 关系中的数值范围：intimacy(亲密度,0~100), trust(信赖度,0~100), passion(激情度,0~100), hostility(敌意度,0~100)
-8. 角色分类建议：请根据角色在原作中的年龄、职业和身份，给出 role_suggestion (student/teacher/staff/uncertain) 和 role_reason (理由)。
+8. 角色分类建议：请根据角色在原作中的年龄、职业和身份，给出 role_suggestion (student/teacher/staff/external/uncertain) 和 role_reason (理由)。
+   - external: 不属于学校的角色（如商店店员、邻居等）
 9. 学力评估：level(${academicLevelKeys}), potential(${academicPotentialKeys}), traits(${traitKeys})
 
 [返回格式 - 查询特定角色]
-<roster_character name="角色名" work="作品名" found="true" gender="male或female" role_suggestion="student/teacher/staff/uncertain" role_reason="理由">
+<roster_character name="角色名" work="作品名" found="true" gender="male或female" role_suggestion="student/teacher/staff/external/uncertain" role_reason="理由" workplace_suggestion="工作地点建议" staff_title="职务头衔">
   <personality order="数值" altruism="数值" tradition="数值" peace="数值" />
   <academic level="等级" potential="潜力" traits="特长标签,逗号分隔" />
   <elective_preference>类型</elective_preference>
@@ -173,6 +174,8 @@ ${querySection}`
         gender: attrs.gender || 'female',
         roleSuggestion: attrs.role_suggestion || 'student',
         roleReason: attrs.role_reason || '',
+        workplaceSuggestion: attrs.workplace_suggestion || '',
+        staffTitle: attrs.staff_title || '',
         personality,
         academicProfile,
         electivePreference,

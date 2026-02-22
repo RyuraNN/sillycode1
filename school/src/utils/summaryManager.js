@@ -52,20 +52,40 @@ const MAJOR_SUMMARY_PROMPT = `[任务：合并小总结]
 请用以下格式输出（必须严格遵循格式）：
 <major_summary>你的合并总结</major_summary>`
 
-const SUPER_SUMMARY_PROMPT = `[任务：合并大总结]
-请将以下多个大总结合并为一个超精简版本。
+
+const DIARY_PROMPT = `[任务：生成每日日记]
+请将以下某一天内的所有剧情小总结，整理成一篇结构化的每日日记。
 
 要求：
-1. 只保留最关键的剧情转折点
-2. 高度压缩信息
-3. 字数控制在200字以内
-4. 直接输出总结内容，不要添加任何前言或解释
+1. 按事件组织内容（而非按楼层顺序），将属于同一事件的内容合并为一段
+2. 每个事件块包含：时间段、地点、涉及人物、事件经过、关系变化（如有）
+3. 事件按时间顺序排列
+4. 记录所有关键剧情转折、情感变化、重要对话要点，不要遗漏
+5. 合并重复信息，删除无意义的过渡描述
+6. 直接输出日记内容，不要添加任何前言或解释
 
-待合并的大总结：
+日期：{date}
+
+该日的剧情小总结（按时间顺序）：
 {summaries}
 
 请用以下格式输出（必须严格遵循格式）：
-<super_summary>你的超级总结</super_summary>`
+<diary>
+{date}
+
+## [事件标题1]
+时间：[具体时间段]
+地点：[地点]
+人物：[涉及角色]
+经过：[事件描述]
+关系变化：[如有变化则记录]
+
+## [事件标题2]
+...
+
+## 当日要点
+- [当天最重要的信息/转折/关系变化]
+</diary>`
 
 /**
  * 清理内容中的图片相关标签（用于发送给AI处理）
@@ -93,7 +113,8 @@ const INSTRUCTION_TAGS = [
   'add_calendar_event', 'event_involved',
   'add_item', 'remove_item', 'use_item',
   'update_impression', 'image', 'generate_image',
-  'minor_summary', 'major_summary', 'super_summary'
+  'minor_summary', 'major_summary', 'super_summary', 'diary',
+  'content'
 ]
 
 /**
@@ -157,7 +178,15 @@ export function removeThinking(content) {
     cleaned = cleaned.replace(regex, '')
   }
 
-  // 第三轮：清理孤立的闭合标签（思维块内未闭合指令标签的残留）
+  // 第三轮（新增）：移除孤立的闭合思维标签及其之前的内容
+  // 场景：后端只输出 </think> 而没有 <think>，此时 </think> 之前的所有内容都是思维链
+  for (const tag of THINKING_TAGS) {
+    const escapedTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const regex = new RegExp(`^[\\s\\S]*?<\\/${escapedTag}>`, 'gi')
+    cleaned = cleaned.replace(regex, '')
+  }
+
+  // 第四轮：清理孤立的闭合标签（思维块内未闭合指令标签的残留）
   cleaned = removeOrphanedClosingTags(cleaned)
 
   return cleaned.trim()
@@ -178,7 +207,8 @@ export function extractSummary(response, type) {
   const tagMap = {
     minor: 'minor_summary',
     major: 'major_summary',
-    super: 'super_summary'
+    super: 'super_summary',
+    diary: 'diary'
   }
   const tag = tagMap[type]
   if (!tag) return null
@@ -205,12 +235,15 @@ export async function generateMinorSummary(content, floor, useAssistant = true, 
 
   // 1. 如果有预生成的小总结，直接使用
   if (preGeneratedSummary) {
+    const { year, month, day } = gameStore.gameTime
+    const gameDate = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`
     const summary = {
       floor,
       type: 'minor',
       content: preGeneratedSummary,
       coveredFloors: [floor],
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      gameDate
     }
     addSummary(summary)
     console.log(`[SummaryManager] Using pre-generated minor summary for floor ${floor}`)
@@ -251,12 +284,15 @@ export async function generateMinorSummary(content, floor, useAssistant = true, 
       return { success: false, error: 'Failed to extract summary' }
     }
 
+    const { year, month, day } = gameStore.gameTime
+    const gameDate = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`
     const summary = {
       floor,
       type: 'minor',
       content: summaryContent,
       coveredFloors: [floor],
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      gameDate
     }
 
     // 保存到store
@@ -340,87 +376,6 @@ export async function generateMajorSummary(floors) {
 }
 
 /**
- * 生成超级总结（合并多个大总结或超级总结）
- * @param {number[]} sourceFloors 要合并的来源总结的floor标识列表
- * @param {'major' | 'super'} sourceType 来源类型
- * @returns {Promise<{success: boolean, summary?: object, error?: string}>}
- */
-export async function generateSuperSummary(sourceFloors, sourceType = 'major') {
-  const gameStore = useGameStore()
-  
-  if (!gameStore.settings.summarySystem?.enabled) {
-    return { success: false, error: 'Summary system is disabled' }
-  }
-
-  // 超级总结开关
-  if (gameStore.settings.summarySystem?.enableSuperSummary === false) {
-    return { success: false, error: 'Super summary is disabled' }
-  }
-
-  // 获取对应的来源总结
-  const sourceSummaries = gameStore.player.summaries
-    .filter(s => s.type === sourceType && sourceFloors.includes(s.floor))
-    .sort((a, b) => a.floor - b.floor)
-
-  if (sourceSummaries.length === 0) {
-    return { success: false, error: `No ${sourceType} summaries found for given floors` }
-  }
-
-  // 收集所有覆盖的原始楼层
-  const allCoveredFloors = []
-  sourceSummaries.forEach(s => {
-    allCoveredFloors.push(...s.coveredFloors)
-  })
-
-  const summariesText = sourceSummaries
-    .map((s, i) => `【楼层${s.coveredFloors[0]}-${s.coveredFloors[s.coveredFloors.length - 1]}】\n${s.content}`)
-    .join('\n\n')
-
-  const prompt = SUPER_SUMMARY_PROMPT.replace('{summaries}', summariesText)
-
-  try {
-    let response
-    
-    if (gameStore.settings.summarySystem.useAssistantForSummary) {
-      // 使用纯总结模式
-      response = await callAssistantAI(prompt, { systemPrompt: SUMMARY_AI_SYSTEM_PROMPT })
-    } else if (window.generate) {
-      response = await window.generate({
-        user_input: prompt,
-        should_silence: true,
-        max_chat_history: 0
-      })
-    } else {
-      response = `<super_summary>（Mock超级总结）合并了${sourceSummaries.length}个${sourceType}总结的内容。</super_summary>`
-    }
-
-    const summaryContent = extractSummary(response, 'super')
-    
-    if (!summaryContent) {
-      console.warn('[SummaryManager] Failed to extract super summary from response')
-      return { success: false, error: 'Failed to extract summary' }
-    }
-
-    const summary = {
-      floor: Math.max(...sourceFloors),
-      type: 'super',
-      content: summaryContent,
-      coveredFloors: [...new Set(allCoveredFloors)].sort((a, b) => a - b),
-      timestamp: Date.now()
-    }
-
-    // 保存到store
-    addSummary(summary)
-
-    console.log(`[SummaryManager] Generated super summary covering floors ${allCoveredFloors.join(', ')}`)
-    return { success: true, summary }
-  } catch (e) {
-    console.error('[SummaryManager] Error generating super summary:', e)
-    return { success: false, error: e.message }
-  }
-}
-
-/**
  * 添加总结到store
  * @param {object} summary 总结对象
  */
@@ -470,6 +425,171 @@ export function removeSummaryAtFloor(floor) {
     // 对于大/超级总结，如果包含该楼层，也需要删除
     return !s.coveredFloors.includes(floor)
   })
+}
+
+/**
+ * 检查哪些日期需要生成日记（有小总结但没有日记的历史日期）
+ * @param {string} currentGameDate 当前游戏日期 'YYYY-MM-DD'
+ * @returns {string[]} 需要生成日记的日期列表
+ */
+export function checkDiaryNeeded(currentGameDate) {
+  const gameStore = useGameStore()
+  const summaries = gameStore.player.summaries || []
+
+  // 收集所有有 gameDate 的 minor 总结的日期
+  const minorDates = new Set()
+  summaries.forEach(s => {
+    if (s.type === 'minor' && s.gameDate) {
+      minorDates.add(s.gameDate)
+    }
+  })
+
+  // 收集已有日记的日期
+  const diaryDates = new Set()
+  summaries.forEach(s => {
+    if (s.type === 'diary' && s.gameDate) {
+      diaryDates.add(s.gameDate)
+    }
+  })
+
+  // 找出有 minor 但没有 diary 且不是当天的日期
+  const needed = []
+  for (const date of minorDates) {
+    if (!diaryDates.has(date) && date < currentGameDate) {
+      needed.push(date)
+    }
+  }
+
+  return needed.sort()
+}
+
+/**
+ * 为指定游戏日期生成每日日记
+ * @param {string} gameDate 游戏日期 'YYYY-MM-DD'
+ * @returns {Promise<{success: boolean, summary?: object, error?: string}>}
+ */
+export async function generateDiary(gameDate) {
+  const gameStore = useGameStore()
+  const settings = gameStore.settings.summarySystem
+
+  if (!settings?.enabled) {
+    return { success: false, error: 'Summary system is disabled' }
+  }
+
+  // 日记依赖辅助 AI
+  if (!settings.useAssistantForSummary || !gameStore.settings.assistantAI?.enabled) {
+    return { success: false, error: 'Assistant AI is required for diary generation' }
+  }
+
+  // 检查是否已有该日期的日记
+  const existing = (gameStore.player.summaries || []).find(
+    s => s.type === 'diary' && s.gameDate === gameDate
+  )
+  if (existing) {
+    console.log(`[SummaryManager] Diary already exists for ${gameDate}, skipping`)
+    return { success: true, summary: existing }
+  }
+
+  // 收集该日期的所有 minor 总结
+  const dayMinors = (gameStore.player.summaries || [])
+    .filter(s => s.type === 'minor' && s.gameDate === gameDate)
+    .sort((a, b) => a.floor - b.floor)
+
+  if (dayMinors.length === 0) {
+    return { success: false, error: `No minor summaries found for ${gameDate}` }
+  }
+
+  // 拼接小总结文本
+  const summariesText = dayMinors
+    .map((s, i) => `【第${s.floor}楼】\n${s.content}`)
+    .join('\n\n')
+
+  const prompt = DIARY_PROMPT
+    .replace(/\{date\}/g, gameDate)
+    .replace('{summaries}', summariesText)
+
+  try {
+    const response = await callAssistantAI(prompt, { systemPrompt: SUMMARY_AI_SYSTEM_PROMPT })
+    const diaryContent = extractSummary(response, 'diary')
+
+    if (!diaryContent) {
+      console.warn('[SummaryManager] Failed to extract diary from response')
+      return { success: false, error: 'Failed to extract diary' }
+    }
+
+    const coveredFloors = dayMinors.map(s => s.floor)
+    const summary = {
+      floor: Math.max(...coveredFloors),
+      type: 'diary',
+      content: diaryContent,
+      coveredFloors,
+      timestamp: Date.now(),
+      gameDate
+    }
+
+    addSummary(summary)
+    console.log(`[SummaryManager] Generated diary for ${gameDate}, covering floors: ${coveredFloors.join(',')}`)
+    return { success: true, summary }
+  } catch (e) {
+    console.error(`[SummaryManager] Error generating diary for ${gameDate}:`, e)
+    return { success: false, error: e.message }
+  }
+}
+
+/**
+ * 批量生成所有缺失的日记（手动触发）
+ * @param {Function} [onProgress] 进度回调 (current, total, date)
+ * @returns {Promise<{generated: number, failed: number}>}
+ */
+export async function generateBatchDiaries(onProgress) {
+  const gameStore = useGameStore()
+  const summaries = gameStore.player.summaries || []
+
+  // 收集所有有 gameDate 的 minor 日期
+  const minorDates = new Set()
+  summaries.forEach(s => {
+    if (s.type === 'minor' && s.gameDate) {
+      minorDates.add(s.gameDate)
+    }
+  })
+
+  // 收集已有日记的日期
+  const diaryDates = new Set()
+  summaries.forEach(s => {
+    if (s.type === 'diary' && s.gameDate) {
+      diaryDates.add(s.gameDate)
+    }
+  })
+
+  // 找出所有缺失日记的日期
+  const needed = [...minorDates].filter(d => !diaryDates.has(d)).sort()
+
+  if (needed.length === 0) {
+    return { generated: 0, failed: 0 }
+  }
+
+  let generated = 0
+  let failed = 0
+
+  for (let i = 0; i < needed.length; i++) {
+    const date = needed[i]
+    if (onProgress) onProgress(i + 1, needed.length, date)
+
+    try {
+      const result = await generateDiary(date)
+      if (result.success) {
+        generated++
+      } else {
+        failed++
+        console.warn(`[SummaryManager] Failed to generate diary for ${date}:`, result.error)
+      }
+    } catch (e) {
+      failed++
+      console.error(`[SummaryManager] Error generating diary for ${date}:`, e)
+    }
+  }
+
+  return { generated, failed }
 }
 
 /**
@@ -547,148 +667,6 @@ export function getSummaryContent(floor, type) {
 }
 
 /**
- * 检查是否需要生成大总结
- * @param {number} currentFloor 当前楼层
- * @returns {{needed: boolean, floors?: number[]}}
- */
-export function checkMajorSummaryNeeded(currentFloor) {
-  const gameStore = useGameStore()
-  const settings = gameStore.settings.summarySystem
-  
-  if (!settings?.enabled || !settings.useAssistantForSummary) {
-    return { needed: false }
-  }
-  
-  // 获取所有小总结
-  const minorSummaries = gameStore.player.summaries
-    .filter(s => s.type === 'minor')
-    .sort((a, b) => a.floor - b.floor)
-  
-  // 获取已经被大总结覆盖的楼层
-  const coveredByMajor = new Set()
-  gameStore.player.summaries
-    .filter(s => s.type === 'major')
-    .forEach(s => s.coveredFloors.forEach(f => coveredByMajor.add(f)))
-  
-  // 找出未被覆盖的小总结，且必须已经超出保护范围（距离 > 25）
-  // 这样保证生成的“大总结”包含的所有内容都是已经可以显示的
-  const uncoveredMinors = minorSummaries.filter(s => {
-    if (coveredByMajor.has(s.floor)) return false
-    
-    // 检查距离：只有当小总结距离当前楼层超过 majorSummaryStartFloor 时，才认为它可以被合并
-    // 对应需求：等待小总结超出的层数大于5的时候再用大总结进行替换
-    const distance = currentFloor - s.floor
-    return distance >= settings.majorSummaryStartFloor
-  })
-  
-  if (uncoveredMinors.length >= settings.minorCountForMajor) {
-    // 取最老的 N 个小总结进行合并
-    const toMerge = uncoveredMinors.slice(0, settings.minorCountForMajor)
-    return {
-      needed: true,
-      floors: toMerge.map(s => s.floor)
-    }
-  }
-  
-  return { needed: false }
-}
-
-/**
- * 检查是否需要生成超级总结（支持递归）
- * @param {number} currentFloor 当前楼层
- * @returns {{needed: boolean, summaryFloors?: number[], sourceType?: 'major' | 'super'}}
- */
-export function checkSuperSummaryNeeded(currentFloor) {
-  const gameStore = useGameStore()
-  const settings = gameStore.settings.summarySystem
-  
-  if (!settings?.enabled || !settings.useAssistantForSummary) {
-    return { needed: false }
-  }
-
-  // 超级总结开关
-  if (settings.enableSuperSummary === false) {
-    return { needed: false }
-  }
-
-  // 1. 检查大总结是否需要合并
-  const majorSummaries = gameStore.player.summaries
-    .filter(s => s.type === 'major')
-    .sort((a, b) => a.floor - b.floor)
-  
-  // 获取已经被超级总结覆盖的大总结
-  const coveredBySuper = new Set()
-  const superSummaries = gameStore.player.summaries
-    .filter(s => s.type === 'super')
-    .sort((a, b) => a.floor - b.floor) // 排序以便后续处理
-
-  superSummaries.forEach(s => {
-    majorSummaries.forEach(m => {
-      // 检查覆盖关系：如果大总结的所有楼层都在超级总结的覆盖范围内
-      if (m.coveredFloors.every(f => s.coveredFloors.includes(f))) {
-        coveredBySuper.add(m.floor)
-      }
-    })
-  })
-  
-  // 筛选未被覆盖的大总结，且必须是“生效”的大总结
-  // 生效定义：在游戏中实际替换了上下文（即距离 > majorSummaryStartFloor）
-  // 我们检查大总结的最大楼层是否也超出了保护范围，确保整个大总结都已经生效
-  const uncoveredMajors = majorSummaries.filter(s => {
-    if (coveredBySuper.has(s.floor)) return false
-
-    const maxFloor = Math.max(...s.coveredFloors)
-    const distance = currentFloor - maxFloor
-    return distance >= settings.majorSummaryStartFloor
-  })
-  
-  if (uncoveredMajors.length >= settings.majorCountForSuper) {
-    const toMerge = uncoveredMajors.slice(0, settings.majorCountForSuper)
-    return {
-      needed: true,
-      summaryFloors: toMerge.map(s => s.floor),
-      sourceType: 'major'
-    }
-  }
-
-  // 2. 检查超级总结是否需要递归合并
-  // 逻辑：如果有一组超级总结，它们没有被更高级的超级总结覆盖
-  // "更高级" 是指覆盖范围更大的超级总结
-  const coveredSupers = new Set()
-  
-  superSummaries.forEach(parent => {
-    superSummaries.forEach(child => {
-      if (parent === child) return
-      // 如果 child 被 parent 完全覆盖（且 parent 范围更大），则 child 已经被合并
-      if (child.coveredFloors.every(f => parent.coveredFloors.includes(f)) && 
-          parent.coveredFloors.length > child.coveredFloors.length) {
-        coveredSupers.add(child.floor)
-      }
-    })
-  })
-
-  // 同样需要检查超级总结是否“生效”，虽然超级总结通常肯定很老了，但保持逻辑一致性
-  const uncoveredSupers = superSummaries.filter(s => {
-    if (coveredSupers.has(s.floor)) return false
-    
-    const maxFloor = Math.max(...s.coveredFloors)
-    const distance = currentFloor - maxFloor
-    return distance >= settings.majorSummaryStartFloor
-  })
-
-  if (uncoveredSupers.length >= settings.majorCountForSuper) { // 复用大总结的阈值设置
-    const toMerge = uncoveredSupers.slice(0, settings.majorCountForSuper)
-    return {
-      needed: true,
-      summaryFloors: toMerge.map(s => s.floor),
-      sourceType: 'super'
-    }
-  }
-  
-  return { needed: false }
-}
-
-/**
  * 处理AI回复后的总结生成（主入口）
  * @param {string} content 正文内容
  * @param {number} floor 当前楼层
@@ -711,28 +689,20 @@ export async function processPostReply(content, floor, preGeneratedMinorSummary 
     return { success: false, reason: minorResult.error === 'Minor summary missed' ? 'missing_minor' : 'error' }
   }
   
-  // 2. 异步检查是否需要生成大总结（仅在使用辅助AI时）
+  // 2. 异步检查是否有需要生成日记的历史日期（兜底）
   // 使用 setTimeout 将其放入下一个 tick，不阻塞当前返回
   if (settings.useAssistantForSummary && gameStore.settings.assistantAI?.enabled) {
     setTimeout(async () => {
       try {
-        const majorCheck = checkMajorSummaryNeeded(floor)
-        if (majorCheck.needed) {
-          console.log('[SummaryManager] Generating major summary for floors:', majorCheck.floors)
-          await generateMajorSummary(majorCheck.floors)
-        }
-        
-        // 3. 检查是否需要生成超级总结 (循环检查以支持多层递归)
-        let superCheck = checkSuperSummaryNeeded(floor)
-        while (superCheck.needed) {
-          console.log(`[SummaryManager] Generating super summary from ${superCheck.sourceType}s:`, superCheck.summaryFloors)
-          await generateSuperSummary(superCheck.summaryFloors, superCheck.sourceType)
-          
-          // 重新检查，看是否能继续向上合并
-          superCheck = checkSuperSummaryNeeded(floor)
+        const { year, month, day } = gameStore.gameTime
+        const currentDate = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+        const diaryCheck = checkDiaryNeeded(currentDate)
+        for (const date of diaryCheck) {
+          console.log('[SummaryManager] Generating diary for:', date)
+          await generateDiary(date)
         }
       } catch (e) {
-        console.error('[SummaryManager] Error in background summary generation:', e)
+        console.error('[SummaryManager] Error in background diary generation:', e)
       }
     }, 0)
   }
@@ -772,7 +742,23 @@ export function buildSummarizedHistory(chatLog, currentFloor) {
         content: cleanImageTags(log.content)
       })
     } else if (contentType === 'minor') {
-      // 中等距离，使用小总结
+      // 中等距离：先查日记覆盖，再用小总结
+      const diary = gameStore.player.summaries.find(
+        s => s.type === 'diary' && s.coveredFloors && s.coveredFloors.includes(logFloor)
+      )
+      if (diary) {
+        const summaryId = `diary_${diary.gameDate}`
+        if (!addedSummaryIds.has(summaryId)) {
+          result.push({
+            type: 'summary',
+            content: `[${diary.gameDate} 日记]\n${diary.content}`,
+            isSummary: true,
+            summaryType: 'diary'
+          })
+          addedSummaryIds.add(summaryId)
+        }
+        continue
+      }
       const summary = getSummaryContent(logFloor, 'minor')
       if (summary) {
         result.push({
@@ -790,16 +776,33 @@ export function buildSummarizedHistory(chatLog, currentFloor) {
         })
       }
     } else if (contentType === 'major') {
-      // 较远的距离，允许使用大/超级总结
-      // 先检查是否有超级总结覆盖该楼层
+      // 较远的距离：日记 > 旧super > 旧major > minor > 原文
+      // 1. 先检查日记覆盖
+      const diary = gameStore.player.summaries.find(
+        s => s.type === 'diary' && s.coveredFloors && s.coveredFloors.includes(logFloor)
+      )
+      if (diary) {
+        const summaryId = `diary_${diary.gameDate}`
+        if (!addedSummaryIds.has(summaryId)) {
+          result.push({
+            type: 'summary',
+            content: `[${diary.gameDate} 日记]\n${diary.content}`,
+            isSummary: true,
+            summaryType: 'diary'
+          })
+          addedSummaryIds.add(summaryId)
+        }
+        continue
+      }
+
+      // 2. 兼容旧数据：检查超级总结
       const superSummary = gameStore.player.summaries.find(
         s => s.type === 'super' && s.coveredFloors && s.coveredFloors.includes(logFloor)
       )
-      
+
       if (superSummary) {
         const summaryId = `super_${superSummary.floor}`
         if (!addedSummaryIds.has(summaryId)) {
-          // 输出超级总结，并标记为已添加
           const minFloor = Math.min(...superSummary.coveredFloors)
           const maxFloor = Math.max(...superSummary.coveredFloors)
           result.push({
@@ -811,15 +814,14 @@ export function buildSummarizedHistory(chatLog, currentFloor) {
           })
           addedSummaryIds.add(summaryId)
         }
-        // 如果该超级总结已被添加过，则跳过这个楼层（不重复输出）
         continue
       }
-      
-      // 没有超级总结，检查大总结
+
+      // 3. 兼容旧数据：检查大总结
       const majorSummary = gameStore.player.summaries.find(
         s => s.type === 'major' && s.coveredFloors && s.coveredFloors.includes(logFloor)
       )
-      
+
       if (majorSummary) {
         const summaryId = `major_${majorSummary.floor}`
         if (!addedSummaryIds.has(summaryId)) {
@@ -834,11 +836,10 @@ export function buildSummarizedHistory(chatLog, currentFloor) {
           })
           addedSummaryIds.add(summaryId)
         }
-        // 如果该大总结已被添加过，则跳过这个楼层
         continue
       }
-      
-      // 没有大/超级总结，回退到小总结
+
+      // 4. 回退到小总结
       const minorSummary = getSummaryContent(logFloor, 'minor')
       if (minorSummary) {
         result.push({

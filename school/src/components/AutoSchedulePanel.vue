@@ -1,6 +1,6 @@
 <!-- 自动排班主面板: 3步向导容器 -->
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useAutoSchedule } from '../composables/useAutoSchedule'
 import { useAutoClubGenerate } from '../composables/useAutoClubGenerate'
 import { registerCustomCourse, saveCoursePoolToWorldbook, initCustomClass, getAllElectives, getRequiredCourses } from '../data/coursePoolData'
@@ -15,10 +15,11 @@ const props = defineProps({
   fullRosterSnapshot: { type: Object, default: () => ({}) },
   currentRosterState: { type: Object, default: () => ({}) },
   originGroups: { type: Map, default: () => new Map() },
-  gameStore: { type: Object, required: true }
+  gameStore: { type: Object, required: true },
+  resolvedLocation: { type: Object, default: null }
 })
 
-const emit = defineEmits(['save', 'show-message', 'sync-pool'])
+const emit = defineEmits(['save', 'show-message', 'sync-pool', 'resolve-location'])
 
 const {
   scheduling,
@@ -45,6 +46,7 @@ const currentStep = ref(1)
 const selectedChars = ref([])
 const userChoices = ref({})
 const syncing = ref(false)
+const unresolvedLocations = ref([])
 
 const deepClone = (data) => JSON.parse(JSON.stringify(data))
 
@@ -125,17 +127,19 @@ async function handleConfirm({ clubMode }) {
   syncing.value = true
   try {
     // 1. 应用排班选择到快照
-    const { modifiedClasses, newCourses, newClasses } = applyScheduleChoices(
+    const { modifiedClasses, newCourses, newClasses, unresolvedLocations: unresolved } = applyScheduleChoices(
       userChoices.value,
       props.fullRosterSnapshot,
       props.characterPool,
       props.currentRosterState
     )
+    unresolvedLocations.value = unresolved || []
 
     // 2. 注册新课程
     for (const course of newCourses) {
       registerCustomCourse({
         ...course,
+        origin: course.teacherOrigin || '',
         runId: props.gameStore.currentRunId
       })
     }
@@ -157,7 +161,7 @@ async function handleConfirm({ clubMode }) {
         createClubInWorldbook,
         addNpcToClubInWorldbook
       )
-      await syncClubWorldbookState(props.gameStore.currentRunId)
+      await syncClubWorldbookState(props.gameStore.currentRunId, props.gameStore.settings?.useGeminiMode)
     }
 
     // 5. 触发保存（复用父组件的保存流程）
@@ -179,6 +183,25 @@ async function handleConfirm({ clubMode }) {
     syncing.value = false
   }
 }
+// 处理未解析地点
+function handleResolveLocation(loc) {
+  emit('resolve-location', loc)
+}
+
+// 接收地点解析结果
+watch(() => props.resolvedLocation, (newVal) => {
+  if (newVal && newVal.charName) {
+    // 更新 unresolvedLocations 列表
+    unresolvedLocations.value = unresolvedLocations.value.filter(
+      loc => loc.charName !== newVal.charName
+    )
+    // 更新对应角色的 workplace
+    const poolChar = props.characterPool.find(c => c.name === newVal.charName)
+    if (poolChar) {
+      poolChar.workplace = newVal.resolvedId || ''
+    }
+  }
+})
 </script>
 
 <template>
@@ -221,9 +244,11 @@ async function handleConfirm({ clubMode }) {
         :full-roster-snapshot="fullRosterSnapshot"
         :generating="generating"
         :club-results="clubResults"
+        :unresolved-locations="unresolvedLocations"
         @back="handleStep3Back"
         @confirm="handleConfirm"
         @generate-clubs="handleGenerateClubs"
+        @resolve-location="handleResolveLocation"
       />
     </div>
 

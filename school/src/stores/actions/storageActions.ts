@@ -519,14 +519,37 @@ export const storageActions = {
     const fullCharacterPool = await getFullCharacterPool()
     const rosterPresets = await getRosterPresets()
 
+    // 导出设置（脱敏：移除 API Key）
+    const sanitizedSettings = JSON.parse(JSON.stringify(this.settings || {}))
+    if (sanitizedSettings.assistantAI) {
+      delete sanitizedSettings.assistantAI.apiKey
+    }
+
+    // 导出 eventLibrary（Map → Array）
+    let eventLibraryArray: any[] = []
+    if (this.eventLibrary instanceof Map && this.eventLibrary.size > 0) {
+      eventLibraryArray = Array.from(this.eventLibrary.entries())
+    }
+
     return JSON.stringify({
-      version: 2, // 升级版本号
+      version: 3,
       timestamp: Date.now(),
       snapshots: fullSnapshots,
       extraData: {
         rosterBackup,
         fullCharacterPool,
         rosterPresets
+      },
+      globalData: {
+        settings: sanitizedSettings,
+        characterNotes: this.characterNotes || {},
+        customCoursePool: this.customCoursePool || null,
+        eventLibrary: eventLibraryArray,
+        eventTriggers: this.eventTriggers || [],
+        // 通知/红点状态
+        unviewedExamIds: this.unviewedExamIds || [],
+        lastViewedWeeklyPreview: this.lastViewedWeeklyPreview || 0,
+        viewedClubIds: this.viewedClubIds || []
       }
     })
   },
@@ -551,21 +574,69 @@ export const storageActions = {
       if (data.extraData) {
         console.log('[GameStore] Importing extra data from save file...')
         const { rosterBackup, fullCharacterPool, rosterPresets } = data.extraData
-        
+
         if (rosterBackup) {
           await saveRosterBackup(rosterBackup)
           console.log('[GameStore] Restored roster backup')
         }
-        
+
         if (fullCharacterPool) {
           await saveFullCharacterPool(fullCharacterPool)
           console.log('[GameStore] Restored full character pool')
         }
-        
+
         if (rosterPresets) {
           await saveRosterPresets(rosterPresets)
           console.log('[GameStore] Restored roster presets')
         }
+      }
+
+      // 恢复全局数据 (v3+)
+      if (data.globalData) {
+        console.log('[GameStore] Importing global data from save file...')
+        const g = data.globalData
+
+        // 设置：合并导入（保留本地 API Key）
+        if (g.settings) {
+          const localApiKey = this.settings?.assistantAI?.apiKey || ''
+          const defaults = createInitialState().settings
+          const imported = validateAndRepairSettings(g.settings)
+          this.settings = { ...defaults, ...imported }
+          this.settings.summarySystem = { ...defaults.summarySystem, ...(imported.summarySystem || {}) }
+          this.settings.assistantAI = { ...defaults.assistantAI, ...(imported.assistantAI || {}) }
+          // 恢复本地 API Key（导出时已脱敏）
+          if (localApiKey) {
+            this.settings.assistantAI.apiKey = localApiKey
+          }
+          await setItem('school_game_settings', JSON.parse(JSON.stringify(this.settings)))
+          console.log('[GameStore] Restored settings (API key preserved)')
+        }
+
+        if (g.characterNotes && typeof g.characterNotes === 'object') {
+          this.characterNotes = g.characterNotes
+          console.log('[GameStore] Restored character notes')
+        }
+
+        if (g.customCoursePool !== undefined) {
+          this.customCoursePool = g.customCoursePool
+          console.log('[GameStore] Restored custom course pool')
+        }
+
+        // eventLibrary: Array → Map
+        if (Array.isArray(g.eventLibrary) && g.eventLibrary.length > 0) {
+          this.eventLibrary = new Map(g.eventLibrary)
+          console.log(`[GameStore] Restored event library (${this.eventLibrary.size} events)`)
+        }
+
+        if (Array.isArray(g.eventTriggers)) {
+          this.eventTriggers = g.eventTriggers
+          console.log(`[GameStore] Restored event triggers (${this.eventTriggers.length})`)
+        }
+
+        // 通知状态
+        if (Array.isArray(g.unviewedExamIds)) this.unviewedExamIds = g.unviewedExamIds
+        if (typeof g.lastViewedWeeklyPreview === 'number') this.lastViewedWeeklyPreview = g.lastViewedWeeklyPreview
+        if (Array.isArray(g.viewedClubIds)) this.viewedClubIds = g.viewedClubIds
       }
 
       const processedSnapshots: SaveSnapshot[] = []

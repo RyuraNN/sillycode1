@@ -1057,7 +1057,7 @@ export const yearProgressionActions = {
       }
 
       // 同步社团状态（统一一次性调用）
-      await syncClubWorldbookState(runId)
+      await syncClubWorldbookState(runId, this.settings?.useGeminiMode)
 
       // 同步社交关系概览
       await saveSocialRelationshipOverview()

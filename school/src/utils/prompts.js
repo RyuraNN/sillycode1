@@ -1235,6 +1235,9 @@ export const buildSystemPromptContent = (gameState) => {
         if (npc.role === 'staff' && npc.staffTitle) {
           roleStr += ` (${npc.staffTitle})`
         }
+        if (npc.role === 'external') {
+          if (npc.staffTitle) roleStr += ` (${npc.staffTitle})`
+        }
         details += `Role: ${roleStr}\n`
         details += `Outfit: ${getNpcOutfitString(npc)}\n`
 
@@ -1242,6 +1245,15 @@ export const buildSystemPromptContent = (gameState) => {
         if (npc.role === 'staff' && npc.workplace) {
           const workplaceName = getItem(npc.workplace)?.name || npc.workplace
           details += `Workplace: ${workplaceName}\n`
+        }
+
+        // 校外人员信息
+        if (npc.role === 'external') {
+          if (npc.workplace) {
+            const workplaceName = getItem(npc.workplace)?.name || npc.workplace
+            details += `Workplace: ${workplaceName}\n`
+          }
+          details += `Type: Off-campus personnel\n`
         }
 
         // 心情状态

@@ -2,7 +2,7 @@
 import { defineEmits, ref, onMounted, onUnmounted, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { fetchModels, IMAGE_ANALYSIS_PROMPT } from '../utils/assistantAI'
-import { generateBatchSummaries } from '../utils/summaryManager'
+import { generateBatchSummaries, generateBatchDiaries } from '../utils/summaryManager'
 import { setVariableParsingWorldbookStatus } from '../utils/worldbookParser'
 import { setItem, getItem, removeItem } from '../utils/indexedDB'
 import SocialApp from './SocialApp.vue'
@@ -58,6 +58,40 @@ const startBatchGeneration = async () => {
     alert('生成过程中出错: ' + e.message)
   } finally {
     isBatchProcessing.value = false
+  }
+}
+
+// 手动批量生成日记
+const isDiaryProcessing = ref(false)
+const diaryProgress = ref({ current: 0, total: 0, date: '' })
+
+const startDiaryGeneration = async () => {
+  if (!gameStore.settings.assistantAI?.enabled) {
+    alert('请先开启辅助AI')
+    return
+  }
+  if (!gameStore.settings.summarySystem?.enabled) {
+    alert('请先开启总结系统')
+    return
+  }
+
+  isDiaryProcessing.value = true
+  diaryProgress.value = { current: 0, total: 0, date: '' }
+
+  try {
+    const result = await generateBatchDiaries((current, total, date) => {
+      diaryProgress.value = { current, total, date }
+    })
+    if (result.generated === 0 && result.failed === 0) {
+      alert('没有需要生成日记的日期')
+    } else {
+      alert(`日记生成完成！成功 ${result.generated} 篇${result.failed > 0 ? `，失败 ${result.failed} 篇` : ''}`)
+    }
+  } catch (e) {
+    console.error(e)
+    alert('生成过程中出错: ' + e.message)
+  } finally {
+    isDiaryProcessing.value = false
   }
 }
 
@@ -691,82 +725,33 @@ const handleHomeClick = () => {
                           <span class="setting-value">{{ gameStore.settings.summarySystem.minorSummaryStartFloor }}</span>
                         </div>
                         <div class="slider-container">
-                          <input 
-                            type="range" 
-                            v-model.number="gameStore.settings.summarySystem.minorSummaryStartFloor" 
-                            min="5" 
-                            max="50" 
-                            step="1"
-                            @change="gameStore.saveToStorage()"
-                            class="setting-slider"
-                          />
-                        </div>
-
-                        <div class="setting-item">
-                          <span class="setting-label">大总结起始楼层</span>
-                          <span class="setting-value">{{ gameStore.settings.summarySystem.majorSummaryStartFloor }}</span>
-                        </div>
-                        <div class="slider-container">
-                          <input 
-                            type="range" 
-                            v-model.number="gameStore.settings.summarySystem.majorSummaryStartFloor" 
-                            min="20" 
-                            max="100" 
-                            step="5"
-                            @change="gameStore.saveToStorage()"
-                            class="setting-slider"
-                          />
-                        </div>
-
-
-                        <div class="setting-item">
-                          <span class="setting-label">大总结触发阈值</span>
-                          <span class="setting-value">{{ gameStore.settings.summarySystem.minorCountForMajor }}个小总结</span>
-                        </div>
-                        <div class="slider-container">
-                          <input 
-                            type="range" 
-                            v-model.number="gameStore.settings.summarySystem.minorCountForMajor" 
-                            min="3" 
-                            max="10" 
-                            step="1"
-                            @change="gameStore.saveToStorage()"
-                            class="setting-slider"
-                          />
-                        </div>
-
-                        <div class="setting-item">
-                          <span class="setting-label">启用超级总结</span>
-                          <label class="switch">
-                            <input type="checkbox" v-model="gameStore.settings.summarySystem.enableSuperSummary" :disabled="gameStore.settings.useGeminiMode" @change="gameStore.saveToStorage()">
-                            <span class="slider"></span>
-                          </label>
-                        </div>
-                        <span v-if="gameStore.settings.useGeminiMode" class="gemini-lock-hint">🔒 Gemini 3.0 Preview 模式下强制开启</span>
-                        <p class="hint">关闭后大总结不会被进一步合并，保留更多早期剧情细节</p>
-
-                        <div class="setting-item" v-if="gameStore.settings.summarySystem.enableSuperSummary">
-                          <span class="setting-label">超级总结触发阈值</span>
-                          <span class="setting-value">{{ gameStore.settings.summarySystem.majorCountForSuper }}个大总结</span>
-                        </div>
-                        <div class="slider-container" v-if="gameStore.settings.summarySystem.enableSuperSummary">
                           <input
                             type="range"
-                            v-model.number="gameStore.settings.summarySystem.majorCountForSuper"
-                            min="2"
-                            max="5"
+                            v-model.number="gameStore.settings.summarySystem.minorSummaryStartFloor"
+                            min="5"
+                            max="50"
                             step="1"
                             @change="gameStore.saveToStorage()"
                             class="setting-slider"
                           />
                         </div>
-                        
+
+                        <p class="hint">总结系统开启且辅助AI可用时，每天结束自动生成日记。日记按事件归类，确保剧情完整性。</p>
+
                         <div style="margin-top: 15px; display: flex; flex-direction: column; gap: 10px;">
                           <button class="action-btn primary" style="width: 100%;" @click="showSummaryViewer = true">
                             📋 查看/修改总结
                           </button>
                           <button class="action-btn secondary" style="width: 100%;" @click="showBatchModal = true">
                             🤖 批量补齐总结
+                          </button>
+                          <button
+                            class="action-btn secondary"
+                            style="width: 100%;"
+                            @click="startDiaryGeneration"
+                            :disabled="isDiaryProcessing"
+                          >
+                            {{ isDiaryProcessing ? `📔 生成日记中 (${diaryProgress.current}/${diaryProgress.total})...` : '📔 手动生成日记' }}
                           </button>
                         </div>
                       </div>

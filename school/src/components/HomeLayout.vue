@@ -67,7 +67,6 @@ const toggleFullscreen = () => {
 const onGeminiModeChange = () => {
   if (gameStore.settings.useGeminiMode) {
     gameStore.settings.summarySystem.enabled = true
-    gameStore.settings.summarySystem.enableSuperSummary = true
   }
   gameStore.saveToStorage()
 }

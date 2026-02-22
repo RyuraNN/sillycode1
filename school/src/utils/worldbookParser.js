@@ -243,6 +243,103 @@ export async function updateAcademicDataInWorldbook(allStudents) {
   }
 }
 
+// ==================== 标签数据（选课偏好 + 日程模板） ====================
+
+/**
+ * 更新角色标签数据到世界书（选课偏好 + 日程模板）
+ * 格式: 姓名|选课偏好|日程模板
+ * 参照 [AcademicData] 模式，enabled=false
+ */
+export async function updateTagDataInWorldbook(allClassData) {
+  if (typeof window.updateWorldbookWith !== 'function') return false
+
+  try {
+    const bookName = getCurrentBookName()
+    if (!bookName) return false
+
+    let content = '# 格式: 姓名|选课偏好|日程模板\n'
+    let count = 0
+
+    for (const [classId, data] of Object.entries(allClassData)) {
+      const allPersons = [
+        ...(data.headTeacher ? [data.headTeacher] : []),
+        ...(data.teachers || []),
+        ...(data.students || [])
+      ]
+      for (const p of allPersons) {
+        if (!p.name) continue
+        const elective = p.electivePreference || ''
+        const schedule = p.scheduleTag || ''
+        if (!elective && !schedule) continue
+        content += `${p.name}|${elective}|${schedule}\n`
+        count++
+      }
+    }
+
+    const entryName = '[TagData] 角色标签数据库'
+
+    await window.updateWorldbookWith(bookName, (entries) => {
+      const newEntries = [...entries]
+      const index = newEntries.findIndex(e => e.name === entryName)
+      const entry = {
+        name: entryName,
+        content: content,
+        key: [],
+        strategy: { type: 'selective' },
+        position: { type: 'before_character_definition', order: 101 },
+        probability: 100,
+        enabled: false,
+        recursion: { prevent_outgoing: true }
+      }
+      if (index !== -1) {
+        newEntries[index] = { ...newEntries[index], ...entry }
+      } else {
+        newEntries.push(entry)
+      }
+      return newEntries
+    })
+
+    console.log(`[WorldbookParser] Tag database updated with ${count} records`)
+    return true
+  } catch (e) {
+    console.error('[WorldbookParser] Error updating tag data:', e)
+    return false
+  }
+}
+
+/**
+ * 从世界书读取标签数据
+ * @returns {Promise<Map<string, {elective: string, schedule: string}>>}
+ */
+export async function fetchTagDataFromWorldbook() {
+  const bookNames = getAllBookNames()
+  const tagMap = new Map()
+  const targetName = '[TagData] 角色标签数据库'
+
+  for (const name of bookNames) {
+    let entries
+    try { entries = await window.getWorldbook(name) } catch { continue }
+    if (!entries || !Array.isArray(entries)) continue
+
+    const entry = entries.find(e => e.name === targetName)
+    if (!entry || !entry.content) continue
+
+    for (const line of entry.content.split('\n')) {
+      if (line.startsWith('#') || !line.trim()) continue
+      const parts = line.split('|')
+      const pName = parts[0]
+      if (pName) {
+        tagMap.set(pName.trim(), {
+          elective: parts[1]?.trim() || '',
+          schedule: parts[2]?.trim() || ''
+        })
+      }
+    }
+    break
+  }
+  return tagMap
+}
+
 // ==================== 社团数据解析 ====================
 
 /**
@@ -556,7 +653,9 @@ export async function createClubInWorldbook(clubInfo, runId) {
     await window.updateWorldbookWith(bookName, (entries) => {
       const newEntries = [...entries]
       
-      const entryName = `[Club:${clubInfo.id}:${runId}] ${clubInfo.name}`
+      const entryName = runId
+        ? `[Club:${clubInfo.id}:${runId}] ${clubInfo.name}`
+        : `[Club:${clubInfo.id}] ${clubInfo.name}`
       
       // 检查是否已存在同名条目
       const existingIndex = newEntries.findIndex(e => e.name && e.name.includes(`[Club:${clubInfo.id}`))
@@ -575,7 +674,7 @@ export async function createClubInWorldbook(clubInfo, runId) {
           content: formatClubData(club),
           key: [clubInfo.name, clubInfo.president].filter(k => k),
           strategy: {
-            type: 'constant'
+            type: runId ? 'constant' : 'selective'
           },
           position: {
             type: 'before_character_definition',
@@ -608,6 +707,89 @@ export async function createClubInWorldbook(clubInfo, runId) {
     console.error('[WorldbookParser] Error creating club:', e)
     console.error('[WorldbookParser] Error stack:', e.stack)
     return null
+  }
+}
+
+/**
+ * 批量更新多个社团到世界书（单次 updateWorldbookWith 调用，避免竞态）
+ * @param {Array} clubs 社团数据数组
+ * @param {string} runId 当前存档ID
+ * @returns {Promise<boolean>} 是否成功
+ */
+export async function batchUpdateClubsInWorldbook(clubs, runId) {
+  if (!clubs || clubs.length === 0) return true
+  if (typeof window.updateWorldbookWith !== 'function') {
+    console.warn('[WorldbookParser] updateWorldbookWith API not available')
+    return false
+  }
+
+  try {
+    const bookName = getCurrentBookName()
+    if (!bookName) {
+      console.warn('[WorldbookParser] No worldbook available for batch club update')
+      return false
+    }
+
+    console.log(`[WorldbookParser] Batch updating ${clubs.length} clubs in worldbook: ${bookName}`)
+
+    let updateSuccess = false
+
+    await window.updateWorldbookWith(bookName, (entries) => {
+      const newEntries = [...entries]
+
+      for (const clubInfo of clubs) {
+        const club = {
+          id: clubInfo.id,
+          name: clubInfo.name,
+          advisor: clubInfo.advisor || '',
+          president: clubInfo.president || '',
+          vicePresident: clubInfo.vicePresident || '',
+          members: clubInfo.members || (clubInfo.president ? [clubInfo.president] : []),
+          coreSkill: clubInfo.coreSkill || '',
+          activityDay: clubInfo.activityDay || '',
+          location: clubInfo.location || '',
+          description: clubInfo.description || '',
+          _bookName: bookName
+        }
+
+        const entryName = runId
+          ? `[Club:${clubInfo.id}:${runId}] ${clubInfo.name}`
+          : `[Club:${clubInfo.id}] ${clubInfo.name}`
+
+        const existingIndex = newEntries.findIndex(e => e.name && e.name.includes(`[Club:${clubInfo.id}`))
+        if (existingIndex !== -1) {
+          newEntries[existingIndex] = {
+            ...newEntries[existingIndex],
+            name: entryName,
+            content: formatClubData(club),
+            key: [clubInfo.name, clubInfo.president].filter(k => k),
+            enabled: true
+          }
+        } else {
+          newEntries.push({
+            name: entryName,
+            content: formatClubData(club),
+            key: [clubInfo.name, clubInfo.president].filter(k => k),
+            strategy: { type: runId ? 'constant' : 'selective' },
+            position: { type: 'before_character_definition', order: 50 },
+            probability: 100,
+            enabled: true,
+            recursion: { prevent_outgoing: true }
+          })
+        }
+      }
+
+      updateSuccess = true
+      return newEntries
+    })
+
+    if (updateSuccess) {
+      console.log(`[WorldbookParser] Batch updated ${clubs.length} clubs successfully`)
+    }
+    return updateSuccess
+  } catch (e) {
+    console.error('[WorldbookParser] Error batch updating clubs:', e)
+    return false
   }
 }
 
@@ -732,7 +914,7 @@ export async function addPlayerToClubInWorldbook(clubId, playerName, clubData, r
  * @param {string|null} runId 当前存档ID（如果为null，则创建通用原始条目）
  * @returns {Promise<boolean>}
  */
-export async function ensureClubExistsInWorldbook(clubData, runId) {
+export async function ensureClubExistsInWorldbook(clubData, runId, useGeminiMode = false) {
   if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
     return false
   }
@@ -778,13 +960,14 @@ export async function ensureClubExistsInWorldbook(clubData, runId) {
           : `[Club:${clubData.id}] ${clubData.name}`
         
         // 确定策略类型：
-        // 1. 学生会 (student_council) 始终为常驻 (constant/蓝灯)
-        // 2. restricted 模式社团为常驻 (constant/蓝灯)
-        // 3. 指定了 runId (isRunSpecific) 的条目为常驻 (constant/蓝灯)
-        // 4. 其他通用初始条目为选择性 (selective/绿灯)
+        // 1. 非 gemini 模式全部蓝灯 (constant)
+        // 2. 学生会 (student_council) 始终为常驻 (constant/蓝灯)
+        // 3. restricted 模式社团为常驻 (constant/蓝灯)
+        // 4. 指定了 runId (isRunSpecific) 的条目为常驻 (constant/蓝灯)
+        // 5. 其他通用初始条目为选择性 (selective/绿灯)
         const isStudentCouncil = clubData.id === 'student_council'
         const isRestricted = clubData.mode === 'restricted'
-        const strategyType = (isStudentCouncil || isRestricted || isRunSpecific) ? 'constant' : 'selective'
+        const strategyType = (!useGeminiMode || isStudentCouncil || isRestricted || isRunSpecific) ? 'constant' : 'selective'
         
         // 确定优先级：
         // 学生会优先级较高 (5)，其他默认为 50
@@ -876,10 +1059,56 @@ export async function removePlayerFromClubInWorldbook(clubId, playerName, clubDa
 }
 
 /**
+ * 从世界书中移除社团条目
+ * @param {string} clubId 社团ID
+ * @param {boolean} permanent 是否永久删除（true=从世界书中移除条目，false=仅禁用）
+ * @returns {Promise<boolean>} 是否成功
+ */
+export async function removeClubFromWorldbook(clubId, permanent = false) {
+  if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
+    return false
+  }
+
+  try {
+    const bookNames = getAllBookNames()
+    for (const name of bookNames) {
+      try {
+        await window.updateWorldbookWith(name, (entries) => {
+          if (permanent) {
+            // 永久删除：过滤掉匹配的条目
+            return entries.filter(entry => {
+              if (entry.name && (entry.name.includes(`[Club:${clubId}]`) || entry.name.includes(`[Club:${clubId}:`))) {
+                return false
+              }
+              return true
+            })
+          } else {
+            // 禁用：设置 enabled: false
+            return entries.map(entry => {
+              if (entry.name && (entry.name.includes(`[Club:${clubId}]`) || entry.name.includes(`[Club:${clubId}:`))) {
+                return { ...entry, enabled: false }
+              }
+              return entry
+            })
+          }
+        })
+      } catch (e) {
+        // skip inaccessible worldbooks
+      }
+    }
+    return true
+  } catch (e) {
+    console.error('[WorldbookParser] Error removing club from worldbook:', e)
+    return false
+  }
+}
+
+/**
  * 同步社团世界书状态（切换存档时调用）
  * @param {string} currentRunId 当前存档ID
+ * @param {boolean} useGeminiMode 是否使用 3.0 Preview 模式
  */
-export async function syncClubWorldbookState(currentRunId) {
+export async function syncClubWorldbookState(currentRunId, useGeminiMode = false) {
   if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
     return
   }
@@ -887,7 +1116,7 @@ export async function syncClubWorldbookState(currentRunId) {
   try {
     const bookNames = getAllBookNames()
 
-    console.log(`[WorldbookParser] Syncing club state for run ${currentRunId}`)
+    console.log(`[WorldbookParser] Syncing club state for run ${currentRunId} (geminiMode: ${useGeminiMode})`)
 
     for (const name of bookNames) {
       try {
@@ -926,10 +1155,10 @@ export async function syncClubWorldbookState(currentRunId) {
             const clubId = originalMatch[1]
             // 如果该社团在当前存档有激活副本，则禁用原始条目；否则启用
             const shouldDisable = activeClubIds.has(clubId)
-            
-            // 学生会始终为常驻 (constant)，其他为选择性 (selective)
-            const strategyType = clubId === 'student_council' ? 'constant' : 'selective'
-            
+
+            // 非 gemini 模式全部蓝灯；gemini 模式下学生会蓝灯，其他绿灯
+            const strategyType = (!useGeminiMode || clubId === 'student_council') ? 'constant' : 'selective'
+
             return {
               ...entry,
               enabled: !shouldDisable,
@@ -1106,8 +1335,9 @@ export async function fetchClassDataFromWorldbook() {
 /**
  * 设置玩家班级（修改世界书策略）
  * @param {string} classId 班级ID (如 '1-A')
+ * @param {boolean} useGeminiMode 是否使用 3.0 Preview 模式
  */
-export async function setPlayerClass(classId) {
+export async function setPlayerClass(classId, useGeminiMode = false) {
   if (typeof window.updateWorldbookWith !== 'function') {
     console.warn('[WorldbookParser] updateWorldbookWith API not available')
     return
@@ -1118,7 +1348,7 @@ export async function setPlayerClass(classId) {
 
     if (!bookName) return
 
-    console.log(`[WorldbookParser] Setting player class to ${classId} in worldbook: ${bookName}`)
+    console.log(`[WorldbookParser] Setting player class to ${classId} in worldbook: ${bookName} (geminiMode: ${useGeminiMode})`)
 
     await window.updateWorldbookWith(bookName, (entries) => {
       return entries.map(entry => {
@@ -1137,13 +1367,14 @@ export async function setPlayerClass(classId) {
               }
             }
           } else {
-            // 其他班级：绿灯 (selective)
-            console.log(`[WorldbookParser] Setting entry ${entry.name} to selective`)
+            // 其他班级：非 gemini 模式全部蓝灯，gemini 模式绿灯
+            const type = useGeminiMode ? 'selective' : 'constant'
+            console.log(`[WorldbookParser] Setting entry ${entry.name} to ${type}`)
             return {
               ...entry,
               strategy: {
                 ...entry.strategy,
-                type: 'selective'
+                type
               }
             }
           }
@@ -1158,18 +1389,18 @@ export async function setPlayerClass(classId) {
 }
 
 // 格式化人员信息
-function formatPerson(p, includeAcademic = true) {
+function formatPerson(p, includeAcademic = true, includeTags = true) {
   const gender = p.gender === 'female' ? '女' : '男'
   let text = `${p.name} ${gender} (${p.origin})`
-  
-  // 添加选课偏好标签
-  if (p.electivePreference) {
-    text += `[${p.electivePreference}]`
-  }
-  
-  // 添加日程模板标签
-  if (p.scheduleTag) {
-    text += `[${p.scheduleTag}]`
+
+  // 选课偏好和日程标签：仅在 includeTags=true 时输出
+  if (includeTags) {
+    if (p.electivePreference) {
+      text += `[${p.electivePreference}]`
+    }
+    if (p.scheduleTag) {
+      text += `[${p.scheduleTag}]`
+    }
   }
   
   // 添加学力档案标签 [academic:level/potential:trait1,trait2]
@@ -1205,26 +1436,26 @@ function formatClassData(data, excludeAcademic = false) {
   
   // 班主任
   if (data.headTeacher && data.headTeacher.name) {
-    text += `  班主任: ${formatPerson(data.headTeacher, !excludeAcademic)}\n`
+    text += `  班主任: ${formatPerson(data.headTeacher, !excludeAcademic, false)}\n`
   }
-  
+
   // 科任教师
   if (data.teachers && data.teachers.length > 0) {
     text += `  科任教师: {\n`
     data.teachers.forEach(t => {
       if (t.name) {
-        text += `    ${t.subject}: ${formatPerson(t, !excludeAcademic)}\n`
+        text += `    ${t.subject}: ${formatPerson(t, !excludeAcademic, false)}\n`
       }
     })
     text += `  }\n`
   }
-  
+
   // 学生列表
   if (data.students && data.students.length > 0) {
     text += `  学生列表: {\n`
     data.students.forEach((s, i) => {
       if (s.name) {
-        text += `    ${i + 1}. ${formatPerson(s, !excludeAcademic)}\n`
+        text += `    ${i + 1}. ${formatPerson(s, !excludeAcademic, false)}\n`
       }
     })
     text += `  }\n`
@@ -2170,7 +2401,7 @@ export async function setupTeacherClassEntries(teachingClasses, homeroomClassIds
   }
 }
 
-export async function syncClassWorldbookState(currentRunId, allClassData) {
+export async function syncClassWorldbookState(currentRunId, allClassData, useGeminiMode = false) {
   if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
     return
   }
@@ -2256,10 +2487,15 @@ export async function syncClassWorldbookState(currentRunId, allClassData) {
               }
             } else {
               // 没有活跃的 runId 副本 → 启用原始条目
-              // (假设原始条目是默认启用的，如果之前被禁用了这里会恢复)
+              // 非 gemini 模式全部蓝灯
+              const strategyType = useGeminiMode ? (entry.strategy?.type || 'selective') : 'constant'
               return {
                 ...entry,
-                enabled: true
+                enabled: true,
+                strategy: {
+                  ...entry.strategy,
+                  type: strategyType
+                }
               }
             }
           }

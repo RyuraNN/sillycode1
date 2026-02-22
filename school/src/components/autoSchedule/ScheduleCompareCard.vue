@@ -13,21 +13,27 @@ function getPlanDisplay(plan) {
   const roleLabels = {
     student: '学生',
     headTeacher: '班主任',
-    subjectTeacher: '科任老师'
+    subjectTeacher: '科任老师',
+    staff: '职工',
+    external: '校外人员'
   }
   return {
     classId: a.classId,
     role: roleLabels[a.role] || a.role,
     subject: a.subject,
     reason: a.reason,
-    teachings: plan.teachings || []
+    teachings: plan.teachings || [],
+    workplaceId: a.workplaceId,
+    workplaceName: a.workplaceName,
+    staffTitle: a.staffTitle,
+    isWorkplace: a.type === 'workplace_assignment'
   }
 }
 
 const suitablePlan = getPlanDisplay(props.character.suitable)
 const interestingPlan = getPlanDisplay(props.character.interesting)
 
-const roleIcon = props.character.role === 'teacher' ? '👩‍🏫' : '👩‍🎓'
+const roleIcon = props.character.role === 'teacher' ? '👩‍🏫' : props.character.role === 'staff' ? '🔧' : props.character.role === 'external' ? '🏢' : '👩‍🎓'
 </script>
 
 <template>
@@ -51,9 +57,11 @@ const roleIcon = props.character.role === 'teacher' ? '👩‍🏫' : '👩‍�
         <template v-if="suitablePlan">
           <div class="plan-detail">
             <span class="detail-arrow">→</span>
-            <span class="detail-class">{{ suitablePlan.classId }}</span>
+            <span v-if="suitablePlan.isWorkplace && suitablePlan.workplaceName" class="detail-workplace">📍 {{ suitablePlan.workplaceName }}</span>
+            <span v-else class="detail-class">{{ suitablePlan.classId }}</span>
             <span class="detail-role">{{ suitablePlan.role }}</span>
             <span v-if="suitablePlan.subject" class="detail-subject">{{ suitablePlan.subject }}</span>
+            <span v-if="suitablePlan.staffTitle" class="detail-staff-title">{{ suitablePlan.staffTitle }}</span>
           </div>
           <div v-if="suitablePlan.reason" class="plan-reason">{{ suitablePlan.reason }}</div>
           <div v-if="suitablePlan.teachings.length > 0" class="plan-teachings">
@@ -78,9 +86,11 @@ const roleIcon = props.character.role === 'teacher' ? '👩‍🏫' : '👩‍�
         <template v-if="interestingPlan">
           <div class="plan-detail">
             <span class="detail-arrow">→</span>
-            <span class="detail-class">{{ interestingPlan.classId }}</span>
+            <span v-if="interestingPlan.isWorkplace && interestingPlan.workplaceName" class="detail-workplace">📍 {{ interestingPlan.workplaceName }}</span>
+            <span v-else class="detail-class">{{ interestingPlan.classId }}</span>
             <span class="detail-role">{{ interestingPlan.role }}</span>
             <span v-if="interestingPlan.subject" class="detail-subject">{{ interestingPlan.subject }}</span>
+            <span v-if="interestingPlan.staffTitle" class="detail-staff-title">{{ interestingPlan.staffTitle }}</span>
           </div>
           <div v-if="interestingPlan.reason" class="plan-reason">{{ interestingPlan.reason }}</div>
           <div v-if="interestingPlan.teachings.length > 0" class="plan-teachings">
@@ -164,6 +174,21 @@ const roleIcon = props.character.role === 'teacher' ? '👩‍🏫' : '👩‍�
 }
 .detail-subject {
   background: #6A1B9A;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.detail-workplace {
+  background: #E65100;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.detail-staff-title {
+  background: #4527A0;
   color: white;
   padding: 2px 6px;
   border-radius: 4px;

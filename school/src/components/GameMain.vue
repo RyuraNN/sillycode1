@@ -654,7 +654,25 @@ const sendMessage = async () => {
             const closeTag = `</${currentTagName}>`
             const closeIndex = streamBuffer.indexOf(closeTag)
             const systemMatch = systemTagStartRegex.exec(streamBuffer)
-            
+
+            // 检测孤立的思维链闭合标签（无对应开标签的 </think> 等）
+            const thinkCloseTags = ['think','thinking','thought','extrathink',
+              'reasoning','reflect','reflection','inner_thought','internal_thought',
+              'scratchpad','chain_of_thought']
+            const thinkCloseRegex = new RegExp(`</(${thinkCloseTags.join('|')})>`, 'i')
+            const thinkCloseMatch = thinkCloseRegex.exec(streamBuffer)
+            if (thinkCloseMatch) {
+              // 闭合标签之前的内容都是泄漏的思维链，丢弃
+              const discardEnd = thinkCloseMatch.index + thinkCloseMatch[0].length
+              streamBuffer = streamBuffer.substring(discardEnd)
+              // 回溯清理已输出到 currentAiLog 中的思维内容
+              if (currentAiLog.value.content) {
+                currentAiLog.value.content = removeThinking(currentAiLog.value.content)
+                handleNewContent(contentAreaRef.value)
+              }
+              continue
+            }
+
             let eventType = null
             let eventIndex = -1
 
@@ -1638,7 +1656,7 @@ const handleRestore = async (snapshot) => {
 
   // 兜底：initializeGameWorld 中的 optimizeWorldbook/injectSmartKeysToWorldbook 可能覆盖班级条目状态
   try {
-    await syncClassWorldbookState(gameStore.currentRunId, gameStore.allClassData)
+    await syncClassWorldbookState(gameStore.currentRunId, gameStore.allClassData, gameStore.settings?.useGeminiMode)
     if (gameStore.player.role === 'teacher' && gameStore.player.teachingClasses?.length > 0) {
       await setupTeacherClassEntries(
         gameStore.player.teachingClasses,

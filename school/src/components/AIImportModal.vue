@@ -100,9 +100,14 @@
                       <option value="student">学生</option>
                       <option value="teacher">教师</option>
                       <option value="staff">职工</option>
+                      <option value="external">校外人员</option>
                       <option value="uncertain">不确定</option>
                     </select>
                     <span v-if="char.roleReason" class="role-reason">{{ char.roleReason }}</span>
+                  </div>
+                  <div v-if="char.roleSuggestion === 'external'" class="char-external-info">
+                    <span v-if="char.staffTitle">职务：{{ char.staffTitle }}</span>
+                    <span v-if="char.workplaceSuggestion">工作地点建议：{{ char.workplaceSuggestion }}</span>
                   </div>
                   <div v-if="char.personality" class="char-personality">
                     性格：秩序{{ char.personality.order }} 利他{{ char.personality.altruism }}
@@ -141,8 +146,8 @@
                     <span class="char-gender">{{ char.gender === 'male' ? '♂' : '♀' }}</span>
                   </div>
                 </div>
-                <button class="btn-detail-query" @click="handleDetailQuery">
-                  查询选中角色的详细信息
+                <button class="btn-detail-query" @click="handleDetailQuery" :disabled="loading">
+                  {{ loading ? '正在查询...' : '查询选中角色的详细信息' }}
                 </button>
               </div>
               <div v-else class="work-not-found">
@@ -567,7 +572,7 @@ const toggleWorkChar = (workIndex, charIndex) => {
   transition: all 0.2s;
 }
 
-.btn-detail-query:hover {
+.btn-detail-query:hover:not(:disabled) {
   background: #0b7dda;
 }
 

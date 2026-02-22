@@ -67,14 +67,18 @@ const summaries = computed(() => {
 const formatType = (type) => {
   const map = {
     minor: '小总结',
-    major: '大总结',
-    super: '超级总结',
+    diary: '📔 每日日记',
+    major: '大总结(旧)',
+    super: '超级总结(旧)',
     missing: '待生成'
   }
   return map[type] || type
 }
 
 const formatFloors = (summary) => {
+  if (summary.type === 'diary' && summary.gameDate) {
+    return summary.gameDate
+  }
   if (summary.type === 'minor' || summary.type === 'missing') {
     return `楼层 ${summary.floor}`
   }
@@ -128,6 +132,7 @@ const deleteSummary = (summary) => {
 const stats = computed(() => {
   const all = gameStore.player.summaries || []
   const minorCount = all.filter(s => s.type === 'minor').length
+  const diaryCount = all.filter(s => s.type === 'diary').length
   const majorCount = all.filter(s => s.type === 'major').length
   const superCount = all.filter(s => s.type === 'super').length
   
@@ -150,7 +155,7 @@ const stats = computed(() => {
     }
   })
   
-  return { minorCount, majorCount, superCount, missingCount, total: chatLog.length }
+  return { minorCount, diaryCount, majorCount, superCount, missingCount, total: chatLog.length }
 })
 
 // 切换选择模式
@@ -246,12 +251,12 @@ const selectAllUncovered = () => {
           <span class="stat-value minor">{{ stats.minorCount }}</span>
         </span>
         <span class="stat-item">
-          <span class="stat-label">大总结:</span>
-          <span class="stat-value major">{{ stats.majorCount }}</span>
+          <span class="stat-label">日记:</span>
+          <span class="stat-value diary">{{ stats.diaryCount }}</span>
         </span>
         <span class="stat-item">
-          <span class="stat-label">超级:</span>
-          <span class="stat-value super">{{ stats.superCount }}</span>
+          <span class="stat-label">大总结:</span>
+          <span class="stat-value major">{{ stats.majorCount }}</span>
         </span>
         <span class="stat-item" v-if="stats.missingCount > 0">
           <span class="stat-label">缺失:</span>
@@ -262,8 +267,8 @@ const selectAllUncovered = () => {
       <div class="tabs">
         <button :class="{ active: currentTab === 'all' }" @click="currentTab = 'all'">全部</button>
         <button :class="{ active: currentTab === 'minor' }" @click="currentTab = 'minor'">小总结</button>
+        <button :class="{ active: currentTab === 'diary' }" @click="currentTab = 'diary'">日记</button>
         <button :class="{ active: currentTab === 'major' }" @click="currentTab = 'major'">大总结</button>
-        <button :class="{ active: currentTab === 'super' }" @click="currentTab = 'super'">超级总结</button>
       </div>
 
       <!-- 批量操作栏 (仅在小总结标签页显示) -->
@@ -316,7 +321,7 @@ const selectAllUncovered = () => {
             <span class="item-floors">{{ formatFloors(summary) }}</span>
             <button v-if="!selectionMode" class="delete-btn" @click.stop="deleteSummary(summary)">🗑️</button>
           </div>
-          <div class="item-preview">{{ summary.content }}</div>
+          <div class="item-preview" :class="{ 'diary-content': summary.type === 'diary' }">{{ summary.content }}</div>
         </div>
       </div>
     </div>
@@ -428,6 +433,7 @@ const selectAllUncovered = () => {
 }
 
 .item-type.minor { background: #34c759; }
+.item-type.diary { background: #007aff; }
 .item-type.major { background: #ff9500; }
 .item-type.super { background: #af52de; }
 .item-type.missing { background: #8e8e93; border: 1px dashed #666; }
@@ -453,6 +459,14 @@ const selectAllUncovered = () => {
   -webkit-box-orient: vertical;
   overflow: hidden;
   line-height: 1.4;
+}
+
+.item-preview.diary-content {
+  display: block;
+  -webkit-line-clamp: unset;
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
 }
 
 .edit-mode, .list-mode {
@@ -555,6 +569,7 @@ const selectAllUncovered = () => {
 }
 
 .stat-value.minor { background: #34c759; }
+.stat-value.diary { background: #007aff; }
 .stat-value.major { background: #ff9500; }
 .stat-value.super { background: #af52de; }
 .stat-value.missing { background: #ff3b30; }

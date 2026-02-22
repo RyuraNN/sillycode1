@@ -179,7 +179,7 @@ export const classClubActions = {
       // 确保在世界书中创建（通用绿灯策略）
       // 学生会初始状态不带 runId，作为通用条目存在。
       // 当玩家或NPC加入时，会自动创建带 runId 的副本并开启蓝灯。
-      await ensureClubExistsInWorldbook(studentCouncil, null as any)
+      await ensureClubExistsInWorldbook(studentCouncil, null as any, this.settings?.useGeminiMode)
     }
   },
 
@@ -435,7 +435,7 @@ export const classClubActions = {
     this.saveToStorage(true)
     
     // 尝试同步世界书 (复用 createClubInWorldbook 的更新逻辑或者 syncClubWorldbookState)
-    await syncClubWorldbookState(this.currentRunId)
+    await syncClubWorldbookState(this.currentRunId, this.settings?.useGeminiMode)
     
     return { success: true, message: `已成为${club.name}的顾问` }
   },
@@ -657,10 +657,10 @@ export const classClubActions = {
     console.log('[GameStore] Syncing worldbook after rollback...')
     
     // 同步社团状态
-    await syncClubWorldbookState(this.currentRunId)
-    
+    await syncClubWorldbookState(this.currentRunId, this.settings?.useGeminiMode)
+
     // 同步班级世界书条目状态（处理进级后的 runId 隔离条目）
-    await syncClassWorldbookState(this.currentRunId, this.allClassData)
+    await syncClassWorldbookState(this.currentRunId, this.allClassData, this.settings?.useGeminiMode)
 
     // 教师模式：重建教师班级副本（注入科任教师等）
     if (this.player.role === 'teacher' && this.player.teachingClasses && this.player.teachingClasses.length > 0) {
@@ -674,7 +674,7 @@ export const classClubActions = {
       )
     } else if (this.player.classId) {
       // 同步班级策略（玩家班级蓝灯）
-      await setPlayerClass(this.player.classId)
+      await setPlayerClass(this.player.classId, this.settings?.useGeminiMode)
     }
     
     // 【修复】同步选修课状态：不仅切换开关，还要重新生成世界书条目
@@ -808,7 +808,7 @@ export const classClubActions = {
     if (this.player.role === 'teacher' && this.player.teachingClasses && this.player.teachingClasses.length > 0) {
       // 先同步状态：禁用其他存档的 runId 副本，启用当前存档的
       await safeRebuildStep(
-        () => syncClassWorldbookState(this.currentRunId, this.allClassData),
+        () => syncClassWorldbookState(this.currentRunId, this.allClassData, this.settings?.useGeminiMode),
         'syncClassWorldbookState', 10000
       )
       // 再创建/更新当前教师存档的班级副本
@@ -826,13 +826,13 @@ export const classClubActions = {
     } else {
       // 学生模式或普通模式
       await safeRebuildStep(
-        () => syncClassWorldbookState(this.currentRunId, this.allClassData),
+        () => syncClassWorldbookState(this.currentRunId, this.allClassData, this.settings?.useGeminiMode),
         'syncClassWorldbookState', 10000
       )
 
       if (this.player.classId) {
         await safeRebuildStep(
-          () => setPlayerClass(this.player.classId),
+          () => setPlayerClass(this.player.classId, this.settings?.useGeminiMode),
           'setPlayerClass', 5000
         )
       }
@@ -843,10 +843,10 @@ export const classClubActions = {
     // 同步社团世界书条目
     await safeRebuildStep(async () => {
       const joinedClubsSet = new Set(this.player.joinedClubs)
-      
+
       for (const [clubId, club] of Object.entries(this.allClubs)) {
         const clubData = club as ClubData
-        await ensureClubExistsInWorldbook(clubData, this.currentRunId)
+        await ensureClubExistsInWorldbook(clubData, this.currentRunId, this.settings?.useGeminiMode)
 
         if (joinedClubsSet.has(clubId)) {
           await addPlayerToClubInWorldbook(clubId, this.player.name, clubData, this.currentRunId)
@@ -857,7 +857,7 @@ export const classClubActions = {
         await new Promise(r => setTimeout(r, 10)) 
       }
 
-      await syncClubWorldbookState(this.currentRunId)
+      await syncClubWorldbookState(this.currentRunId, this.settings?.useGeminiMode)
     }, 'syncClubWorldbook', 30000) // 增加超时
     
     await new Promise(r => setTimeout(r, 100)) // Yield
@@ -954,7 +954,7 @@ export const classClubActions = {
     // Phase 2 中 syncClassWorldbookState 设置的 enabled 状态可能被后续大量 updateWorldbookWith 调用覆盖，
     // 在所有写操作完成后再执行一次，确保班级条目状态正确。
     await safeRebuildStep(
-      () => syncClassWorldbookState(this.currentRunId, this.allClassData),
+      () => syncClassWorldbookState(this.currentRunId, this.allClassData, this.settings?.useGeminiMode),
       'finalClassSync', 10000
     )
     if (this.player.role === 'teacher' && this.player.teachingClasses && this.player.teachingClasses.length > 0) {
@@ -1027,7 +1027,7 @@ export const classClubActions = {
     this.saveToStorage(true)
     
     try {
-      await syncClubWorldbookState(this.currentRunId)
+      await syncClubWorldbookState(this.currentRunId, this.settings?.useGeminiMode)
       
       await switchSaveSlot()
       await switchForumSlot(this.currentRunId)

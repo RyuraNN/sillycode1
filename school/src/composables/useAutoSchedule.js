@@ -5,6 +5,7 @@
 import { ref } from 'vue'
 import { removeThinking } from '../utils/summaryManager'
 import { ELECTIVE_PREFERENCES, getGradeFromClassId } from '../data/coursePoolData'
+import { mapData, getItem } from '../data/mapData'
 
 const CHUNK_SIZE = 15
 
@@ -36,12 +37,14 @@ export function useAutoSchedule() {
   function buildClassSummary(fullRosterSnapshot) {
     const lines = []
     for (const [classId, classInfo] of Object.entries(fullRosterSnapshot)) {
-      const studentCount = Array.isArray(classInfo.students) ? classInfo.students.length : 0
+      const students = Array.isArray(classInfo.students) ? classInfo.students : []
+      const studentCount = students.length
+      const studentNames = students.map(s => s.name).filter(Boolean).join(', ')
       const ht = classInfo.headTeacher?.name || '无'
       const teachers = Array.isArray(classInfo.teachers)
         ? classInfo.teachers.map(t => `${t.name}(${t.subject || '未定'})`).join(', ') || '无'
         : '无'
-      lines.push(`${classId} "${classInfo.name || classId}": 学生${studentCount}人, 班主任:${ht}, 科任:[${teachers}]`)
+      lines.push(`${classId} "${classInfo.name || classId}": 学生${studentCount}人 [${studentNames}], 班主任:${ht}, 科任:[${teachers}]`)
     }
     return lines.join('\n')
   }
@@ -89,14 +92,23 @@ export function useAutoSchedule() {
     const classSummary = buildClassSummary(existingClasses)
     const courseSummary = buildCourseSummary(coursePool)
     const prefKeys = Object.keys(ELECTIVE_PREFERENCES).join(', ')
+    const locationList = mapData
+      .filter(item => item.id && item.name)
+      .map(item => `${item.id}: ${item.name}`)
+      .join(', ')
 
     const charList = chars.map(c => {
       const parts = [`- ${c.name} (${c.origin || '未知作品'}) ${c.gender === 'male' ? '男' : '女'}`]
-      parts.push(c.role === 'teacher' ? '教师' : c.role === 'staff' ? '职员' : '学生')
+      if (c.role === 'teacher') parts.push('教师')
+      else if (c.role === 'staff') parts.push('职工')
+      else if (c.role === 'external') parts.push('校外人员')
+      else parts.push('学生')
       if (c.electivePreference && c.electivePreference !== 'general') {
         parts.push(`选课偏好:${c.electivePreference}`)
       }
       if (c.subject) parts.push(`科目:${c.subject}`)
+      if (c.staffTitle) parts.push(`职务:${c.staffTitle}`)
+      if (c.workplace) parts.push(`工作地点:${c.workplace}`)
       return parts.join(' ')
     }).join('\n')
 
@@ -123,6 +135,10 @@ ${charList}
 6. 为新课程指定选课偏好标签(preference)
 7. 如果现有班级不够，可建议创建新班级(需提供班级ID和名称)
 8. 班级ID格式: "年级-字母"，如 "1-A", "2-B", "3-C"
+9. 选修课的 location 必须使用以下地点ID之一: ${locationList}
+10. 职工(staff)和校外人员(external)不分配班级，而是分配工作地点(workplace)
+11. 为职工/校外人员建议一个合理的工作地点名称(workplace_name)和地点ID(workplace_id)
+12. workplace_id 优先使用已有地点ID: ${locationList}，如果没有合适的，可以建议新地点名称
 
 [返回两种方案]
 方案A(更合适): 逻辑合理、平衡、符合原作设定
@@ -136,6 +152,7 @@ ${charList}
     <assignment name="角色名" role="headTeacher" class="班级ID" reason="排班理由" />
     <assignment name="角色名" role="subjectTeacher" class="班级ID" subject="科目" reason="排班理由" />
     <teaching name="角色名" course_name="课程名" course_type="elective" grade="1" preference="选课偏好标签" location="教室ID" reason="授课理由" />
+    <workplace_assignment name="角色名" role="staff|external" workplace_id="地点ID" workplace_name="地点显示名" staff_title="职务" reason="理由" />
   </plan>
   <plan type="interesting">
     ...同上格式...
@@ -203,6 +220,24 @@ ${charList}
             grade: attrs.grade || 'universal',
             preference: attrs.preference || 'general',
             location: attrs.location || '',
+            reason: attrs.reason || ''
+          })
+        }
+      }
+
+      // 解析workplace_assignment
+      const wpRegex = /<workplace_assignment\s+([^/]*?)\/>/g
+      let wpMatch
+      while ((wpMatch = wpRegex.exec(planBody)) !== null) {
+        const attrs = parseAttributes(wpMatch[1])
+        if (attrs.name) {
+          result[planType].push({
+            type: 'workplace_assignment',
+            name: attrs.name,
+            role: attrs.role || 'external',
+            workplaceId: attrs.workplace_id || '',
+            workplaceName: attrs.workplace_name || '',
+            staffTitle: attrs.staff_title || '',
             reason: attrs.reason || ''
           })
         }
@@ -386,6 +421,8 @@ ${charList}
         if (!entry) continue
         if (item.type === 'assignment') {
           entry[planType].assignment = item
+        } else if (item.type === 'workplace_assignment') {
+          entry[planType].assignment = item
         } else if (item.type === 'teaching') {
           entry[planType].teachings.push(item)
         }
@@ -413,6 +450,7 @@ ${charList}
     const modifiedClasses = new Set()
     const newCourses = []
     const createdClasses = []
+    const unresolvedLocations = []
 
     // 收集需要创建的新班级
     const neededNewClasses = new Set()
@@ -450,8 +488,59 @@ ${charList}
       const plan = charResult[planType]
       if (!plan.assignment) continue
 
-      const { role, classId, subject } = plan.assignment
       const poolChar = characterPool.find(c => c.name === charName)
+
+      // 处理 workplace_assignment 类型（职工/校外人员）
+      if (plan.assignment.type === 'workplace_assignment') {
+        if (poolChar) {
+          // 从旧班级移除
+          if (poolChar.classId && fullRosterSnapshot[poolChar.classId]) {
+            const oldClass = fullRosterSnapshot[poolChar.classId]
+            if (oldClass.headTeacher?.name === charName) oldClass.headTeacher = null
+            if (Array.isArray(oldClass.teachers)) {
+              oldClass.teachers = oldClass.teachers.filter(t => t.name !== charName)
+            }
+            if (Array.isArray(oldClass.students)) {
+              oldClass.students = oldClass.students.filter(s => s.name !== charName)
+            }
+            if (currentRosterState[poolChar.classId]) {
+              delete currentRosterState[poolChar.classId][charName]
+            }
+            modifiedClasses.add(poolChar.classId)
+          }
+
+          poolChar.role = plan.assignment.role || 'external'
+          poolChar.staffTitle = plan.assignment.staffTitle || poolChar.staffTitle || ''
+          poolChar.workplace = plan.assignment.workplaceId || ''
+          poolChar.classId = ''
+
+          // 收集需要验证的地点
+          if (plan.assignment.workplaceId && !getItem(plan.assignment.workplaceId)) {
+            unresolvedLocations.push({
+              charName: charName,
+              workplaceId: plan.assignment.workplaceId,
+              workplaceName: plan.assignment.workplaceName || plan.assignment.workplaceId
+            })
+          }
+        }
+
+        // 处理teaching条目
+        for (const teaching of plan.teachings) {
+          newCourses.push({
+            name: teaching.courseName,
+            type: teaching.courseType || 'elective',
+            grade: teaching.grade || 'universal',
+            preference: teaching.preference || 'general',
+            teacher: charName,
+            teacherGender: charResult.gender || poolChar?.gender || 'female',
+            location: teaching.location || '',
+            teacherOrigin: charResult.origin || poolChar?.origin || ''
+          })
+        }
+        continue
+      }
+
+      const { role, classId, subject } = plan.assignment
 
       // 从旧班级移除
       if (poolChar?.classId && fullRosterSnapshot[poolChar.classId]) {
@@ -518,12 +607,13 @@ ${charList}
           preference: teaching.preference || 'general',
           teacher: charName,
           teacherGender: charResult.gender || poolChar?.gender || 'female',
-          location: teaching.location || ''
+          location: teaching.location || '',
+          teacherOrigin: charResult.origin || poolChar?.origin || ''
         })
       }
     }
 
-    return { modifiedClasses, newCourses, newClasses: createdClasses }
+    return { modifiedClasses, newCourses, newClasses: createdClasses, unresolvedLocations }
   }
 
   function resetSchedule() {

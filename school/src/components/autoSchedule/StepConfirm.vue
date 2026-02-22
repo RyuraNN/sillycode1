@@ -7,10 +7,11 @@ const props = defineProps({
   choices: { type: Object, default: () => ({}) },
   fullRosterSnapshot: { type: Object, default: () => ({}) },
   generating: { type: Boolean, default: false },
-  clubResults: { type: Array, default: () => [] }
+  clubResults: { type: Array, default: () => [] },
+  unresolvedLocations: { type: Array, default: () => [] }
 })
 
-const emit = defineEmits(['back', 'confirm', 'generate-clubs', 'preview-clubs'])
+const emit = defineEmits(['back', 'confirm', 'generate-clubs', 'preview-clubs', 'resolve-location'])
 
 const clubMode = ref('none') // 'none' | 'original' | 'creative'
 
@@ -22,6 +23,8 @@ const summary = computed(() => {
   let teacherCount = 0
   let headTeacherCount = 0
   let subjectTeacherCount = 0
+  let staffCount = 0
+  let externalCount = 0
   let newCourseCount = 0
   const classChanges = {} // { classId: { addStudents: [], addTeachers: [], headTeacher: '' } }
   const newClassIds = new Set()
@@ -33,21 +36,35 @@ const summary = computed(() => {
     if (!plan?.assignment) continue
 
     const { role, classId, subject } = plan.assignment
-    if (!classChanges[classId]) {
-      classChanges[classId] = { addStudents: [], addTeachers: [], headTeacher: '' }
+
+    // workplace_assignment 类型
+    if (plan.assignment.type === 'workplace_assignment') {
+      if (role === 'staff' || plan.assignment.role === 'staff') staffCount++
+      else externalCount++
+      continue
+    }
+
+    if (classId) {
+      if (!classChanges[classId]) {
+        classChanges[classId] = { addStudents: [], addTeachers: [], headTeacher: '' }
+      }
     }
 
     if (role === 'student') {
       studentCount++
-      classChanges[classId].addStudents.push(charName)
+      if (classId) classChanges[classId].addStudents.push(charName)
     } else if (role === 'headTeacher') {
       teacherCount++
       headTeacherCount++
-      classChanges[classId].headTeacher = charName
+      if (classId) classChanges[classId].headTeacher = charName
     } else if (role === 'subjectTeacher') {
       teacherCount++
       subjectTeacherCount++
-      classChanges[classId].addTeachers.push(`${charName}(${subject || '未定'})`)
+      if (classId) classChanges[classId].addTeachers.push(`${charName}(${subject || '未定'})`)
+    } else if (role === 'staff') {
+      staffCount++
+    } else if (role === 'external') {
+      externalCount++
     }
 
     // 统计新课程
@@ -69,6 +86,8 @@ const summary = computed(() => {
     teacherCount,
     headTeacherCount,
     subjectTeacherCount,
+    staffCount,
+    externalCount,
     newCourseCount,
     affectedClassCount,
     newClassCount: newClassIds.size,
@@ -113,6 +132,23 @@ function handleGenerateClubs() {
             <span class="summary-label">新建班级</span>
             <span class="summary-value highlight">{{ summary.newClassCount }}个</span>
           </div>
+          <div v-if="summary.staffCount > 0" class="summary-item">
+            <span class="summary-label">职工分配</span>
+            <span class="summary-value">🔧 {{ summary.staffCount }}人</span>
+          </div>
+          <div v-if="summary.externalCount > 0" class="summary-item">
+            <span class="summary-label">校外人员</span>
+            <span class="summary-value">🏢 {{ summary.externalCount }}人</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 未解析地点警告 -->
+      <div v-if="unresolvedLocations.length > 0" class="unresolved-warning">
+        <h4>⚠️ 以下工作地点在地图中不存在，需要手动创建：</h4>
+        <div v-for="loc in unresolvedLocations" :key="loc.charName" class="unresolved-item">
+          <span class="unresolved-info">{{ loc.charName }} → {{ loc.workplaceName }} ({{ loc.workplaceId }})</span>
+          <button class="btn-resolve" @click="$emit('resolve-location', loc)">📍 创建地点</button>
         </div>
       </div>
 
@@ -293,6 +329,39 @@ function handleGenerateClubs() {
   flex-shrink: 0;
 }
 .confirm-warning { color: #ff9800; font-size: 12px; }
+.unresolved-warning {
+  background: rgba(255, 152, 0, 0.1);
+  border: 1px solid rgba(255, 152, 0, 0.3);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-top: 12px;
+}
+.unresolved-warning h4 {
+  color: #ff9800;
+  font-size: 13px;
+  margin: 0 0 10px 0;
+}
+.unresolved-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  background: #333;
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+.unresolved-info { color: #ddd; font-size: 13px; }
+.btn-resolve {
+  padding: 4px 10px;
+  background: #E65100;
+  border: none;
+  border-radius: 4px;
+  color: white;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-resolve:hover { background: #BF360C; }
 .btn-back, .btn-confirm {
   padding: 10px 20px;
   border: none;

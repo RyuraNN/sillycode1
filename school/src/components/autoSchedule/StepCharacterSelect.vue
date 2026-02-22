@@ -35,6 +35,8 @@ const groupedCharacters = computed(() => {
     if (prefFilter.value && c.electivePreference !== prefFilter.value) return
     if (roleFilter.value === 'student' && c.role !== 'student') return
     if (roleFilter.value === 'teacher' && c.role !== 'teacher') return
+    if (roleFilter.value === 'staff' && c.role !== 'staff') return
+    if (roleFilter.value === 'external' && c.role !== 'external') return
     if (roleFilter.value === 'unassigned' && c.classId) return
 
     if (!groups[origin]) groups[origin] = []
@@ -59,9 +61,21 @@ const stats = computed(() => {
   const pool = props.characterPool || []
   const students = all.filter(name => {
     const c = pool.find(p => p.name === name)
-    return c && c.role !== 'teacher'
+    return c && c.role === 'student'
   }).length
-  return { total: all.length, students, teachers: all.length - students }
+  const teachers = all.filter(name => {
+    const c = pool.find(p => p.name === name)
+    return c && c.role === 'teacher'
+  }).length
+  const staff = all.filter(name => {
+    const c = pool.find(p => p.name === name)
+    return c && c.role === 'staff'
+  }).length
+  const external = all.filter(name => {
+    const c = pool.find(p => p.name === name)
+    return c && c.role === 'external'
+  }).length
+  return { total: all.length, students, teachers, staff, external }
 })
 
 function toggleChar(name) {
@@ -144,6 +158,8 @@ function handleNext() {
         <option value="">全部角色</option>
         <option value="student">学生</option>
         <option value="teacher">教师</option>
+        <option value="staff">职工</option>
+        <option value="external">校外人员</option>
         <option value="unassigned">仅未分班</option>
       </select>
     </div>
@@ -182,7 +198,7 @@ function handleNext() {
             />
             <span class="char-name">{{ c.name }}</span>
             <span class="char-gender">{{ c.gender === 'male' ? '♂' : '♀' }}</span>
-            <span class="char-role" :class="c.role">{{ c.role === 'teacher' ? '教师' : '学生' }}</span>
+            <span class="char-role" :class="c.role">{{ c.role === 'teacher' ? '👩‍🏫 教师' : c.role === 'staff' ? '🔧 职工' : c.role === 'external' ? '🏢 校外' : '👩‍🎓 学生' }}</span>
             <span v-if="c.electivePreference && c.electivePreference !== 'general'" class="char-pref">
               {{ ELECTIVE_PREFERENCES[c.electivePreference]?.icon || '' }} {{ c.electivePreference }}
             </span>
@@ -199,7 +215,7 @@ function handleNext() {
     <div class="step-footer">
       <div class="stats">
         已选: <strong>{{ stats.total }}人</strong>
-        (学生{{ stats.students }}, 教师{{ stats.teachers }})
+        (学生{{ stats.students }}, 教师{{ stats.teachers }}<span v-if="stats.staff">, 职工{{ stats.staff }}</span><span v-if="stats.external">, 校外{{ stats.external }}</span>)
         <span v-if="stats.total > 20" class="batch-hint">将分{{ Math.ceil(stats.total / 15) }}批处理</span>
       </div>
       <button class="btn-next" :disabled="stats.total === 0" @click="handleNext">
@@ -319,6 +335,8 @@ function handleNext() {
   color: #aaa;
 }
 .char-role.teacher { background: #1565C0; color: #fff; }
+.char-role.staff { background: #6A1B9A; color: #fff; }
+.char-role.external { background: #E65100; color: #fff; }
 .char-pref { font-size: 11px; color: #888; }
 .char-unassigned {
   font-size: 10px;

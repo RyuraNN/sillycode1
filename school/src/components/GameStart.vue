@@ -919,7 +919,7 @@ const confirmSignature = async () => {
   
   // 设置世界书策略（选中班级蓝灯，其他绿灯）并创建班级群
   if (formData.value.classId && playerRole.value === 'student') {
-    await setPlayerClass(formData.value.classId)
+    await setPlayerClass(formData.value.classId, gameStore.settings?.useGeminiMode)
     // 设置玩家班级并生成课表，这个函数会自动调用 joinClassGroup
     // 创建班级群并保存到世界书
     await gameStore.setPlayerClass(formData.value.classId)

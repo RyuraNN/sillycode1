@@ -22,6 +22,7 @@ export const timeActions = {
 
     try {
       const previousDay = this.gameTime.day
+      const previousWeekNumber = this.getWeekNumber?.() ?? 0
 
       const currentDate = new Date(
         this.gameTime.year,
@@ -74,6 +75,14 @@ export const timeActions = {
         // 周报系统：假期中跳过
         const termInfo = this.getTermInfo?.()
         const isVacationNow = termInfo?.isVacation === true
+
+        // 周数变化时：重新生成课表
+        const currentWeekNumber = this.getWeekNumber?.() ?? 0
+        if (currentWeekNumber !== previousWeekNumber && this.regenerateSchedules) {
+          console.log(`[TimeActions] Week changed: ${previousWeekNumber} → ${currentWeekNumber}, regenerating schedules`)
+          this.regenerateSchedules()
+        }
+
         if (!isVacationNow) {
           // 周一：存快照
           if (this.gameTime.weekday === 'Monday' && this.saveWeeklySnapshot) {
@@ -86,6 +95,15 @@ export const timeActions = {
             this.generateWeeklyPreview()
           }
         }
+
+        // 新增：为前一天生成日记（异步，不阻塞时间推进）
+        const prevDateForDiary = new Date(this.gameTime.year, this.gameTime.month - 1, previousDay)
+        const prevDateStr = `${prevDateForDiary.getFullYear()}-${String(prevDateForDiary.getMonth()+1).padStart(2,'0')}-${String(prevDateForDiary.getDate()).padStart(2,'0')}`
+        import('../../utils/summaryManager').then(({ generateDiary }) => {
+          generateDiary(prevDateStr).catch((e: any) => {
+            console.error('[TimeActions] Failed to generate diary:', e)
+          })
+        })
       }
 
       // 更新NPC位置（每小时更新一次，内部有缓存机制）

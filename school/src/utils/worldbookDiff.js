@@ -8,6 +8,7 @@ import {
   fetchAcademicDataFromWorldbook,
   updateClassDataInWorldbook,
   createClubInWorldbook,
+  batchUpdateClubsInWorldbook,
   updateAcademicDataInWorldbook
 } from './worldbookParser'
 import {
@@ -368,10 +369,11 @@ export async function applyResolvedDiffs(resolvedDiffs) {
       }
       affectedClubIds.add(d.entityId)
     }
-    for (const clubId of affectedClubIds) {
-      if (gameStore.allClubs[clubId]) {
-        await createClubInWorldbook(gameStore.allClubs[clubId], gameStore.currentRunId)
-      }
+    if (affectedClubIds.size > 0) {
+      await batchUpdateClubsInWorldbook(
+        [...affectedClubIds].map(id => gameStore.allClubs[id]).filter(Boolean),
+        gameStore.currentRunId
+      )
     }
   }
 

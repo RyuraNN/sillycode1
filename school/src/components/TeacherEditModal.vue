@@ -34,45 +34,21 @@
           <!-- 任教信息 -->
           <div class="form-section">
             <h4>任教信息</h4>
-            <div class="form-row">
-              <label>任教科目</label>
-              <input v-model="localForm.subject" placeholder="如：数学、语文" />
-            </div>
-
-            <div class="form-row">
-              <label>
-                <input type="checkbox" v-model="localForm.isHeadTeacher" />
-                担任班主任
-              </label>
-            </div>
-
-            <div v-if="localForm.isHeadTeacher" class="form-row">
-              <label>班主任班级</label>
-              <select v-model="localForm.classId">
-                <option value="">未分配</option>
-                <option v-for="(classInfo, classId) in classes" :key="classId" :value="classId">
-                  {{ classInfo.name || classId }}
-                </option>
-              </select>
-            </div>
-
-            <div v-if="!localForm.isHeadTeacher" class="form-row">
-              <label>任教班级（可多选）</label>
-              <div class="class-checkboxes">
-                <label
-                  v-for="(classInfo, classId) in classes"
-                  :key="classId"
-                  class="class-checkbox-item"
-                >
-                  <input
-                    type="checkbox"
-                    :value="classId"
-                    :checked="localForm.teachingClasses.includes(classId)"
-                    @change="toggleTeachingClass(classId)"
-                  />
-                  {{ classInfo.name || classId }}
+            <div class="class-assignments">
+              <div v-for="(assignment, idx) in localForm.classAssignments" :key="idx" class="assignment-row">
+                <select v-model="assignment.classId" class="assignment-class">
+                  <option value="">选择班级</option>
+                  <option v-for="(classInfo, cid) in availableClasses(idx)" :key="cid" :value="cid">
+                    {{ classInfo.name || cid }}
+                  </option>
+                </select>
+                <label class="assignment-homeroom">
+                  <input type="checkbox" v-model="assignment.isHomeroom" /> 班主任
                 </label>
+                <input v-model="assignment.subject" placeholder="科目" class="assignment-subject" />
+                <button class="btn-remove-assignment" @click="removeAssignment(idx)">✕</button>
               </div>
+              <button class="btn-add-assignment" @click="addAssignment">＋ 添加班级</button>
             </div>
           </div>
 
@@ -167,14 +143,24 @@ const localForm = computed({
   set: (val) => emit('update:form', val)
 })
 
-const toggleTeachingClass = (classId) => {
-  const classes = localForm.value.teachingClasses
-  const idx = classes.indexOf(classId)
-  if (idx > -1) {
-    classes.splice(idx, 1)
-  } else {
-    classes.push(classId)
+const addAssignment = () => {
+  localForm.value.classAssignments.push({ classId: '', isHomeroom: false, subject: '' })
+}
+
+const removeAssignment = (idx) => {
+  localForm.value.classAssignments.splice(idx, 1)
+}
+
+const availableClasses = (currentIdx) => {
+  const usedIds = localForm.value.classAssignments
+    .filter((_, i) => i !== currentIdx)
+    .map(a => a.classId)
+    .filter(id => id)
+  const result = {}
+  for (const [cid, info] of Object.entries(props.classes || {})) {
+    if (!usedIds.includes(cid)) result[cid] = info
   }
+  return result
 }
 
 const handleSave = () => {
@@ -311,32 +297,42 @@ const handleSave = () => {
   cursor: pointer;
 }
 
-.class-checkboxes {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 200px;
-  overflow-y: auto;
-  padding: 10px;
-  background: #2a2a2a;
-  border: 1px solid #444;
-  border-radius: 6px;
+.class-assignments {
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 250px; overflow-y: auto;
 }
-
-.class-checkbox-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #ccc;
-  cursor: pointer;
-  padding: 6px;
-  border-radius: 4px;
-  transition: all 0.2s;
+.assignment-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; background: #1a1a1a;
+  border: 1px solid #444; border-radius: 6px;
 }
-
-.class-checkbox-item:hover {
-  background: #333;
+.assignment-class {
+  flex: 1; min-width: 0;
+  padding: 6px 8px; background: #2a2a2a; border: 1px solid #555;
+  border-radius: 4px; color: #fff; font-size: 13px;
 }
+.assignment-homeroom {
+  display: flex; align-items: center; gap: 4px;
+  color: #ccc; font-size: 12px; white-space: nowrap; cursor: pointer;
+}
+.assignment-homeroom input[type="checkbox"] { cursor: pointer; }
+.assignment-subject {
+  width: 80px; padding: 6px 8px;
+  background: #2a2a2a; border: 1px solid #555;
+  border-radius: 4px; color: #fff; font-size: 13px;
+}
+.btn-remove-assignment {
+  padding: 4px 8px; background: #c62828; color: white;
+  border: none; border-radius: 4px; cursor: pointer;
+  font-size: 12px; flex-shrink: 0;
+}
+.btn-remove-assignment:hover { background: #d32f2f; }
+.btn-add-assignment {
+  padding: 6px 12px; background: #3a6ea5; color: white;
+  border: none; border-radius: 6px; cursor: pointer;
+  font-size: 13px; align-self: flex-start;
+}
+.btn-add-assignment:hover { background: #4a7eb5; }
 
 .personality-sliders {
   display: flex;

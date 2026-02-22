@@ -27,10 +27,10 @@ export const WEATHER_TYPES = {
 
 // 季节定义
 export const SEASONS = {
-  spring: { months: [3, 4, 5], name: '春季', baseTemp: 18, tempRange: 10, dayNightDiff: 8 },
-  summer: { months: [6, 7, 8], name: '夏季', baseTemp: 30, tempRange: 6, dayNightDiff: 6 },
-  autumn: { months: [9, 10, 11], name: '秋季', baseTemp: 16, tempRange: 12, dayNightDiff: 10 },
-  winter: { months: [12, 1, 2], name: '冬季', baseTemp: 4, tempRange: 8, dayNightDiff: 12 }
+  spring: { months: [3, 4, 5], name: '春季', baseTemp: 16, tempRange: 10, dayNightDiff: 8 },
+  summer: { months: [6, 7, 8], name: '夏季', baseTemp: 28, tempRange: 6, dayNightDiff: 7 },
+  autumn: { months: [9, 10, 11], name: '秋季', baseTemp: 18, tempRange: 10, dayNightDiff: 9 },
+  winter: { months: [12, 1, 2], name: '冬季', baseTemp: 6, tempRange: 7, dayNightDiff: 10 }
 }
 
 // ============ 季节天气转换矩阵 ============
@@ -38,9 +38,9 @@ export const SEASONS = {
 // 格式: { 当前天气: { 可转换的天气: 权重 } }
 
 const SPRING_TRANSITIONS = {
-  sunny: { sunny: 40, partly_cloudy: 45, cloudy: 10, fog: 5 },
+  sunny: { sunny: 35, partly_cloudy: 45, cloudy: 15, fog: 5 },
   partly_cloudy: { sunny: 25, partly_cloudy: 40, cloudy: 30, fog: 5 },
-  cloudy: { sunny: 10, partly_cloudy: 25, cloudy: 35, overcast: 25, light_rain: 5 },
+  cloudy: { sunny: 8, partly_cloudy: 22, cloudy: 35, overcast: 25, light_rain: 10 },
   overcast: { partly_cloudy: 10, cloudy: 30, overcast: 35, light_rain: 20, fog: 5 },
   light_rain: { cloudy: 15, overcast: 30, light_rain: 40, rain: 15 },
   rain: { overcast: 10, light_rain: 35, rain: 40, heavy_rain: 15 },
@@ -50,8 +50,8 @@ const SPRING_TRANSITIONS = {
 }
 
 const SUMMER_TRANSITIONS = {
-  sunny: { sunny: 55, partly_cloudy: 30, cloudy: 10, thunderstorm: 5 },
-  partly_cloudy: { sunny: 30, partly_cloudy: 40, cloudy: 20, thunderstorm: 10 },
+  sunny: { sunny: 45, partly_cloudy: 35, cloudy: 12, thunderstorm: 8 },
+  partly_cloudy: { sunny: 25, partly_cloudy: 35, cloudy: 25, thunderstorm: 15 },
   cloudy: { sunny: 15, partly_cloudy: 30, cloudy: 30, overcast: 15, thunderstorm: 10 },
   overcast: { partly_cloudy: 15, cloudy: 30, overcast: 25, light_rain: 15, thunderstorm: 15 },
   light_rain: { cloudy: 20, overcast: 25, light_rain: 30, rain: 15, thunderstorm: 10 },
@@ -63,7 +63,7 @@ const SUMMER_TRANSITIONS = {
 }
 
 const AUTUMN_TRANSITIONS = {
-  sunny: { sunny: 60, partly_cloudy: 30, cloudy: 8, fog: 2 },
+  sunny: { sunny: 65, partly_cloudy: 25, cloudy: 8, fog: 2 },
   partly_cloudy: { sunny: 35, partly_cloudy: 45, cloudy: 18, fog: 2 },
   cloudy: { sunny: 20, partly_cloudy: 35, cloudy: 35, overcast: 8, fog: 2 },
   overcast: { partly_cloudy: 20, cloudy: 40, overcast: 30, light_rain: 10 },
@@ -78,7 +78,7 @@ const WINTER_TRANSITIONS = {
   sunny: { sunny: 45, partly_cloudy: 35, cloudy: 15, fog: 5 },
   partly_cloudy: { sunny: 25, partly_cloudy: 40, cloudy: 30, fog: 5 },
   cloudy: { sunny: 10, partly_cloudy: 25, cloudy: 40, overcast: 20, fog: 5 },
-  overcast: { partly_cloudy: 10, cloudy: 35, overcast: 35, light_snow: 15, light_rain: 5 },
+  overcast: { partly_cloudy: 8, cloudy: 30, overcast: 35, light_snow: 15, light_rain: 12 },
   light_rain: { cloudy: 20, overcast: 35, light_rain: 30, rain: 10, light_snow: 5 },
   rain: { overcast: 20, light_rain: 40, rain: 30, heavy_rain: 5, snow: 5 },
   heavy_rain: { light_rain: 25, rain: 45, heavy_rain: 20, snow: 10 },
@@ -143,18 +143,18 @@ const TIME_PERIOD_MODIFIERS = {
 // 不同天气的平均持续时段数和稳定性
 
 const WEATHER_PERSISTENCE = {
-  sunny: { minDuration: 4, maxDuration: 24, stability: 0.85 },      // 晴天持续4-48小时，很稳定
+  sunny: { minDuration: 3, maxDuration: 24, stability: 0.85 },      // 晴天持续6-48小时，很稳定
   partly_cloudy: { minDuration: 2, maxDuration: 12, stability: 0.70 }, // 多云2-24小时
   cloudy: { minDuration: 2, maxDuration: 16, stability: 0.75 },     // 阴天2-32小时
   overcast: { minDuration: 2, maxDuration: 10, stability: 0.70 },   // 阴沉2-20小时
-  light_rain: { minDuration: 2, maxDuration: 18, stability: 0.65 }, // 小雨可以持续很久
+  light_rain: { minDuration: 2, maxDuration: 14, stability: 0.65 }, // 小雨可以持续较久
   rain: { minDuration: 1, maxDuration: 8, stability: 0.60 },        // 中雨2-16小时
   heavy_rain: { minDuration: 1, maxDuration: 4, stability: 0.50 },  // 大雨2-8小时
   thunderstorm: { minDuration: 1, maxDuration: 3, stability: 0.40 }, // 雷雨2-6小时，不稳定
   light_snow: { minDuration: 2, maxDuration: 16, stability: 0.70 },
   snow: { minDuration: 2, maxDuration: 10, stability: 0.65 },
   heavy_snow: { minDuration: 1, maxDuration: 6, stability: 0.55 },
-  fog: { minDuration: 1, maxDuration: 4, stability: 0.50 },         // 雾2-8小时
+  fog: { minDuration: 1, maxDuration: 6, stability: 0.50 },         // 雾2-12小时
   haze: { minDuration: 3, maxDuration: 12, stability: 0.75 }        // 霾6-24小时
 }
 

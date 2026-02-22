@@ -6,8 +6,9 @@ import { useRosterData } from '../composables/useRosterData'
 import { useCharacterPool } from '../composables/useCharacterPool'
 import { useBatchComplete } from '../composables/useBatchComplete'
 import { useAIImport } from '../composables/useAIImport'
+import { useAutoClubGenerate } from '../composables/useAutoClubGenerate'
 import { saveRosterBackup, saveFullCharacterPool, getSnapshotData, saveSnapshotData } from '../utils/indexedDB'
-import { updateClassDataInWorldbook, updateAcademicDataInWorldbook, updateStaffRosterInWorldbook, ensureClubExistsInWorldbook, syncClubWorldbookState } from '../utils/worldbookParser'
+import { updateClassDataInWorldbook, updateAcademicDataInWorldbook, updateTagDataInWorldbook, updateStaffRosterInWorldbook, ensureClubExistsInWorldbook, syncClubWorldbookState, createClubInWorldbook, addNpcToClubInWorldbook, batchUpdateClubsInWorldbook, removeClubFromWorldbook } from '../utils/worldbookParser'
 import { saveSocialData } from '../utils/socialRelationshipsWorldbook'
 import { saveImpressionDataImmediate } from '../utils/impressionWorldbook'
 import { getRelationship, setRelationship, removeRelationship, removeCharacter as removeCharacterFromRelations, flushPendingSocialData } from '../utils/relationshipManager'
@@ -72,9 +73,21 @@ const {
   resetAIImport
 } = useAIImport()
 
+const {
+  generating: clubGenerating,
+  clubResults: clubGenResults,
+  clubAdditions: clubGenAdditions,
+  clubError: clubGenError,
+  progress: clubGenProgress,
+  newAdvisors: clubNewAdvisors,
+  generateClubs,
+  applyClubResults: applyGeneratedClubs,
+  resetClubs: resetGeneratedClubs
+} = useAutoClubGenerate()
+
 // ==================== 状态管理 ====================
 const activeTab = ref('filter') // 'filter' | 'composer' | 'characterEditor' | 'clubEditor' | 'relationshipEditor' | 'autoSchedule'
-const filterSubTab = ref('student') // 'student' | 'teacher'
+const filterSubTab = ref('student') // 'student' | 'teacher' | 'external'
 const saving = ref(false)
 const isLocked = ref(false)
 
@@ -107,10 +120,7 @@ const teacherEditForm = ref({
   name: '',
   gender: 'female',
   origin: '',
-  subject: '',
-  classId: '',
-  isHeadTeacher: false,
-  teachingClasses: [],
+  classAssignments: [{ classId: '', isHomeroom: false, subject: '' }],
   personality: { order: 0, altruism: 0, tradition: 0, peace: 50 },
   notes: ''
 })
@@ -156,6 +166,7 @@ const charEditorWorkFilter = ref('')
 // 社团编辑器状态
 const showClubEditor = ref(false)
 const editingClub = ref(null)
+const deletedClubs = ref([])  // 回收站
 const clubEditForm = ref({
   name: '', description: '', coreSkill: '',
   activityDay: '', location: '', advisor: '',
@@ -163,7 +174,11 @@ const clubEditForm = ref({
   mode: 'normal',
   customId: ''
 })
-const mapEditorContext = ref('class') // 'class' | 'club'
+const mapEditorContext = ref('class') // 'class' | 'club' | 'external_workplace' | 'auto_schedule_workplace'
+
+// 自动排班地点解析状态
+const pendingLocationResolve = ref(null)
+const autoScheduleResolvedLocation = ref(null)
 
 // 关系编辑器状态
 const showRelationshipEditor = ref(false)
@@ -239,9 +254,12 @@ const candidateCounts = computed(() => {
     byClassTotal += count
   }
 
+  const externalCount = pool.filter(c => c.role === 'external').length
+
   return {
     missing_academic: missingAcademic,
     missing_personality: missingPersonality,
+    external: externalCount,
     all: unique.size,
     classCounts,
     by_class: byClassTotal
@@ -631,13 +649,13 @@ const handleSave = async () => {
     }
 
     // 5. 同步学力数据
-    const academicMap = {}
-    characterPool.value.forEach(c => {
-      if (c.role === 'student' && c.academicProfile) {
-        academicMap[c.name] = c.academicProfile
-      }
-    })
-    await updateAcademicDataInWorldbook(academicMap)
+    const academicList = characterPool.value
+      .filter(c => c.role === 'student' && c.academicProfile)
+      .map(c => ({ name: c.name, academicProfile: c.academicProfile }))
+    await updateAcademicDataInWorldbook(academicList)
+
+    // 5.5. 同步标签数据（选课偏好 + 日程模板）
+    await updateTagDataInWorldbook(fullRosterSnapshot.value)
 
     // 6. 同步性格数据
     const socialMap = {}
@@ -664,6 +682,40 @@ const handleSave = async () => {
 }
 
 // ==================== 角色编辑器功能 ====================
+
+// 校外人员列表
+const externalNpcs = computed(() => {
+  return characterPool.value.filter(c => c.role === 'external')
+})
+
+const getLocationName = (workplace) => {
+  const item = getItem(workplace)
+  return item ? item.name : workplace
+}
+
+const handleAddExternal = () => {
+  editingCharacter.value = null
+  characterEditForm.value = {
+    name: '',
+    gender: 'female',
+    origin: '',
+    classId: '',
+    role: 'external',
+    subject: '',
+    isHeadTeacher: false,
+    assignments: [],
+    electivePreference: 'general',
+    scheduleTag: '',
+    staffTitle: '',
+    workplace: '',
+    grade: undefined,
+    notes: '',
+    personality: { order: 0, altruism: 0, tradition: 0, peace: 50 },
+    academicProfile: { level: 'avg', potential: 'medium', traits: [] }
+  }
+  showCharacterEditor.value = true
+}
+
 const handleAddCharacter = () => {
   editingCharacter.value = null
   characterEditForm.value = {
@@ -751,10 +803,7 @@ const handleAddTeacher = () => {
     name: '',
     gender: 'female',
     origin: '',
-    subject: '',
-    classId: Object.keys(fullRosterSnapshot.value)[0] || '',
-    isHeadTeacher: false,
-    teachingClasses: [],
+    classAssignments: [{ classId: '', isHomeroom: false, subject: '' }],
     personality: { order: 0, altruism: 0, tradition: 0, peace: 50 },
     notes: ''
   }
@@ -764,13 +813,20 @@ const handleAddTeacher = () => {
 const handleEditTeacher = (teacher) => {
   editingTeacher.value = teacher
 
-  // 收集该教师在所有班级中的任教记录
-  const existingTeachingClasses = []
+  // 从班级数据构建 classAssignments
+  const assignments = []
   for (const [classId, classInfo] of Object.entries(fullRosterSnapshot.value)) {
-    if (Array.isArray(classInfo.teachers)) {
-      if (classInfo.teachers.some(t => t.name === teacher.name)) {
-        existingTeachingClasses.push(classId)
-      }
+    const isHomeroom = classInfo.headTeacher?.name === teacher.name
+    const teacherEntry = Array.isArray(classInfo.teachers)
+      ? classInfo.teachers.find(t => t.name === teacher.name)
+      : null
+
+    if (isHomeroom || teacherEntry) {
+      assignments.push({
+        classId,
+        isHomeroom,
+        subject: teacherEntry?.subject || ''
+      })
     }
   }
 
@@ -778,10 +834,7 @@ const handleEditTeacher = (teacher) => {
     name: teacher.name || '',
     gender: teacher.gender || 'female',
     origin: teacher.origin || '',
-    subject: teacher.subject || '',
-    classId: teacher.classId || '',
-    isHeadTeacher: teacher.isHeadTeacher || false,
-    teachingClasses: existingTeachingClasses,
+    classAssignments: assignments.length > 0 ? assignments : [{ classId: '', isHomeroom: false, subject: '' }],
     personality: teacher.personality || { order: 0, altruism: 0, tradition: 0, peace: 50 },
     notes: teacher.notes || ''
   }
@@ -795,57 +848,45 @@ const handleSaveTeacher = async () => {
     return
   }
 
+  const validAssignments = form.classAssignments.filter(a => a.classId)
+  if (validAssignments.length === 0) {
+    showMessage('请至少分配一个班级')
+    return
+  }
+
   const oldName = editingTeacher.value?.name || ''
 
-  if (form.isHeadTeacher) {
-    if (!form.classId) {
-      showMessage('请选择班主任班级')
-      return
-    }
-    // 清除旧记录（所有班级）
-    if (oldName) {
-      for (const [, classInfo] of Object.entries(fullRosterSnapshot.value)) {
-        if (classInfo.headTeacher?.name === oldName) {
-          classInfo.headTeacher = { name: '', gender: 'female', origin: '', role: 'teacher' }
-        }
-        if (Array.isArray(classInfo.teachers)) {
-          const idx = classInfo.teachers.findIndex(t => t.name === oldName)
-          if (idx !== -1) classInfo.teachers.splice(idx, 1)
-        }
+  // 1. 清除旧记录（所有班级）
+  if (oldName) {
+    for (const [, classInfo] of Object.entries(fullRosterSnapshot.value)) {
+      if (classInfo.headTeacher?.name === oldName) {
+        classInfo.headTeacher = { name: '', gender: 'female', origin: '', role: 'teacher' }
+      }
+      if (Array.isArray(classInfo.teachers)) {
+        const idx = classInfo.teachers.findIndex(t => t.name === oldName)
+        if (idx !== -1) classInfo.teachers.splice(idx, 1)
       }
     }
-    // 设置新班主任
-    const targetClass = fullRosterSnapshot.value[form.classId]
-    if (targetClass) {
-      targetClass.headTeacher = {
+  }
+
+  // 2. 写入新记录
+  for (const assignment of validAssignments) {
+    const classData = fullRosterSnapshot.value[assignment.classId]
+    if (!classData) continue
+
+    // 班主任
+    if (assignment.isHomeroom) {
+      classData.headTeacher = {
         name: form.name, gender: form.gender, origin: form.origin, role: 'teacher'
       }
     }
-  } else {
-    if (!form.teachingClasses || form.teachingClasses.length === 0) {
-      showMessage('请至少选择一个任教班级')
-      return
-    }
-    // 清除旧记录（所有班级）
-    if (oldName) {
-      for (const [, classInfo] of Object.entries(fullRosterSnapshot.value)) {
-        if (classInfo.headTeacher?.name === oldName) {
-          classInfo.headTeacher = { name: '', gender: 'female', origin: '', role: 'teacher' }
-        }
-        if (Array.isArray(classInfo.teachers)) {
-          const idx = classInfo.teachers.findIndex(t => t.name === oldName)
-          if (idx !== -1) classInfo.teachers.splice(idx, 1)
-        }
-      }
-    }
-    // 添加到所有选中的班级
-    for (const classId of form.teachingClasses) {
-      const classData = fullRosterSnapshot.value[classId]
-      if (!classData) continue
+
+    // 科任（无论是否班主任，只要有科目就加入 teachers 列表）
+    if (assignment.subject) {
       if (!Array.isArray(classData.teachers)) classData.teachers = []
       classData.teachers.push({
         name: form.name, gender: form.gender, origin: form.origin,
-        subject: form.subject, role: 'teacher'
+        subject: assignment.subject, role: 'teacher'
       })
     }
   }
@@ -982,6 +1023,9 @@ const handleConfirmAIImport = async () => {
     if (char.roleSuggestion === 'staff') {
       role = 'staff'
       staffTitle = '职工'
+    } else if (char.roleSuggestion === 'external') {
+      role = 'external'
+      staffTitle = char.staffTitle || '校外人员'
     } else if (char.roleSuggestion === 'teacher') {
       role = 'teacher'
     }
@@ -993,7 +1037,7 @@ const handleConfirmAIImport = async () => {
     characterPool.value.push({
       name: char.name,
       gender: char.gender,
-      origin: `(${char.work})`,
+      origin: char.work || '',
       classId: '',
       role: role,
       staffTitle: staffTitle,
@@ -1297,6 +1341,17 @@ const handleLocationSelected = (location) => {
   if (mapEditorContext.value === 'club') {
     clubEditForm.value.location = location.id
     showMapEditor.value = false
+  } else if (mapEditorContext.value === 'external_workplace') {
+    characterEditForm.value.workplace = location.id
+    showMapEditor.value = false
+  } else if (mapEditorContext.value === 'auto_schedule_workplace') {
+    autoScheduleResolvedLocation.value = {
+      ...pendingLocationResolve.value,
+      resolvedId: location.id,
+      resolvedName: location.name
+    }
+    pendingLocationResolve.value = null
+    showMapEditor.value = false
   } else {
     handleClassroomSelected(location)
   }
@@ -1304,6 +1359,17 @@ const handleLocationSelected = (location) => {
 
 const handleClubSelectLocation = () => {
   mapEditorContext.value = 'club'
+  showMapEditor.value = true
+}
+
+const handleSelectWorkplace = () => {
+  mapEditorContext.value = 'external_workplace'
+  showMapEditor.value = true
+}
+
+const handleAutoScheduleResolveLocation = (loc) => {
+  pendingLocationResolve.value = loc
+  mapEditorContext.value = 'auto_schedule_workplace'
   showMapEditor.value = true
 }
 
@@ -1362,8 +1428,9 @@ const handleSaveClub = async () => {
         mode: form.mode,
         members: form.members || club.members || []
       })
-      await ensureClubExistsInWorldbook(club, gameStore.currentRunId)
-      await syncClubWorldbookState(gameStore.currentRunId)
+      // 社团编辑器是游戏外管理工具，直接更新基础条目内容
+      await batchUpdateClubsInWorldbook([club], null)
+      await syncClubWorldbookState(gameStore.currentRunId, gameStore.settings?.useGeminiMode)
     }
     showMessage('社团已更新')
   } else if (form.customId?.trim()) {
@@ -1387,8 +1454,8 @@ const handleSaveClub = async () => {
     if (!gameStore.player.joinedClubs.includes(clubId)) {
       gameStore.player.joinedClubs.push(clubId)
     }
-    await ensureClubExistsInWorldbook(newClub, gameStore.currentRunId)
-    await syncClubWorldbookState(gameStore.currentRunId)
+    await ensureClubExistsInWorldbook(newClub, null, gameStore.settings?.useGeminiMode)
+    await syncClubWorldbookState(gameStore.currentRunId, gameStore.settings?.useGeminiMode)
     gameStore.saveToStorage(true)
     showMessage('社团已创建')
   } else {
@@ -1403,8 +1470,8 @@ const handleSaveClub = async () => {
       if (newClub) {
         newClub.mode = form.mode
         if (form.mode !== 'normal') {
-          await ensureClubExistsInWorldbook(newClub, gameStore.currentRunId)
-          await syncClubWorldbookState(gameStore.currentRunId)
+          await ensureClubExistsInWorldbook(newClub, null, gameStore.settings?.useGeminiMode)
+          await syncClubWorldbookState(gameStore.currentRunId, gameStore.settings?.useGeminiMode)
         }
       }
     }
@@ -1416,14 +1483,99 @@ const handleSaveClub = async () => {
 const handleDeleteClub = async (clubId) => {
   const club = gameStore.allClubs[clubId]
   if (!club) return
+  // 移入回收站
+  deletedClubs.value.push({ id: clubId, name: club.name || clubId, data: { ...club } })
   delete gameStore.allClubs[clubId]
   if (gameStore.player?.joinedClubs) {
     const idx = gameStore.player.joinedClubs.indexOf(clubId)
     if (idx !== -1) gameStore.player.joinedClubs.splice(idx, 1)
   }
-  await syncClubWorldbookState(gameStore.currentRunId)
+  // 禁用世界书条目（不删除，恢复时可重新启用）
+  await removeClubFromWorldbook(clubId)
   gameStore.saveToStorage(true)
-  showMessage(`社团"${club.name}"已删除`)
+}
+
+const handleRestoreClub = async (clubId) => {
+  const idx = deletedClubs.value.findIndex(c => c.id === clubId)
+  if (idx === -1) return
+  const restored = deletedClubs.value.splice(idx, 1)[0]
+  if (!gameStore.allClubs) gameStore.allClubs = {}
+  gameStore.allClubs[clubId] = restored.data
+  await syncClubWorldbookState(gameStore.currentRunId, gameStore.settings?.useGeminiMode)
+  gameStore.saveToStorage(true)
+}
+
+const handleConfirmDelete = async (clubId) => {
+  const idx = deletedClubs.value.findIndex(c => c.id === clubId)
+  if (idx === -1) return
+  const club = deletedClubs.value.splice(idx, 1)[0]
+  await removeClubFromWorldbook(clubId, true)  // permanent=true，真正删除条目
+  gameStore.saveToStorage(true)
+  showMessage(`社团"${club.name}"已永久删除`)
+}
+
+// AI自动生成社团
+async function handleAutoGenerateClubs(mode) {
+  const pool = characterPool.value || []
+  const result = await generateClubs(pool, mode, gameStore.allClubs || {})
+  if (!result.success) {
+    showMessage(`社团生成失败: ${result.message}`)
+  }
+}
+
+async function handleApplyGeneratedClubs() {
+  try {
+    // 自动创建新教师到角色池
+    let newTeacherCount = 0
+    for (const advisor of clubNewAdvisors.value) {
+      if (!characterPool.value.find(c => c.name === advisor.name)) {
+        characterPool.value.push({
+          name: advisor.name,
+          gender: advisor.gender || '',
+          origin: advisor.origin || '',
+          classId: '',
+          role: 'teacher',
+          staffTitle: '',
+          workplace: '',
+          subject: '',
+          isHeadTeacher: false,
+          electivePreference: 'general',
+          scheduleTag: '',
+          personality: { order: 0, altruism: 0, tradition: 0, peace: 50 },
+          academicProfile: { level: 'avg', potential: 'medium', traits: [] },
+          userCreated: true
+        })
+        newTeacherCount++
+      }
+    }
+    if (newTeacherCount > 0) {
+      await saveFullCharacterPool(deepClone(characterPool.value))
+    }
+
+    const applyResult = await applyGeneratedClubs(
+      clubGenResults.value,
+      clubGenAdditions.value,
+      gameStore,
+      createClubInWorldbook,
+      addNpcToClubInWorldbook,
+      null  // 游戏外管理，不创建 run-specific 副本
+    )
+    await syncClubWorldbookState(gameStore.currentRunId, gameStore.settings?.useGeminiMode)
+    gameStore.saveToStorage(true)
+    resetGeneratedClubs()
+    const parts = []
+    if (applyResult.created > 0) parts.push(`新建${applyResult.created}个社团`)
+    if (applyResult.merged > 0) parts.push(`合并${applyResult.merged}个社团`)
+    if (applyResult.updated > 0) parts.push(`更新${applyResult.updated}个社团`)
+    if (newTeacherCount > 0) parts.push(`新增${newTeacherCount}名教师`)
+    showMessage(`处理完成：${parts.join('、')}。可在社团编辑中设置活动地点。`)
+  } catch (e) {
+    showMessage(`社团应用失败: ${e.message}`)
+  }
+}
+
+function handleCancelGenerateClubs() {
+  resetGeneratedClubs()
 }
 
 // ==================== 关系编辑器事件处理 ====================
@@ -1617,6 +1769,9 @@ const handleSaveComposer = async () => {
                 <button :class="{ active: filterSubTab === 'teacher' }" @click="filterSubTab = 'teacher'">
                   👩‍🏫 教师名册
                 </button>
+                <button :class="{ active: filterSubTab === 'external' }" @click="filterSubTab = 'external'">
+                  🏢 校外人员
+                </button>
               </div>
               <div class="filter-sub-content">
                 <RosterFilterView
@@ -1649,6 +1804,30 @@ const handleSaveComposer = async () => {
                   @edit-teacher="handleEditTeacher"
                   @delete-teacher="handleDeleteTeacher"
                 />
+                <!-- 校外人员视图 -->
+                <div v-if="filterSubTab === 'external'" class="external-roster-view">
+                  <div class="external-header">
+                    <span>校外人员列表</span>
+                    <button class="btn-add-external" @click="handleAddExternal">
+                      + 添加校外人员
+                    </button>
+                  </div>
+                  <div v-if="externalNpcs.length === 0" class="empty-hint">
+                    暂无校外人员，点击上方按钮添加
+                  </div>
+                  <div v-for="npc in externalNpcs" :key="npc.name" class="external-card">
+                    <div class="external-info">
+                      <span class="npc-name">{{ npc.name }}</span>
+                      <span class="npc-gender">{{ npc.gender === 'male' ? '♂' : '♀' }}</span>
+                      <span v-if="npc.staffTitle" class="npc-title">{{ npc.staffTitle }}</span>
+                      <span v-if="npc.workplace" class="npc-workplace">📍 {{ getLocationName(npc.workplace) }}</span>
+                    </div>
+                    <div class="external-actions">
+                      <button @click="handleEditCharacter(npc)">编辑</button>
+                      <button @click="handleDeleteCharacter(npc)">删除</button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1699,9 +1878,20 @@ const handleSaveComposer = async () => {
           <div v-if="activeTab === 'clubEditor'" class="tab-content">
             <ClubEditorPanel
               :clubs="gameStore.allClubs || {}"
+              :generating="clubGenerating"
+              :club-results="clubGenResults"
+              :club-error="clubGenError"
+              :progress="clubGenProgress"
+              :new-advisors="clubNewAdvisors"
+              :deleted-clubs="deletedClubs"
               @add-club="handleAddClub"
               @edit-club="handleEditClub"
               @delete-club="handleDeleteClub"
+              @restore-club="handleRestoreClub"
+              @confirm-delete="handleConfirmDelete"
+              @generate-clubs="handleAutoGenerateClubs"
+              @apply-clubs="handleApplyGeneratedClubs"
+              @cancel-generate="handleCancelGenerateClubs"
             />
           </div>
 
@@ -1751,9 +1941,11 @@ const handleSaveComposer = async () => {
               :current-roster-state="currentRosterState"
               :origin-groups="originGroups"
               :game-store="gameStore"
+              :resolved-location="autoScheduleResolvedLocation"
               @save="handleSave"
               @show-message="showMessage"
               @sync-pool="saveCharacterPool"
+              @resolve-location="handleAutoScheduleResolveLocation"
             />
           </div>
         </div>
@@ -1805,6 +1997,7 @@ const handleSaveComposer = async () => {
       :classes="fullRosterSnapshot"
       @close="showCharacterEditor = false"
       @save="handleSaveCharacter"
+      @select-workplace="handleSelectWorkplace"
     />
 
     <TeacherEditModal
@@ -1841,7 +2034,7 @@ const handleSaveComposer = async () => {
     <MapEditorPanel
       v-if="showMapEditor"
       :selection-mode="true"
-      :selection-title="mapEditorContext === 'club' ? '选择社团活动地点' : '选择班级教室'"
+      :selection-title="mapEditorContext === 'club' ? '选择社团活动地点' : mapEditorContext === 'external_workplace' ? '选择校外人员工作地点' : mapEditorContext === 'auto_schedule_workplace' ? '选择工作地点 - ' + (pendingLocationResolve?.charName || '') : '选择班级教室'"
       :prefill-id="mapEditorContext === 'club' ? '' : (pendingNewClassId ? `classroom_${pendingNewClassId.toLowerCase().replace('-', '')}` : '')"
       :prefill-name="mapEditorContext === 'club' ? '' : (pendingNewClassId ? `${fullRosterSnapshot[pendingNewClassId]?.name || pendingNewClassId}教室` : '')"
       initial-parent-id="tianhua_high_school"
@@ -2254,5 +2447,82 @@ const handleSaveComposer = async () => {
 .loading-hint {
   font-size: 12px;
   color: #aaa;
+}
+
+/* 校外人员视图 */
+.external-roster-view {
+  padding: 8px 0;
+}
+.external-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  font-size: 14px;
+  color: #ccc;
+}
+.btn-add-external {
+  padding: 4px 12px;
+  background: #4a6fa5;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn-add-external:hover {
+  background: #5a7fb5;
+}
+.empty-hint {
+  text-align: center;
+  color: #888;
+  padding: 20px;
+  font-size: 13px;
+}
+.external-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  background: #2a2a2a;
+  border-radius: 6px;
+  margin-bottom: 6px;
+}
+.external-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.external-info .npc-name {
+  font-weight: bold;
+  color: #e0e0e0;
+}
+.external-info .npc-gender {
+  color: #aaa;
+}
+.external-info .npc-title {
+  color: #8bb8e8;
+  font-size: 12px;
+}
+.external-info .npc-workplace {
+  color: #a8d8a8;
+  font-size: 12px;
+}
+.external-actions {
+  display: flex;
+  gap: 4px;
+}
+.external-actions button {
+  padding: 3px 8px;
+  background: #444;
+  color: #ccc;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.external-actions button:hover {
+  background: #555;
 }
 </style>

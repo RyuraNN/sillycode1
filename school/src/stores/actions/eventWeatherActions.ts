@@ -244,7 +244,12 @@ export const eventWeatherActions = {
            }
         }
       }
-      
+
+      // fallback：存档恢复等场景下 forecast 中无昨天数据，用当前天气保持连续性
+      if (!lastWeatherOfPreviousDay && !previousWeather) {
+        lastWeatherOfPreviousDay = this.worldState.weather.current?.weather || null
+      }
+
       const weatherData = generateWeatherForecast(year, month, day, previousWeather as any, lastWeatherOfPreviousDay as any) as any
       
       this.worldState.weather = {
