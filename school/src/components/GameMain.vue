@@ -539,7 +539,7 @@ const sendMessage = async () => {
 
   try {
     const historyLog = gameLog.value.slice(0, -1)
-    const summarizedLog = buildSummarizedHistory(historyLog, gameStore.currentFloor)
+    const summarizedLog = await buildSummarizedHistory(historyLog, gameStore.currentFloor, messageContent)
     
     const customHistory = summarizedLog.map(log => {
       let role = 'user'

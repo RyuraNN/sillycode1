@@ -194,6 +194,13 @@ export function createInitialState(): GameState {
         majorCountForSuper: 3,
         useAssistantForSummary: true
       },
+      ragSystem: {
+        enabled: false,
+        embedding: { apiUrl: '', apiKey: '', model: '' },
+        rerank: { apiUrl: '', apiKey: '', model: '' },
+        topK: 50,
+        rerankTopN: 15
+      },
       suggestedReplies: false,
       enterToSend: true,
       independentImageGeneration: false,

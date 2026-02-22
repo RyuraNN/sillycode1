@@ -1,5 +1,6 @@
 import { useGameStore } from '../stores/gameStore'
 import { callAssistantAI } from './assistantAI'
+import { extractKeywordsFromSummary, embedSummary, buildRAGHistory, isRAGReady } from './ragService'
 
 /**
  * 总结系统管理器
@@ -683,10 +684,28 @@ export async function processPostReply(content, floor, preGeneratedMinorSummary 
   
   // 1. 生成小总结
   const minorResult = await generateMinorSummary(content, floor, settings.useAssistantForSummary, preGeneratedMinorSummary)
-  
+
   if (!minorResult.success) {
     console.warn('[SummaryManager] Failed to generate minor summary:', minorResult.error)
     return { success: false, reason: minorResult.error === 'Minor summary missed' ? 'missing_minor' : 'error' }
+  }
+
+  // 1.5 RAG 扩展：提取关键词 + 生成向量
+  if (minorResult.summary) {
+    // 提取关键词（始终执行，不依赖 RAG 开关）
+    const keywords = extractKeywordsFromSummary(minorResult.summary.content)
+    if (keywords.length > 0) {
+      minorResult.summary.keywords = keywords
+    }
+    // 如果 RAG 已启用且配置完整，异步生成向量
+    if (isRAGReady()) {
+      embedSummary(minorResult.summary).then(ok => {
+        if (ok) {
+          console.log(`[SummaryManager] Embedded summary for floor ${floor}`)
+          gameStore.saveToStorage()
+        }
+      }).catch(() => {})
+    }
   }
   
   // 2. 异步检查是否有需要生成日记的历史日期（兜底）
@@ -714,11 +733,17 @@ export async function processPostReply(content, floor, preGeneratedMinorSummary 
  * 构建带总结的历史消息（用于发送给AI）
  * @param {Array} chatLog 原始聊天记录
  * @param {number} currentFloor 当前楼层
- * @returns {Array} 处理后的聊天记录（用于构建上下文）
+ * @param {string} [userInput] 用户当前输入（RAG 模式用作检索 query）
+ * @returns {Array|Promise<Array>} 处理后的聊天记录（用于构建上下文）
  */
-export function buildSummarizedHistory(chatLog, currentFloor) {
+export function buildSummarizedHistory(chatLog, currentFloor, userInput) {
   const gameStore = useGameStore()
   const settings = gameStore.settings.summarySystem
+
+  // RAG 分支：启用且有用户输入时走 RAG 路径
+  if (isRAGReady() && userInput) {
+    return buildRAGHistory(chatLog, currentFloor, userInput)
+  }
   
   if (!settings?.enabled || chatLog.length === 0) {
     return chatLog

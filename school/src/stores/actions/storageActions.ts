@@ -86,6 +86,16 @@ function validateAndRepairSettings(settings: any): any {
   } else {
     settings.summarySystem = { ...defaults.summarySystem, ...settings.summarySystem }
   }
+
+  // 确保 ragSystem 对象完整
+  if (!settings.ragSystem || typeof settings.ragSystem !== 'object') {
+    settings.ragSystem = { ...defaults.ragSystem }
+  } else {
+    settings.ragSystem = { ...defaults.ragSystem, ...settings.ragSystem }
+    // 深度合并嵌套对象
+    settings.ragSystem.embedding = { ...defaults.ragSystem.embedding, ...(settings.ragSystem.embedding || {}) }
+    settings.ragSystem.rerank = { ...defaults.ragSystem.rerank, ...(settings.ragSystem.rerank || {}) }
+  }
   
   // 确保数值字段有效
   if (typeof settings.snapshotLimit !== 'number' || settings.snapshotLimit <= 0) {
@@ -514,6 +524,15 @@ export const storageActions = {
       fullSnapshots.push(fullSnapshot)
     }
 
+    // 导出时剥离 embedding 向量，减小文件体积
+    for (const snap of fullSnapshots) {
+      if (snap.gameState?.player?.summaries) {
+        for (const s of snap.gameState.player.summaries) {
+          delete s.embedding
+        }
+      }
+    }
+
     // 获取扩展数据 (IndexedDB)
     const rosterBackup = await getRosterBackup()
     const fullCharacterPool = await getFullCharacterPool()
@@ -523,6 +542,12 @@ export const storageActions = {
     const sanitizedSettings = JSON.parse(JSON.stringify(this.settings || {}))
     if (sanitizedSettings.assistantAI) {
       delete sanitizedSettings.assistantAI.apiKey
+    }
+    if (sanitizedSettings.ragSystem?.embedding) {
+      delete sanitizedSettings.ragSystem.embedding.apiKey
+    }
+    if (sanitizedSettings.ragSystem?.rerank) {
+      delete sanitizedSettings.ragSystem.rerank.apiKey
     }
 
     // 导出 eventLibrary（Map → Array）

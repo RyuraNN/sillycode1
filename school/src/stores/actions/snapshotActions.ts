@@ -20,8 +20,16 @@ export const snapshotActions = {
    * 创建存档快照
    */
   async createSnapshot(this: any, chatLog: ChatLogEntry[], messageIndex: number, label?: string) {
+    // 深拷贝 player 并剥离 embedding 向量，避免快照体积膨胀
+    const playerCopy = JSON.parse(JSON.stringify(this.player))
+    if (Array.isArray(playerCopy.summaries)) {
+      for (const s of playerCopy.summaries) {
+        delete s.embedding
+      }
+    }
+
     const gameState: GameStateData = JSON.parse(JSON.stringify({
-      player: this.player,
+      player: playerCopy,
       npcs: this.npcs,
       npcRelationships: this.npcRelationships,
       graduatedNpcs: this.graduatedNpcs || [],

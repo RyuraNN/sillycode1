@@ -3,10 +3,12 @@ import { defineEmits, ref, onMounted, onUnmounted, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { fetchModels, IMAGE_ANALYSIS_PROMPT } from '../utils/assistantAI'
 import { generateBatchSummaries, generateBatchDiaries } from '../utils/summaryManager'
+import { batchEmbedSummaries } from '../utils/ragService'
 import { setVariableParsingWorldbookStatus } from '../utils/worldbookParser'
 import { setItem, getItem, removeItem } from '../utils/indexedDB'
 import SocialApp from './SocialApp.vue'
 import SummaryViewer from './SummaryViewer.vue'
+import MemoryGraph from './MemoryGraph.vue'
 import CalendarApp from './CalendarApp.vue'
 import ScheduleApp from './ScheduleApp.vue'
 import WeeklyPreviewModal from './WeeklyPreviewModal.vue'
@@ -26,6 +28,13 @@ const fileInputRef = ref(null) // 文件输入引用
 const modelList = ref([])
 const isLoadingModels = ref(false)
 const showSummaryViewer = ref(false)
+const showMemoryGraph = ref(false)
+const isEmbedding = ref(false)
+const embedProgress = ref({ current: 0, total: 0 })
+const embeddingModelList = ref([])
+const rerankModelList = ref([])
+const isLoadingEmbModels = ref(false)
+const isLoadingRerankModels = ref(false)
 const showBatchModal = ref(false)
 const batchSize = ref(10)
 const isBatchProcessing = ref(false)
@@ -93,6 +102,50 @@ const startDiaryGeneration = async () => {
   } finally {
     isDiaryProcessing.value = false
   }
+}
+
+// 批量生成向量
+const startBatchEmbed = async () => {
+  if (!gameStore.settings.ragSystem?.embedding?.apiUrl || !gameStore.settings.ragSystem?.embedding?.apiKey) {
+    alert('请先配置 Embedding API')
+    return
+  }
+  isEmbedding.value = true
+  embedProgress.value = { current: 0, total: 0 }
+  try {
+    const result = await batchEmbedSummaries((current, total) => {
+      embedProgress.value = { current, total }
+    })
+    alert(`向量生成完成！成功 ${result.success} 个${result.failed > 0 ? `，失败 ${result.failed} 个` : ''}`)
+  } catch (e) {
+    alert('生成向量出错: ' + e.message)
+  } finally {
+    isEmbedding.value = false
+  }
+}
+
+const loadEmbeddingModels = async () => {
+  const cfg = gameStore.settings.ragSystem.embedding
+  if (!cfg.apiUrl || !cfg.apiKey) { alert('请先填写 Embedding API 地址和 Key'); return }
+  isLoadingEmbModels.value = true
+  try {
+    const models = await fetchModels(cfg.apiUrl, cfg.apiKey)
+    embeddingModelList.value = models.filter(m => /embed/i.test(m.id))
+    if (embeddingModelList.value.length === 0) embeddingModelList.value = models
+  } catch (e) { alert('获取模型列表失败: ' + e.message) }
+  finally { isLoadingEmbModels.value = false }
+}
+
+const loadRerankModels = async () => {
+  const cfg = gameStore.settings.ragSystem.rerank
+  if (!cfg.apiUrl || !cfg.apiKey) { alert('请先填写 Rerank API 地址和 Key'); return }
+  isLoadingRerankModels.value = true
+  try {
+    const models = await fetchModels(cfg.apiUrl, cfg.apiKey)
+    rerankModelList.value = models.filter(m => /rerank/i.test(m.id))
+    if (rerankModelList.value.length === 0) rerankModelList.value = models
+  } catch (e) { alert('获取模型列表失败: ' + e.message) }
+  finally { isLoadingRerankModels.value = false }
 }
 
 // 重置生图系统提示词
@@ -758,6 +811,105 @@ const handleHomeClick = () => {
                     </div>
 
                     <div class="settings-section">
+                      <h3 class="section-title">RAG 记忆检索系统</h3>
+
+                      <div class="setting-item">
+                        <span class="setting-label">启用 RAG 检索</span>
+                        <label class="switch">
+                          <input type="checkbox" v-model="gameStore.settings.ragSystem.enabled" @change="gameStore.saveToStorage()">
+                          <span class="slider"></span>
+                        </label>
+                      </div>
+                      <p class="hint">启用后，发送消息时将通过向量检索召回最相关的历史总结，替代距离分层。未启用时使用现有总结系统。</p>
+
+                      <div v-if="gameStore.settings.ragSystem.enabled">
+                        <div style="margin-top: 10px;">
+                          <label style="font-weight: bold; font-size: 12px; color: #888;">Embedding API</label>
+                          <div class="input-row">
+                            <label>API 地址</label>
+                            <input type="text" v-model="gameStore.settings.ragSystem.embedding.apiUrl" placeholder="例如: https://api.openai.com/v1" @change="gameStore.saveToStorage()">
+                          </div>
+                          <div class="input-row">
+                            <label>API Key</label>
+                            <input type="password" v-model="gameStore.settings.ragSystem.embedding.apiKey" placeholder="sk-..." @change="gameStore.saveToStorage()">
+                          </div>
+                          <div class="input-row">
+                            <label>模型</label>
+                            <div style="display: flex; gap: 6px; align-items: center;">
+                              <input type="text" v-model="gameStore.settings.ragSystem.embedding.model" placeholder="text-embedding-3-small" @change="gameStore.saveToStorage()" style="flex: 1;">
+                              <button class="action-btn secondary" style="padding: 6px 10px; font-size: 11px; white-space: nowrap;" @click="loadEmbeddingModels" :disabled="isLoadingEmbModels">
+                                {{ isLoadingEmbModels ? '...' : '拉取' }}
+                              </button>
+                            </div>
+                            <select v-if="embeddingModelList.length > 0" v-model="gameStore.settings.ragSystem.embedding.model" @change="gameStore.saveToStorage()" style="width: 100%; margin-top: 4px; padding: 4px 6px; font-size: 12px; border-radius: 6px; border: 1px solid #ddd;">
+                              <option v-for="m in embeddingModelList" :key="m.id" :value="m.id">{{ m.id }}</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div style="margin-top: 10px;">
+                          <label style="font-weight: bold; font-size: 12px; color: #888;">Rerank API</label>
+                          <div class="input-row">
+                            <label>API 地址</label>
+                            <input type="text" v-model="gameStore.settings.ragSystem.rerank.apiUrl" placeholder="例如: https://api.jina.ai/v1" @change="gameStore.saveToStorage()">
+                          </div>
+                          <div class="input-row">
+                            <label>API Key</label>
+                            <input type="password" v-model="gameStore.settings.ragSystem.rerank.apiKey" placeholder="sk-..." @change="gameStore.saveToStorage()">
+                          </div>
+                          <div class="input-row">
+                            <label>模型</label>
+                            <div style="display: flex; gap: 6px; align-items: center;">
+                              <input type="text" v-model="gameStore.settings.ragSystem.rerank.model" placeholder="jina-reranker-v2-base-multilingual" @change="gameStore.saveToStorage()" style="flex: 1;">
+                              <button class="action-btn secondary" style="padding: 6px 10px; font-size: 11px; white-space: nowrap;" @click="loadRerankModels" :disabled="isLoadingRerankModels">
+                                {{ isLoadingRerankModels ? '...' : '拉取' }}
+                              </button>
+                            </div>
+                            <select v-if="rerankModelList.length > 0" v-model="gameStore.settings.ragSystem.rerank.model" @change="gameStore.saveToStorage()" style="width: 100%; margin-top: 4px; padding: 4px 6px; font-size: 12px; border-radius: 6px; border: 1px solid #ddd;">
+                              <option v-for="m in rerankModelList" :key="m.id" :value="m.id">{{ m.id }}</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div style="margin-top: 10px;">
+                          <div class="setting-item">
+                            <span class="setting-label">向量召回数量 (topK): {{ gameStore.settings.ragSystem.topK }}</span>
+                          </div>
+                          <div class="slider-container">
+                            <input type="range" v-model.number="gameStore.settings.ragSystem.topK" min="10" max="100" step="5" @change="gameStore.saveToStorage()" class="setting-slider" />
+                          </div>
+                          <!-- PLACEHOLDER_RAG_UI_2 -->
+                          <div class="setting-item" style="margin-top: 8px;">
+                            <span class="setting-label">Rerank 保留数量 (topN): {{ gameStore.settings.ragSystem.rerankTopN }}</span>
+                          </div>
+                          <div class="slider-container">
+                            <input type="range" v-model.number="gameStore.settings.ragSystem.rerankTopN" min="5" max="30" step="1" @change="gameStore.saveToStorage()" class="setting-slider" />
+                          </div>
+                        </div>
+
+                        <div style="margin-top: 15px; display: flex; flex-direction: column; gap: 10px;">
+                          <button
+                            class="action-btn secondary"
+                            style="width: 100%;"
+                            @click="startBatchEmbed"
+                            :disabled="isEmbedding"
+                          >
+                            {{ isEmbedding ? `⚡ 生成向量中 (${embedProgress.current}/${embedProgress.total})...` : '⚡ 批量生成向量' }}
+                          </button>
+                          <div v-if="isEmbedding" class="batch-progress-bar" style="margin-top: -4px;">
+                            <div
+                              class="batch-progress-fill"
+                              :style="{ width: embedProgress.total ? (embedProgress.current / embedProgress.total * 100) + '%' : '0%' }"
+                            ></div>
+                          </div>
+                          <button class="action-btn primary" style="width: 100%;" @click="showMemoryGraph = true">
+                            🕸️ 查看记忆图谱
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="settings-section">
                       <h3 class="section-title">制作名单</h3>
                       <div class="credits-body">
                         <p>原作者：墨沈</p>
@@ -771,6 +923,11 @@ const handleHomeClick = () => {
                   <!-- 总结查看器覆盖层 -->
                   <transition name="app-scale">
                     <SummaryViewer v-if="showSummaryViewer" @close="showSummaryViewer = false" />
+                  </transition>
+
+                  <!-- 记忆图谱覆盖层 -->
+                  <transition name="app-scale">
+                    <MemoryGraph v-if="showMemoryGraph" @close="showMemoryGraph = false" />
                   </transition>
 
                   <!-- 批量生成模态框 -->

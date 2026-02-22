@@ -19,7 +19,10 @@
       "Bash(xargs cat:*)",
       "Bash(python:*)",
       "Bash(cmd.exe /c \"dir D:\\\\sillycode1\\\\school\\\\src /b\")",
-      "Bash(cmd.exe /c:*)"
+      "Bash(cmd.exe /c:*)",
+      "Bash(gh repo:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }

@@ -367,7 +367,7 @@ function getBarStyle(axisKey, val) {
 </script>
 
 <style scoped>
-.rel-editor-panel { display: flex; height: 100%; overflow: hidden; }
+.rel-editor-panel { display: flex; height: 100%; overflow: hidden; flex: 1; min-height: 0; }
 /* 左侧面板 */
 .left-panel {
   width: 260px; min-width: 220px; border-right: 1px solid #444;
@@ -559,5 +559,24 @@ function getBarStyle(axisKey, val) {
 
   /* 反向关系 */
   .reverse-section { padding: 6px 10px; }
+}
+
+/* 暗色滚动条 */
+.char-list::-webkit-scrollbar,
+.rel-list::-webkit-scrollbar {
+  width: 6px;
+}
+.char-list::-webkit-scrollbar-track,
+.rel-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.char-list::-webkit-scrollbar-thumb,
+.rel-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+.char-list::-webkit-scrollbar-thumb:hover,
+.rel-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
 }
 </style>

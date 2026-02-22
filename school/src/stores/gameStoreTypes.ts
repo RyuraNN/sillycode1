@@ -162,6 +162,25 @@ export interface SummaryData {
   coveredFloors: number[]
   timestamp: number
   gameDate?: string  // 'YYYY-MM-DD' 格式，diary 必填，minor 建议填
+  keywords?: string[]        // 提取的关键词（人物名、地点名）
+  embedding?: number[]       // 向量（RAG 模式使用）
+}
+
+/** RAG 记忆检索系统设置 */
+export interface RAGSettings {
+  enabled: boolean
+  embedding: {
+    apiUrl: string
+    apiKey: string
+    model: string
+  }
+  rerank: {
+    apiUrl: string
+    apiKey: string
+    model: string
+  }
+  topK: number              // 向量召回数量，默认 50（范围 10-100）
+  rerankTopN: number         // Rerank 后保留数量，默认 15（范围 5-30）
 }
 
 /** 总结系统设置 */
@@ -632,6 +651,7 @@ export interface GameState {
       temperature: number
     }
     summarySystem: SummarySystemSettings
+    ragSystem: RAGSettings
     suggestedReplies: boolean
     enterToSend: boolean
     independentImageGeneration: boolean

@@ -11,6 +11,10 @@ defineEmits(['back'])
 const gameStore = useGameStore()
 const modelList = ref([])
 const isLoadingModels = ref(false)
+const embeddingModelList = ref([])
+const rerankModelList = ref([])
+const isLoadingEmbModels = ref(false)
+const isLoadingRerankModels = ref(false)
 const newContentTag = ref('')
 const showSummaryViewer = ref(false)
 const showBatchModal = ref(false)
@@ -196,6 +200,46 @@ const loadModels = async () => {
     alert('获取模型列表失败: ' + e.message)
   } finally {
     isLoadingModels.value = false
+  }
+}
+
+const loadEmbeddingModels = async () => {
+  const cfg = gameStore.settings.ragSystem.embedding
+  if (!cfg.apiUrl || !cfg.apiKey) {
+    alert('请先填写 Embedding API 地址和 Key')
+    return
+  }
+  isLoadingEmbModels.value = true
+  try {
+    const models = await fetchModels(cfg.apiUrl, cfg.apiKey)
+    embeddingModelList.value = models.filter(m => /embed/i.test(m.id))
+    if (embeddingModelList.value.length === 0) {
+      embeddingModelList.value = models
+    }
+  } catch (e) {
+    alert('获取模型列表失败: ' + e.message)
+  } finally {
+    isLoadingEmbModels.value = false
+  }
+}
+
+const loadRerankModels = async () => {
+  const cfg = gameStore.settings.ragSystem.rerank
+  if (!cfg.apiUrl || !cfg.apiKey) {
+    alert('请先填写 Rerank API 地址和 Key')
+    return
+  }
+  isLoadingRerankModels.value = true
+  try {
+    const models = await fetchModels(cfg.apiUrl, cfg.apiKey)
+    rerankModelList.value = models.filter(m => /rerank/i.test(m.id))
+    if (rerankModelList.value.length === 0) {
+      rerankModelList.value = models
+    }
+  } catch (e) {
+    alert('获取模型列表失败: ' + e.message)
+  } finally {
+    isLoadingRerankModels.value = false
   }
 }
 </script>
@@ -407,11 +451,11 @@ const loadModels = async () => {
                     <span class="setting-hint">最近 N 层保持原文，超过则使用小总结</span>
                   </div>
                   <div class="setting-control">
-                    <input 
-                      type="range" 
-                      v-model.number="gameStore.settings.summarySystem.minorSummaryStartFloor" 
-                      min="5" 
-                      max="50" 
+                    <input
+                      type="range"
+                      v-model.number="gameStore.settings.summarySystem.minorSummaryStartFloor"
+                      min="5"
+                      max="50"
                       step="1"
                       class="range-slider"
                       @change="gameStore.saveToStorage()"
@@ -420,75 +464,74 @@ const loadModels = async () => {
                   </div>
                 </div>
 
-                <div class="setting-row">
-                  <div class="setting-info">
-                    <span class="setting-label">小总结保留层数</span>
-                    <span class="setting-hint">最近 N 层使用小总结，超过则使用大/超级总结</span>
+              </div>
+            </transition>
+          </div>
+        </div>
+
+        <!-- RAG 记忆检索系统 -->
+        <div class="settings-card">
+          <div class="card-header">
+            <span class="card-icon">🔍</span>
+            <h3 class="card-title">RAG 记忆检索</h3>
+          </div>
+          <div class="card-body">
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-label">启用 RAG 检索</span>
+                <span class="setting-hint">通过向量检索召回最相关的历史总结，替代距离分层。未启用时使用现有总结系统</span>
+              </div>
+              <div class="setting-control">
+                <label class="toggle-switch">
+                  <input type="checkbox" v-model="gameStore.settings.ragSystem.enabled" @change="gameStore.saveToStorage()">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <transition name="expand">
+              <div v-if="gameStore.settings.ragSystem.enabled" class="sub-settings">
+                <div class="input-group">
+                  <label class="input-label">Embedding API 地址</label>
+                  <input type="text" v-model="gameStore.settings.ragSystem.embedding.apiUrl" placeholder="例如: https://api.openai.com/v1" class="text-input" @change="gameStore.saveToStorage()">
+                </div>
+                <div class="input-group">
+                  <label class="input-label">Embedding API Key</label>
+                  <input type="password" v-model="gameStore.settings.ragSystem.embedding.apiKey" placeholder="sk-..." class="text-input" @change="gameStore.saveToStorage()">
+                </div>
+                <div class="input-group">
+                  <label class="input-label">Embedding 模型</label>
+                  <div class="model-input-row">
+                    <input type="text" v-model="gameStore.settings.ragSystem.embedding.model" placeholder="text-embedding-3-small" class="text-input flex-1" @change="gameStore.saveToStorage()">
+                    <button class="fetch-btn" @click="loadEmbeddingModels" :disabled="isLoadingEmbModels">
+                      {{ isLoadingEmbModels ? '加载中...' : '拉取列表' }}
+                    </button>
                   </div>
-                  <div class="setting-control">
-                    <input 
-                      type="range" 
-                      v-model.number="gameStore.settings.summarySystem.majorSummaryStartFloor" 
-                      min="20" 
-                      max="100" 
-                      step="5"
-                      class="range-slider"
-                      @change="gameStore.saveToStorage()"
-                    >
-                    <span class="range-value">{{ gameStore.settings.summarySystem.majorSummaryStartFloor }}</span>
-                  </div>
+                  <select v-if="embeddingModelList.length > 0" v-model="gameStore.settings.ragSystem.embedding.model" class="model-select" @change="gameStore.saveToStorage()">
+                    <option v-for="m in embeddingModelList" :key="m.id" :value="m.id">{{ m.id }}</option>
+                  </select>
                 </div>
 
-                <div class="setting-row">
-                  <div class="setting-info">
-                    <span class="setting-label">大总结触发阈值 (小总结数)</span>
-                  </div>
-                  <div class="setting-control">
-                    <input 
-                      type="range" 
-                      v-model.number="gameStore.settings.summarySystem.minorCountForMajor" 
-                      min="3" 
-                      max="10" 
-                      step="1"
-                      class="range-slider"
-                      @change="gameStore.saveToStorage()"
-                    >
-                    <span class="range-value">{{ gameStore.settings.summarySystem.minorCountForMajor }}</span>
-                  </div>
+                <div class="input-group" style="margin-top: 12px;">
+                  <label class="input-label">Rerank API 地址</label>
+                  <input type="text" v-model="gameStore.settings.ragSystem.rerank.apiUrl" placeholder="例如: https://api.jina.ai/v1" class="text-input" @change="gameStore.saveToStorage()">
                 </div>
-
-                <div class="setting-row">
-                  <div class="setting-info">
-                    <span class="setting-label">启用超级总结</span>
-                    <span class="setting-hint">关闭后大总结不会被进一步合并，保留更多早期剧情细节</span>
-                  </div>
-                  <div class="setting-control">
-                    <label class="toggle-switch">
-                      <input type="checkbox" v-model="gameStore.settings.summarySystem.enableSuperSummary" :disabled="gameStore.settings.useGeminiMode" @change="gameStore.saveToStorage()">
-                      <span class="toggle-slider"></span>
-                    </label>
-                    <span v-if="gameStore.settings.useGeminiMode" class="gemini-lock-hint">🔒 Gemini 3.0 Preview 模式下强制开启</span>
-                  </div>
+                <div class="input-group">
+                  <label class="input-label">Rerank API Key</label>
+                  <input type="password" v-model="gameStore.settings.ragSystem.rerank.apiKey" placeholder="sk-..." class="text-input" @change="gameStore.saveToStorage()">
                 </div>
-
-                <div class="setting-row" v-if="gameStore.settings.summarySystem.enableSuperSummary">
-                  <div class="setting-info">
-                    <span class="setting-label">超级总结触发阈值 (大总结数)</span>
+                <div class="input-group">
+                  <label class="input-label">Rerank 模型</label>
+                  <div class="model-input-row">
+                    <input type="text" v-model="gameStore.settings.ragSystem.rerank.model" placeholder="jina-reranker-v2-base-multilingual" class="text-input flex-1" @change="gameStore.saveToStorage()">
+                    <button class="fetch-btn" @click="loadRerankModels" :disabled="isLoadingRerankModels">
+                      {{ isLoadingRerankModels ? '加载中...' : '拉取列表' }}
+                    </button>
                   </div>
-                  <div class="setting-control">
-                    <input
-                      type="range"
-                      v-model.number="gameStore.settings.summarySystem.majorCountForSuper"
-                      min="2"
-                      max="5"
-                      step="1"
-                      class="range-slider"
-                      @change="gameStore.saveToStorage()"
-                    >
-                    <span class="range-value">{{ gameStore.settings.summarySystem.majorCountForSuper }}</span>
-                  </div>
+                  <select v-if="rerankModelList.length > 0" v-model="gameStore.settings.ragSystem.rerank.model" class="model-select" @change="gameStore.saveToStorage()">
+                    <option v-for="m in rerankModelList" :key="m.id" :value="m.id">{{ m.id }}</option>
+                  </select>
                 </div>
-
               </div>
             </transition>
           </div>

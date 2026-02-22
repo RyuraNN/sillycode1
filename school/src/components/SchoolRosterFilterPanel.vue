@@ -2221,6 +2221,8 @@ const handleSaveComposer = async () => {
 .tab-content {
   height: 100%;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .filter-tab-layout {
@@ -2412,6 +2414,7 @@ const handleSaveComposer = async () => {
   padding: 8px 12px;
   background: rgba(255, 193, 7, 0.08);
   border-bottom: 1px solid rgba(255, 193, 7, 0.2);
+  flex-shrink: 0;
 }
 .snapshot-selector {
   display: flex;
@@ -2524,5 +2527,21 @@ const handleSaveComposer = async () => {
 }
 .external-actions button:hover {
   background: #555;
+}
+
+/* 统一暗色滚动条 */
+.panel-content ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.panel-content ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.panel-content ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+.panel-content ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
 }
 </style>
