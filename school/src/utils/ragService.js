@@ -239,8 +239,23 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
 
   const result = []
   const recentThreshold = settings.minorSummaryStartFloor || 8
+  const bridgeCount = 5 // 桥接层：正文边界外最近 5 轮小总结
 
-  // 1. 分离最近楼层和更早楼层
+  // 构建检索 query：拼接最近2条小总结 + 用户输入，提升语义丰富度
+  let query = userInput
+  if (ragSettings.useContextQuery !== false) {
+    const recentSummaries = gameStore.player.summaries
+      .filter(s => s.type === 'minor')
+      .sort((a, b) => b.floor - a.floor)
+      .slice(0, 2)
+      .reverse()
+    if (recentSummaries.length > 0) {
+      const summaryContext = recentSummaries.map(s => s.content).join('\n')
+      query = (summaryContext + '\n' + userInput).slice(0, 2000)
+    }
+  }
+
+  // 1. 分离最近楼层（Layer 1: 原文）和更早楼层
   const recentLogs = []
   const olderFloors = []
 
@@ -254,26 +269,51 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
     }
   }
 
-  // 2. 对更早楼层进行 RAG 检索
+  // 2. 从更早楼层中分离桥接层（Layer 2）和 RAG 层（Layer 3）
+  const sortedOlder = [...olderFloors].sort((a, b) => b - a) // 按楼层降序
+  const bridgeFloors = sortedOlder.slice(0, bridgeCount)      // 最靠近正文边界的 N 个
+  const bridgeSet = new Set(bridgeFloors)
+  // 原文层 + 桥接层的楼层集合，RAG 检索时排除这些
+  const recentFloorSet = new Set(recentLogs.map(r => r.floor))
+  const excludeSet = new Set([...bridgeSet, ...recentFloorSet])
+
+  // 3. 桥接层：查找对应小总结，按楼层升序注入
+  const bridgeSummaries = []
+  for (const floor of [...bridgeFloors].sort((a, b) => a - b)) {
+    const summary = gameStore.player.summaries.find(
+      s => s.type === 'minor' && s.floor === floor
+    )
+    if (summary) {
+      bridgeSummaries.push({
+        type: 'summary',
+        content: `[桥接总结 楼层${floor}] ${summary.content}`,
+        isSummary: true,
+        summaryType: 'bridge'
+      })
+    }
+  }
+
+  // 4. RAG 检索（排除原文层和桥接层楼层的总结）
   let ragSummaries = []
-  if (olderFloors.length > 0 && userInput) {
+  const ragCandidateCount = olderFloors.length - bridgeFloors.length
+  if (ragCandidateCount > 0 && userInput) {
     try {
       const topK = ragSettings.topK || 50
       const topN = ragSettings.rerankTopN || 15
 
-      // 检查已向量化的小总结数量，太少则直接全部注入，跳过检索
+      // 检查已向量化的小总结数量（排除原文层+桥接层），太少则直接全部注入
       const embeddedSummaries = gameStore.player.summaries.filter(
-        s => s.type === 'minor' && s.embedding && s.embedding.length > 0
+        s => s.type === 'minor' && s.embedding && s.embedding.length > 0 && !excludeSet.has(s.floor)
       )
       if (embeddedSummaries.length <= topN) {
-        // 总结数量不超过 topN，直接全部注入，省去 API 调用
         ragSummaries = embeddedSummaries.map(s => ({ summary: s, score: 1 }))
       } else {
         // 向量粗筛
-        const candidates = await searchSimilarSummaries(userInput, topK)
-        if (candidates.length > 0) {
-          // Rerank 精排
-          ragSummaries = await rerankSummaries(userInput, candidates, topN)
+        const candidates = await searchSimilarSummaries(query, topK)
+        // 过滤掉原文层和桥接层的楼层
+        const filtered = candidates.filter(c => !excludeSet.has(c.summary.floor))
+        if (filtered.length > 0) {
+          ragSummaries = await rerankSummaries(query, filtered, topN)
         }
       }
     } catch (e) {
@@ -281,7 +321,9 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
     }
   }
 
-  // 3. 注入 RAG 召回的总结（按楼层时间排序）
+  // 5. 组装结果：[RAG召回] → [桥接总结] → [最近原文]
+
+  // Layer 3: RAG 召回的总结（按楼层升序）
   if (ragSummaries.length > 0) {
     const sorted = ragSummaries.sort((a, b) => a.summary.floor - b.summary.floor)
     for (const item of sorted) {
@@ -295,7 +337,10 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
     }
   }
 
-  // 4. 添加最近楼层原文
+  // Layer 2: 桥接层小总结
+  result.push(...bridgeSummaries)
+
+  // Layer 1: 最近楼层原文
   for (const { log } of recentLogs) {
     result.push({
       ...log,

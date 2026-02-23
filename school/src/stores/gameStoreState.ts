@@ -199,7 +199,8 @@ export function createInitialState(): GameState {
         embedding: { apiUrl: '', apiKey: '', model: '' },
         rerank: { apiUrl: '', apiKey: '', model: '' },
         topK: 50,
-        rerankTopN: 15
+        rerankTopN: 15,
+        useContextQuery: true
       },
       suggestedReplies: false,
       enterToSend: true,

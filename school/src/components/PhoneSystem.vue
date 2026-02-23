@@ -885,6 +885,15 @@ const handleHomeClick = () => {
                           <div class="slider-container">
                             <input type="range" v-model.number="gameStore.settings.ragSystem.rerankTopN" min="5" max="30" step="1" @change="gameStore.saveToStorage()" class="setting-slider" />
                           </div>
+
+                          <div class="setting-item" style="margin-top: 8px;">
+                            <span class="setting-label">使用上下文增强检索</span>
+                            <label class="switch">
+                              <input type="checkbox" v-model="gameStore.settings.ragSystem.useContextQuery" @change="gameStore.saveToStorage()">
+                              <span class="slider"></span>
+                            </label>
+                          </div>
+                          <p class="hint">开启后将最近一轮 AI 回复拼入检索 query，提升召回相关性</p>
                         </div>
 
                         <div style="margin-top: 15px; display: flex; flex-direction: column; gap: 10px;">

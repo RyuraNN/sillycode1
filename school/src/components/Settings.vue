@@ -532,6 +532,19 @@ const loadRerankModels = async () => {
                     <option v-for="m in rerankModelList" :key="m.id" :value="m.id">{{ m.id }}</option>
                   </select>
                 </div>
+
+                <div class="setting-row" style="margin-top: 12px;">
+                  <div class="setting-info">
+                    <span class="setting-label">使用上下文增强检索</span>
+                    <span class="setting-hint">将最近一轮 AI 回复拼入检索 query，提升召回相关性</span>
+                  </div>
+                  <div class="setting-control">
+                    <label class="toggle-switch">
+                      <input type="checkbox" v-model="gameStore.settings.ragSystem.useContextQuery" @change="gameStore.saveToStorage()">
+                      <span class="toggle-slider"></span>
+                    </label>
+                  </div>
+                </div>
               </div>
             </transition>
           </div>
