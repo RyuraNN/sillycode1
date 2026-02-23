@@ -70,6 +70,8 @@ const inputText = ref('')
 const gameLog = ref([])
 const isGenerating = ref(false)
 const isAssistantProcessing = ref(false)
+const processingStage = ref('') // 'rag' | 'generating' | ''
+const ragErrors = ref([]) // RAG 管线错误列表
 const showMapPanel = ref(false)
 const showEquipmentPanel = ref(false)
 const showSavePanel = ref(false)
@@ -539,8 +541,14 @@ const sendMessage = async () => {
 
   try {
     const historyLog = gameLog.value.slice(0, -1)
+    processingStage.value = 'rag'
+    ragErrors.value = []
     const summarizedLog = await buildSummarizedHistory(historyLog, gameStore.currentFloor, messageContent)
-    
+    if (summarizedLog._ragErrors?.length > 0) {
+      ragErrors.value = summarizedLog._ragErrors
+    }
+    processingStage.value = ''
+
     const customHistory = summarizedLog.map(log => {
       let role = 'user'
       if (log.type === 'ai') role = 'assistant'
@@ -856,6 +864,7 @@ const sendMessage = async () => {
   } finally {
     isGenerating.value = false
     isAssistantProcessing.value = false
+    processingStage.value = ''
   }
 }
 
@@ -1991,13 +2000,13 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
             @input="autoResizeTextarea"
             @keydown="handleKeyDown"
             rows="1"
-            :disabled="isGenerating || isAssistantProcessing"
-            :placeholder="isGenerating ? 'AI 正在思考...' : (isAssistantProcessing ? '正在处理世界变动...' : '输入指令或对话...')" 
+            :disabled="isGenerating || isAssistantProcessing || processingStage === 'rag'"
+            :placeholder="processingStage === 'rag' ? '正在检索记忆...' : (isGenerating ? 'AI 正在思考...' : (isAssistantProcessing ? '正在处理世界变动...' : '输入指令或对话...'))"
             class="main-input" 
           ></textarea>
           
           <!-- Loading 图标 -->
-          <div v-if="isAssistantProcessing" class="processing-indicator" title="辅助AI正在解析变量...">
+          <div v-if="isAssistantProcessing || processingStage === 'rag'" class="processing-indicator" :title="processingStage === 'rag' ? '正在检索记忆...' : '辅助AI正在解析变量...'">
             <div class="spinner"></div>
           </div>
 
@@ -2009,6 +2018,17 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
           >
             {{ isGenerating ? '停止' : '发送' }}
           </button>
+        </div>
+        <!-- RAG 管线错误提示 -->
+        <div v-if="ragErrors.length > 0" class="rag-error-bar">
+          <div class="rag-error-header">
+            <span>⚠️ RAG 管线部分环节异常</span>
+            <button class="rag-dismiss-btn" @click="ragErrors = []">×</button>
+          </div>
+          <div v-for="(err, i) in ragErrors" :key="i" class="rag-error-item">
+            <span class="rag-error-stage">{{ { queryRewrite: '查询改写', ragRetrieval: '向量检索', embedding: '向量生成', rerank: '重排序' }[err.stage] || err.stage }}</span>
+            <span class="rag-error-msg">{{ err.message }}</span>
+          </div>
         </div>
       </div>
     </main>
@@ -2348,6 +2368,57 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
   transform: translateY(-50%);
   width: 24px;
   height: 24px;
+}
+
+.rag-error-bar {
+  background: rgba(180, 83, 9, 0.15);
+  border: 1px solid rgba(180, 83, 9, 0.3);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+.rag-error-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #b45309;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.rag-dismiss-btn {
+  background: none;
+  border: none;
+  color: #b45309;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.rag-error-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  color: #92400e;
+}
+
+.rag-error-stage {
+  background: rgba(180, 83, 9, 0.2);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.rag-error-msg {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .new-message-tip {

@@ -273,7 +273,7 @@ const initNetworkData = () => {
         })
     })
 
-    // 边：只连接焦点与周围节点（星形拓扑）
+    // 边：连接焦点与周围节点（星形拓扑）
     for (const name of neighbors) {
         const si = nameToIdx[focusName]
         const ti = nameToIdx[name]
@@ -287,6 +287,27 @@ const initNetworkData = () => {
             dashPattern: style.dashPattern,
             label: style.label, score: style.score
         })
+    }
+
+    // 边：邻居之间的关系（网状拓扑补充）
+    for (let i = 0; i < neighbors.length; i++) {
+        for (let j = i + 1; j < neighbors.length; j++) {
+            const nameA = neighbors[i], nameB = neighbors[j]
+            const relAB = getCharRelations(nameA)[nameB] || getCharRelations(nameB)[nameA]
+            if (!relAB) continue
+            const { intimacy = 0, trust = 0, passion = 0, hostility = 0 } = relAB
+            if (intimacy === 0 && trust === 0 && passion === 0 && hostility === 0) continue
+            const si = nameToIdx[nameA], ti = nameToIdx[nameB]
+            if (si === undefined || ti === undefined) continue
+            const style = getEdgeStyle(relAB)
+            netEdges.push({
+                source: nameA, target: nameB,
+                sourceIdx: si, targetIdx: ti,
+                color: style.color, width: style.width,
+                dashPattern: style.dashPattern,
+                label: style.label, score: style.score
+            })
+        }
     }
 }
 

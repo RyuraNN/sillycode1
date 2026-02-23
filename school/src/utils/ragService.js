@@ -1,5 +1,5 @@
 import { useGameStore } from '../stores/gameStore'
-import { cleanImageTags } from './summaryManager'
+import { cleanImageTags, removeThinking } from './summaryManager'
 
 /**
  * RAG 记忆检索服务
@@ -123,6 +123,74 @@ export function extractKeywordsFromSummary(summaryContent) {
   return [...new Set(keywords)]
 }
 
+// ==================== Query 改写 ====================
+
+/**
+ * 使用 assistantAI 改写检索 query
+ * 将相对时间、代词指代等转换为具体描述，提升向量检索精度
+ * @param {string} userInput 原始用户输入
+ * @param {object} gameTime 当前游戏时间
+ * @param {object|null} lastRound 最近一轮上下文 { playerMsg, aiReply }
+ * @returns {Promise<string>} 改写后的 query
+ */
+export async function rewriteQueryWithAI(userInput, gameTime, lastRound) {
+  const gameStore = useGameStore()
+  const { apiUrl, apiKey, model } = gameStore.settings.assistantAI
+  if (!apiUrl || !apiKey) return userInput
+
+  const systemPrompt = `你是一个查询改写助手。将用户的输入改写为适合语义检索的查询文本。
+规则：
+1. 将相对时间（前天、上周、那次）转换为具体日期或描述
+2. 将代词指代（他、她、那个人）尽量替换为具体名称（根据上下文推断）
+3. 保留原始语义，不要添加无关内容
+4. 直接输出改写后的文本，不要解释
+5. 如果输入已经足够明确，原样返回即可`
+
+  let contextBlock = ''
+  if (lastRound) {
+    if (lastRound.playerMsg) contextBlock += `[玩家上一轮输入] ${lastRound.playerMsg}\n`
+    if (lastRound.aiReply) contextBlock += `[AI上一轮回复摘要] ${cleanImageTags(lastRound.aiReply).slice(0, 800)}\n`
+  }
+
+  const userPrompt = `当前游戏时间：${gameTime.year}年${gameTime.month}月${gameTime.day}日 ${gameTime.hour}:${String(gameTime.minute).padStart(2, '0')}
+${contextBlock}
+[当前玩家输入] ${userInput}
+
+请将当前玩家输入改写为适合语义检索的查询文本：`
+
+  let endpoint = apiUrl.replace(/\/+$/, '')
+  if (!endpoint.endsWith('/chat/completions')) {
+    endpoint += '/chat/completions'
+  }
+
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      temperature: 0.3,
+      max_tokens: 300
+    })
+  })
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => res.statusText)
+    throw new Error(`Query rewrite API 错误 (${res.status}): ${errText}`)
+  }
+
+  const data = await res.json()
+  let result = (data.choices?.[0]?.message?.content || '').trim()
+  result = removeThinking(result).trim()
+  return result || userInput
+}
+
 // ==================== 向量生成与存储 ====================
 
 /**
@@ -234,8 +302,9 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
   const gameStore = useGameStore()
   const settings = gameStore.settings.summarySystem
   const ragSettings = gameStore.settings.ragSystem
+  const errors = [] // 收集各环节错误
 
-  if (!chatLog || chatLog.length === 0) return chatLog
+  if (!chatLog || chatLog.length === 0) return { history: chatLog, errors }
 
   const result = []
   const recentThreshold = settings.minorSummaryStartFloor || 8
@@ -255,6 +324,25 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
     }
   }
 
+  // Query 改写：使用 assistantAI 解析相对时间/代词指代
+  if (gameStore.settings.assistantAI?.enabled && gameStore.settings.assistantAI?.apiUrl) {
+    try {
+      let lastRound = null
+      if (chatLog.length >= 2) {
+        const lastAi = chatLog[chatLog.length - 1]
+        const lastPlayer = chatLog[chatLog.length - 2]
+        lastRound = {
+          playerMsg: lastPlayer?.type === 'player' ? (lastPlayer.content || '').slice(0, 500) : '',
+          aiReply: lastAi?.type === 'ai' ? lastAi.content : ''
+        }
+      }
+      query = await rewriteQueryWithAI(query, gameStore.gameTime, lastRound)
+    } catch (e) {
+      console.warn('[RAG] Query rewrite failed:', e.message)
+      errors.push({ stage: 'queryRewrite', message: e.message })
+    }
+  }
+
   // 1. 分离最近楼层（Layer 1: 原文）和更早楼层
   const recentLogs = []
   const olderFloors = []
@@ -270,10 +358,9 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
   }
 
   // 2. 从更早楼层中分离桥接层（Layer 2）和 RAG 层（Layer 3）
-  const sortedOlder = [...olderFloors].sort((a, b) => b - a) // 按楼层降序
-  const bridgeFloors = sortedOlder.slice(0, bridgeCount)      // 最靠近正文边界的 N 个
+  const sortedOlder = [...olderFloors].sort((a, b) => b - a)
+  const bridgeFloors = sortedOlder.slice(0, bridgeCount)
   const bridgeSet = new Set(bridgeFloors)
-  // 原文层 + 桥接层的楼层集合，RAG 检索时排除这些
   const recentFloorSet = new Set(recentLogs.map(r => r.floor))
   const excludeSet = new Set([...bridgeSet, ...recentFloorSet])
 
@@ -301,29 +388,26 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
       const topK = ragSettings.topK || 50
       const topN = ragSettings.rerankTopN || 15
 
-      // 检查已向量化的小总结数量（排除原文层+桥接层），太少则直接全部注入
       const embeddedSummaries = gameStore.player.summaries.filter(
         s => s.type === 'minor' && s.embedding && s.embedding.length > 0 && !excludeSet.has(s.floor)
       )
       if (embeddedSummaries.length <= topN) {
         ragSummaries = embeddedSummaries.map(s => ({ summary: s, score: 1 }))
       } else {
-        // 向量粗筛
         const candidates = await searchSimilarSummaries(query, topK)
-        // 过滤掉原文层和桥接层的楼层
         const filtered = candidates.filter(c => !excludeSet.has(c.summary.floor))
         if (filtered.length > 0) {
           ragSummaries = await rerankSummaries(query, filtered, topN)
         }
       }
     } catch (e) {
-      console.warn('[RAG] buildRAGHistory retrieval failed:', e.message)
+      console.warn('[RAG] retrieval failed:', e.message)
+      errors.push({ stage: 'ragRetrieval', message: e.message })
     }
   }
 
   // 5. 组装结果：[RAG召回] → [桥接总结] → [最近原文]
 
-  // Layer 3: RAG 召回的总结（按楼层升序）
   if (ragSummaries.length > 0) {
     const sorted = ragSummaries.sort((a, b) => a.summary.floor - b.summary.floor)
     for (const item of sorted) {
@@ -337,10 +421,8 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
     }
   }
 
-  // Layer 2: 桥接层小总结
   result.push(...bridgeSummaries)
 
-  // Layer 1: 最近楼层原文
   for (const { log } of recentLogs) {
     result.push({
       ...log,
@@ -348,7 +430,7 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
     })
   }
 
-  return result
+  return { history: result, errors }
 }
 
 /**

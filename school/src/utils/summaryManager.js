@@ -742,15 +742,19 @@ export async function processPostReply(content, floor, preGeneratedMinorSummary 
  * @param {Array} chatLog 原始聊天记录
  * @param {number} currentFloor 当前楼层
  * @param {string} [userInput] 用户当前输入（RAG 模式用作检索 query）
- * @returns {Array|Promise<Array>} 处理后的聊天记录（用于构建上下文）
+ * @returns {Array|Promise<Array>} 处理后的聊天记录（用于构建上下文），RAG 模式下 result._ragErrors 包含错误信息
  */
-export function buildSummarizedHistory(chatLog, currentFloor, userInput) {
+export async function buildSummarizedHistory(chatLog, currentFloor, userInput) {
   const gameStore = useGameStore()
   const settings = gameStore.settings.summarySystem
 
   // RAG 分支：启用且有用户输入时走 RAG 路径
   if (isRAGReady() && userInput) {
-    return buildRAGHistory(chatLog, currentFloor, userInput)
+    const { history, errors } = await buildRAGHistory(chatLog, currentFloor, userInput)
+    if (errors && errors.length > 0) {
+      history._ragErrors = errors
+    }
+    return history
   }
   
   if (!settings?.enabled || chatLog.length === 0) {
