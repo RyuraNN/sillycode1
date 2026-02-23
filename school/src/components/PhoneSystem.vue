@@ -873,17 +873,26 @@ const handleHomeClick = () => {
 
                         <div style="margin-top: 10px;">
                           <div class="setting-item">
+                            <span class="setting-label">自动调整参数</span>
+                            <label class="switch">
+                              <input type="checkbox" v-model="gameStore.settings.ragSystem.autoAdjust" @change="gameStore.saveToStorage()">
+                              <span class="slider"></span>
+                            </label>
+                          </div>
+                          <p class="hint">根据总结数量自动计算 topK 和 topN，无需手动调整</p>
+
+                          <div class="setting-item" :style="{ opacity: gameStore.settings.ragSystem.autoAdjust ? 0.45 : 1 }">
                             <span class="setting-label">向量召回数量 (topK): {{ gameStore.settings.ragSystem.topK }}</span>
                           </div>
-                          <div class="slider-container">
-                            <input type="range" v-model.number="gameStore.settings.ragSystem.topK" min="10" max="100" step="5" @change="gameStore.saveToStorage()" class="setting-slider" />
+                          <div class="slider-container" :style="{ opacity: gameStore.settings.ragSystem.autoAdjust ? 0.45 : 1 }">
+                            <input type="range" v-model.number="gameStore.settings.ragSystem.topK" min="10" max="100" step="5" @change="gameStore.saveToStorage()" class="setting-slider" :disabled="gameStore.settings.ragSystem.autoAdjust" />
                           </div>
                           <!-- PLACEHOLDER_RAG_UI_2 -->
-                          <div class="setting-item" style="margin-top: 8px;">
+                          <div class="setting-item" style="margin-top: 8px;" :style="{ opacity: gameStore.settings.ragSystem.autoAdjust ? 0.45 : 1 }">
                             <span class="setting-label">Rerank 保留数量 (topN): {{ gameStore.settings.ragSystem.rerankTopN }}</span>
                           </div>
-                          <div class="slider-container">
-                            <input type="range" v-model.number="gameStore.settings.ragSystem.rerankTopN" min="5" max="30" step="1" @change="gameStore.saveToStorage()" class="setting-slider" />
+                          <div class="slider-container" :style="{ opacity: gameStore.settings.ragSystem.autoAdjust ? 0.45 : 1 }">
+                            <input type="range" v-model.number="gameStore.settings.ragSystem.rerankTopN" min="5" max="30" step="1" @change="gameStore.saveToStorage()" class="setting-slider" :disabled="gameStore.settings.ragSystem.autoAdjust" />
                           </div>
 
                           <div class="setting-item" style="margin-top: 8px;">

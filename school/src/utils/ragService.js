@@ -235,6 +235,37 @@ export async function batchEmbedSummaries(progressCallback) {
   return { success, failed }
 }
 
+// ==================== 动态参数计算 ====================
+
+/**
+ * 根据总结数量自动计算 topK 和 rerankTopN
+ * @param {number} summaryCount 已向量化的 minor 总结数量
+ * @returns {{ topK: number, topN: number }}
+ */
+export function calcAutoRAGParams(summaryCount) {
+  // topK: 取总结数量的 25%，夹在 10-100 之间
+  const topK = Math.max(10, Math.min(100, Math.round(summaryCount * 0.25)))
+  // topN: 取 topK 的 30%，夹在 3-30 之间
+  const topN = Math.max(3, Math.min(30, Math.round(topK * 0.3)))
+  return { topK, topN }
+}
+
+/**
+ * 获取生效的 RAG 参数（自动调整 or 手动设置）
+ * @returns {{ topK: number, topN: number }}
+ */
+export function getEffectiveRAGParams() {
+  const gameStore = useGameStore()
+  const ragSettings = gameStore.settings.ragSystem
+  if (ragSettings.autoAdjust) {
+    const summaryCount = gameStore.player.summaries.filter(
+      s => s.type === 'minor' && s.embedding && s.embedding.length > 0
+    ).length
+    return calcAutoRAGParams(summaryCount)
+  }
+  return { topK: ragSettings.topK || 50, topN: ragSettings.rerankTopN || 15 }
+}
+
 // ==================== 检索与重排序 ====================
 
 /**
@@ -385,8 +416,7 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
   const ragCandidateCount = olderFloors.length - bridgeFloors.length
   if (ragCandidateCount > 0 && userInput) {
     try {
-      const topK = ragSettings.topK || 50
-      const topN = ragSettings.rerankTopN || 15
+      const { topK, topN } = getEffectiveRAGParams()
 
       const embeddedSummaries = gameStore.player.summaries.filter(
         s => s.type === 'minor' && s.embedding && s.embedding.length > 0 && !excludeSet.has(s.floor)

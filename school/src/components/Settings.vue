@@ -535,6 +535,19 @@ const loadRerankModels = async () => {
 
                 <div class="setting-row" style="margin-top: 12px;">
                   <div class="setting-info">
+                    <span class="setting-label">自动调整参数</span>
+                    <span class="setting-hint">根据总结数量自动计算 topK 和 topN</span>
+                  </div>
+                  <div class="setting-control">
+                    <label class="toggle-switch">
+                      <input type="checkbox" v-model="gameStore.settings.ragSystem.autoAdjust" @change="gameStore.saveToStorage()">
+                      <span class="toggle-slider"></span>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="setting-row" style="margin-top: 12px;">
+                  <div class="setting-info">
                     <span class="setting-label">使用上下文增强检索</span>
                     <span class="setting-hint">将最近一轮 AI 回复拼入检索 query，提升召回相关性</span>
                   </div>

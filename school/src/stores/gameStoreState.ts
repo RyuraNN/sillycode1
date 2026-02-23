@@ -200,7 +200,8 @@ export function createInitialState(): GameState {
         rerank: { apiUrl: '', apiKey: '', model: '' },
         topK: 50,
         rerankTopN: 15,
-        useContextQuery: true
+        useContextQuery: true,
+        autoAdjust: true
       },
       suggestedReplies: false,
       enterToSend: true,
