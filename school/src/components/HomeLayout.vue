@@ -4,6 +4,7 @@ import { useGameStore } from '../stores/gameStore'
 import { switchSaveSlot, restoreWorldbookFromStore } from '../utils/socialWorldbook'
 import { clearAllData } from '../utils/indexedDB'
 import { getAllBookNames } from '../utils/worldbookHelper'
+import { syncClubWorldbookState, syncClassWorldbookState, setPlayerClass } from '../utils/worldbookParser'
 
 // 使用异步组件以优化首屏加载性能
 const GameStart = defineAsyncComponent(() => import('./GameStart.vue'))
@@ -64,11 +65,29 @@ const toggleFullscreen = () => {
   }
 }
 
-const onGeminiModeChange = () => {
+const onGeminiModeChange = async () => {
   if (gameStore.settings.useGeminiMode) {
     gameStore.settings.summarySystem.enabled = true
   }
   gameStore.saveToStorage()
+
+  // 同步世界书灯光颜色状态
+  try {
+    // 同步社团世界书状态（蓝灯/绿灯切换）
+    await syncClubWorldbookState(gameStore.currentRunId, gameStore.settings.useGeminiMode)
+
+    // 同步班级世界书状态（蓝灯/绿灯切换）
+    await syncClassWorldbookState(gameStore.currentRunId, gameStore.allClassData, gameStore.settings.useGeminiMode)
+
+    // 如果玩家已经选择了班级，重新设置玩家班级（确保玩家班级始终是蓝灯）
+    if (gameStore.player.classId) {
+      await setPlayerClass(gameStore.player.classId, gameStore.settings.useGeminiMode)
+    }
+
+    console.log('[HomeLayout] Worldbook lamp colors synced for Gemini mode:', gameStore.settings.useGeminiMode)
+  } catch (e) {
+    console.error('[HomeLayout] Failed to sync worldbook state:', e)
+  }
 }
 
 async function clearRunIdWorldbookEntries() {

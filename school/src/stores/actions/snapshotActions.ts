@@ -3,17 +3,31 @@
  */
 
 import type { ChatLogEntry, SaveSnapshot, GameStateData } from '../gameStoreTypes'
-import { saveSnapshotData, getSnapshotData, removeSnapshotData } from '../../utils/indexedDB'
+import { saveSnapshotData, getSnapshotData, removeSnapshotData, loadChunkedChatLog } from '../../utils/indexedDB'
 import { updateAcademicWorldbookEntry } from '../../utils/academicWorldbook'
 import { createInitialState } from '../gameStoreState'
-import { 
-  computeDelta, 
-  applyDelta, 
-  isDeltaSnapshot, 
+import {
+  computeDelta,
+  applyDelta,
+  isDeltaSnapshot,
   shouldCreateBaseSnapshot,
   createLightSnapshot,
-  type DeltaSnapshot 
+  type DeltaSnapshot
 } from '../../utils/snapshotUtils'
+
+/**
+ * 精简 chatLog 拷贝，移除冗余字段
+ * @param chatLog 原始聊天记录
+ * @returns 精简后的聊天记录
+ */
+function createLightChatLogCopy(chatLog: ChatLogEntry[]): ChatLogEntry[] {
+  return chatLog.map(log => ({
+    type: log.type,
+    content: log.content,
+    snapshot: log.snapshot,
+    // 不保存: rawContent, preVariableSnapshot（可从 snapshot 恢复）
+  } as ChatLogEntry))
+}
 
 export const snapshotActions = {
   /**
@@ -113,12 +127,17 @@ export const snapshotActions = {
     }))
 
     const autoSaveId = `autosave_${this.currentRunId}`
-    const logCopy = JSON.parse(JSON.stringify(chatLog))
 
-    await saveSnapshotData(autoSaveId, {
-      gameState,
-      chatLog: logCopy
-    })
+    // 精简 chatLog：移除冗余字段
+    const logCopy = createLightChatLogCopy(chatLog)
+
+    // 使用分片存储保存 chatLog
+    const { saveChunkedChatLog } = await import('../../utils/indexedDB')
+    await saveChunkedChatLog(autoSaveId, logCopy)
+
+    // 保存 gameState（不分片，因为相对较小）
+    const { saveSnapshotData } = await import('../../utils/indexedDB')
+    await saveSnapshotData(autoSaveId, { gameState })
 
     const snapshot: SaveSnapshot = {
       id: autoSaveId,
@@ -152,14 +171,25 @@ export const snapshotActions = {
   async loadSnapshotDetails(this: any, snapshotId: string) {
     const snapshot = this.saveSnapshots.find((s: SaveSnapshot) => s.id === snapshotId)
     if (!snapshot) return null
-    
+
     if (snapshot.chatLog && snapshot.gameState) {
       return snapshot
     }
-    
+
     const details = await getSnapshotData(snapshotId)
-    if (details) {
-      return { ...snapshot, ...details }
+
+    // 尝试加载分片 chatLog
+    let chatLog = details?.chatLog
+    if (!chatLog) {
+      chatLog = await loadChunkedChatLog(snapshotId)
+    }
+
+    if (details || chatLog) {
+      return {
+        ...snapshot,
+        gameState: details?.gameState,
+        chatLog
+      }
     }
     return null
   },

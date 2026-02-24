@@ -772,9 +772,9 @@
 
 /* ==================== 变量计算失败提示 ==================== */
 .variable-error-tip {
-  position: fixed;
-  bottom: 120px;
-  right: 20px;
+  position: relative;
+  margin: 0 auto 8px;
+  max-width: 320px;
   background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
   border: 2px solid rgba(255, 152, 0, 0.3);
   border-left: 4px solid #ff9800;
@@ -783,21 +783,20 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  box-shadow: 0 4px 12px rgba(255, 152, 0, 0.2), 0 0 20px rgba(255, 152, 0, 0.1);
-  z-index: 1000;
-  animation: pulse-glow 2s ease-in-out infinite;
-  max-width: 200px;
+  box-shadow: 0 0 15px rgba(255, 152, 0, 0.4), 0 0 30px rgba(255, 152, 0, 0.2);
+  z-index: 15;
+  animation: variable-error-glow 2s ease-in-out infinite;
   font-size: 0.85rem;
   cursor: default;
   user-select: none;
 }
 
-@keyframes pulse-glow {
+@keyframes variable-error-glow {
   0%, 100% {
-    box-shadow: 0 4px 12px rgba(255, 152, 0, 0.2), 0 0 20px rgba(255, 152, 0, 0.1);
+    box-shadow: 0 0 10px rgba(255, 152, 0, 0.3), 0 0 20px rgba(255, 152, 0, 0.15);
   }
   50% {
-    box-shadow: 0 4px 16px rgba(255, 152, 0, 0.35), 0 0 30px rgba(255, 152, 0, 0.2);
+    box-shadow: 0 0 20px rgba(255, 152, 0, 0.5), 0 0 40px rgba(255, 152, 0, 0.3);
   }
 }
 
@@ -869,9 +868,7 @@
 /* 移动端适配 */
 @media (max-width: 768px) {
   .variable-error-tip {
-    bottom: 100px;
-    right: 10px;
-    max-width: 160px;
+    max-width: 280px;
     font-size: 0.8rem;
     padding: 6px 10px;
     gap: 6px;

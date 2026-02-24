@@ -222,9 +222,15 @@ export function createInitialState(): GameState {
       debugUnlocked: false,
       snapshotLimit: 10,
       snapshotMode: 'delta',
-      useGeminiMode: false
+      useGeminiMode: false,
+      retrySystem: {
+        enabled: true,
+        maxRetries: 3,
+        retryDelay: 2000
+      }
     },
     saveSnapshots: [],
+    saveError: null as string | null,
     currentChatLog: [],
     pendingRestoreLog: null,
     eventLibrary: new Map(),

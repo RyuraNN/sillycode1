@@ -358,27 +358,30 @@ const openImagePanel = (imgId, prompt, history, logIndex, fullMatch) => {
 const retryImageGeneration = async (prompt, reqId, logIndex) => {
   const targetLog = gameLog.value[logIndex]
   if (!targetLog) return
-  
+
+  console.log(`[GameMain] Retrying image generation for reqId: ${reqId}, prompt: ${prompt.substring(0, 50)}...`)
+
   const loadingHtml = `<div id="${reqId}" class="image-loading-placeholder" style="padding: 20px; text-align: center; border: 1px dashed #ccc; border-radius: 8px; margin: 10px 0; background: rgba(0,0,0,0.05); max-width: 100%; box-sizing: border-box;">
     <span class="img-spinner"></span>
     <span style="vertical-align: middle; color: #5d4037; font-size: 0.9em;">正在重新绘制...</span>
   </div>`
-  
+
   const errorRegex = new RegExp(`<div[^>]*class="[^"]*image-error[^"]*"[^>]*data-req-id="${reqId}"[^>]*>[\\s\\S]*?<\\/div>`, 'i')
   targetLog.content = targetLog.content.replace(errorRegex, loadingHtml)
-  
+
   try {
     const base64Img = await requestImageGeneration(prompt, '', null, null)
+    console.log(`[GameMain] Retry successful for reqId: ${reqId}`)
     const imgId = 'img_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)
     await saveAndCache(imgId, base64Img)
     addToImageCache(prompt, { id: imgId, base64: base64Img })
-    
+
     const refHtml = `<image-ref id="${imgId}" prompt="${prompt}" />`
     const placeholderRegex = new RegExp(`<div id="${reqId}"[^>]*>[\\s\\S]*?<\\/div>`, 'i')
     targetLog.content = targetLog.content.replace(placeholderRegex, refHtml)
     handleNewContent(contentAreaRef.value)
   } catch (e) {
-    console.error('Retry image generation failed:', e)
+    console.error('[GameMain] Retry image generation failed:', e)
     const errorHtml = `<div class="image-error" data-req-id="${reqId}" data-prompt="${encodeURIComponent(prompt)}" data-log-index="${logIndex}" style="padding: 10px; color: #d32f2f; background: #ffebee; border-radius: 4px; font-size: 0.9em; max-width: 100%; box-sizing: border-box; overflow: hidden;">❌ 图片生成失败: ${e.message} <button class="retry-image-btn" style="margin-left: 8px; padding: 2px 8px; cursor: pointer; border: 1px solid #d32f2f; background: white; color: #d32f2f; border-radius: 4px; font-size: 0.85em;">重试</button></div>`
     const placeholderRegex = new RegExp(`<div id="${reqId}"[^>]*>[\\s\\S]*?<\\/div>`, 'i')
     targetLog.content = targetLog.content.replace(placeholderRegex, errorHtml)
@@ -388,42 +391,45 @@ const retryImageGeneration = async (prompt, reqId, logIndex) => {
 // 图片交互面板事件
 const handleImageRegenerate = async (newPrompt) => {
   if (!selectedImageInfo.value || !newPrompt) return
-  
+
   const { id: oldId, logIndex, history } = selectedImageInfo.value
   showImagePanel.value = false
-  
+
   const targetLog = gameLog.value[logIndex]
   if (!targetLog) return
 
+  console.log(`[GameMain] Regenerating image with new prompt: ${newPrompt.substring(0, 50)}...`)
+
   const reqId = 'img-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5)
   const newHistory = [...history, oldId].join(',')
-  
+
   const loadingHtml = `<div id="${reqId}" class="image-loading-placeholder" style="padding: 20px; text-align: center; border: 1px dashed #ccc; border-radius: 8px; margin: 10px 0; background: rgba(0,0,0,0.05);">
     <span class="img-spinner"></span>
     <span style="vertical-align: middle; color: #5d4037; font-size: 0.9em;">正在重绘...</span>
   </div>`
-  
+
   const regex = new RegExp(`<image-ref\\s+[^>]*id="${oldId}"[^>]*\\/?>`, 'i')
   if (!regex.test(targetLog.content)) {
-    console.error('Original image tag not found for regeneration')
+    console.error('[GameMain] Original image tag not found for regeneration')
     return
   }
-  
+
   targetLog.content = targetLog.content.replace(regex, loadingHtml)
-  
+
   try {
     const base64Img = await requestImageGeneration(newPrompt, '', null, null)
+    console.log(`[GameMain] Regeneration successful`)
     const newImgId = 'img_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)
     await saveAndCache(newImgId, base64Img)
     addToImageCache(newPrompt, { id: newImgId, base64: base64Img })
-    
+
     const refHtml = `<image-ref id="${newImgId}" prompt="${newPrompt}" history="${newHistory}" />`
     const placeholderRegex = new RegExp(`<div id="${reqId}"[^>]*>[\\s\\S]*?<\\/div>`, 'i')
     targetLog.content = targetLog.content.replace(placeholderRegex, refHtml)
-    
+
     gameStore.createAutoSave(gameLog.value, gameStore.currentFloor)
   } catch (e) {
-    console.error('Regenerate image failed:', e)
+    console.error('[GameMain] Regenerate image failed:', e)
     const oldRefHtml = `<image-ref id="${oldId}" prompt="${selectedImageInfo.value.prompt}" history="${history.join(',')}" />`
     const placeholderRegex = new RegExp(`<div id="${reqId}"[^>]*>[\\s\\S]*?<\\/div>`, 'i')
     targetLog.content = targetLog.content.replace(placeholderRegex, oldRefHtml)
@@ -590,8 +596,23 @@ const sendMessage = async () => {
     let fullResponse = ''
     const isStreamEnabled = gameStore.settings.streamResponse !== false && gameStore.settings.streamResponse !== 'false'
 
-    if (isStreamEnabled) {
-      fullResponse = await generateStreaming(finalPrompt, (token) => {
+    // 自动重试逻辑
+    const retrySettings = gameStore.settings.retrySystem
+    let retryCount = 0
+    const maxRetries = retrySettings?.enabled ? retrySettings.maxRetries : 0
+
+    while (fullResponse === '' || fullResponse === '__ERROR__') {
+      if (retryCount > 0) {
+        // 显示重试状态
+        if (hasAddedLog) {
+          currentAiLog.value.content = `<div class="retry-notice" style="padding: 10px; background: #fff3cd; border-left: 4px solid #ffc107; margin: 10px 0;">⚠️ 正在重试 (${retryCount}/${maxRetries})...</div>`
+          handleNewContent(contentAreaRef.value)
+        }
+        await new Promise(r => setTimeout(r, retrySettings.retryDelay))
+      }
+
+      if (isStreamEnabled) {
+        fullResponse = await generateStreaming(finalPrompt, (token) => {
         if (myGenerationId !== currentGenerationId.value) return
 
         streamBuffer += token
@@ -640,11 +661,11 @@ const sendMessage = async () => {
                 if (externalMatch) {
                   prompt = externalMatch[1].trim()
                 }
-                
+
                 if (prompt) {
                   const reqId = 'img-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5)
                   const placeholderHtml = `<div id="${reqId}" class="flashing-text" style="padding: 10px; color: #8b4513; font-size: 0.9em; animation: flash 1.5s infinite;">[正在绘图: ${prompt.substring(0, 10)}...]</div>`
-                  
+
                   if (!hasAddedLog) {
                     gameLog.value.push(currentAiLog.value)
                     hasAddedLog = true
@@ -652,27 +673,42 @@ const sendMessage = async () => {
                   currentAiLog.value.content += placeholderHtml
                   handleNewContent(contentAreaRef.value)
 
-                  const fullPromise = requestImageGeneration(prompt, '', null, null)
-                    .then(async (base64Img) => {
-                      const imgId = 'img_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)
-                      await saveAndCache(imgId, base64Img)
-                      addToImageCache(prompt, { id: imgId, base64: base64Img })
+                  // 使用与批量处理相同的缓存键策略
+                  const cacheKey = `${prompt}|||`
 
-                      const refHtml = `<image-ref id="${imgId}" prompt="${prompt}" />`
-                      
-                      if (currentAiLog.value && currentAiLog.value.content) {
-                        const regex = new RegExp(`<div id="${reqId}"[^>]*>([\\s\\S]*?)<\\/div>`, 'i')
-                        currentAiLog.value.content = currentAiLog.value.content.replace(regex, refHtml)
-                        handleNewContent(contentAreaRef.value)
-                      }
-                      
-                      return base64Img
-                    }).catch(e => {
-                      console.error('Stream image gen failed:', e)
-                      throw e
+                  let fullPromise = imageGenerationCache.get(cacheKey)
+                  if (!fullPromise) {
+                    console.log(`[GameMain Stream] Creating new image request: ${prompt.substring(0, 50)}...`)
+                    fullPromise = requestImageGeneration(prompt, '', null, null)
+                      .then(async (base64Img) => {
+                        const imgId = 'img_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)
+                        await saveAndCache(imgId, base64Img)
+                        addToImageCache(prompt, { id: imgId, base64: base64Img })
+
+                        const refHtml = `<image-ref id="${imgId}" prompt="${prompt}" />`
+
+                        if (currentAiLog.value && currentAiLog.value.content) {
+                          const regex = new RegExp(`<div id="${reqId}"[^>]*>([\\s\\S]*?)<\\/div>`, 'i')
+                          currentAiLog.value.content = currentAiLog.value.content.replace(regex, refHtml)
+                          handleNewContent(contentAreaRef.value)
+                        }
+
+                        return base64Img
+                      }).catch(e => {
+                        console.error('[GameMain Stream] Image gen failed:', e)
+                        throw e
+                      })
+
+                    imageGenerationCache.set(cacheKey, fullPromise)
+
+                    // 完成后从缓存中移除
+                    fullPromise.finally(() => {
+                      imageGenerationCache.delete(cacheKey)
+                      console.log(`[GameMain Stream] Removed promise from cache: ${prompt.substring(0, 50)}...`)
                     })
-                  
-                  imageGenerationCache.set(prompt, fullPromise)
+                  } else {
+                    console.log(`[GameMain Stream] Using cached promise: ${prompt.substring(0, 50)}...`)
+                  }
                 }
               }
 
@@ -799,66 +835,112 @@ const sendMessage = async () => {
             }
           }
         }
-      }, customHistory)
-      
-      if (currentTagName && !currentSystemTag && streamBuffer) {
-        const closeTag = `</${currentTagName}`
-        if (!streamBuffer.includes(closeTag)) {
-          if (!hasAddedLog) {
-            gameLog.value.push(currentAiLog.value)
-            hasAddedLog = true
+        }, customHistory)
+
+        if (currentTagName && !currentSystemTag && streamBuffer) {
+          const closeTag = `</${currentTagName}`
+          if (!streamBuffer.includes(closeTag)) {
+            if (!hasAddedLog) {
+              gameLog.value.push(currentAiLog.value)
+              hasAddedLog = true
+            }
+            currentAiLog.value.content += streamBuffer
+            handleNewContent(contentAreaRef.value)
           }
-          currentAiLog.value.content += streamBuffer
-          handleNewContent(contentAreaRef.value)
         }
-      }
-      
-      // 流式结束后，如果从未找到正文标签（currentTagName 一直为 null），
-      // 且没有输出过任何内容，显示提示
-      if (!hasAddedLog && !currentTagName && fullResponse && fullResponse !== '__STOPPED__' && fullResponse !== '__ERROR__') {
-        const tagNames = allowedTags.join(', ')
-        console.warn(`[GameMain] 流式解析未找到正文标签 <${tagNames}>，AI 可能未按格式输出`)
-        const warningContent = `<div class="empty-reply-warning format-issue">
+
+        // 流式结束后，如果从未找到正文标签（currentTagName 一直为 null），
+        // 且没有输出过任何内容，显示提示
+        if (!hasAddedLog && !currentTagName && fullResponse && fullResponse !== '__STOPPED__' && fullResponse !== '__ERROR__') {
+          const tagNames = allowedTags.join(', ')
+          console.warn(`[GameMain] 流式解析未找到正文标签 <${tagNames}>，AI 可能未按格式输出`)
+          const warningContent = `<div class="empty-reply-warning format-issue">
             <div class="warning-header">⚠️ 未检测到正文内容</div>
             <div class="warning-body">AI 回复中未找到正文标签（如 &lt;${allowedTags[0]}&gt;），流式输出无法显示。</div>
             <div class="warning-detail">后台已收到完整回复，变量已正常更新。正在尝试解析完整回复...</div>
             <div class="warning-hint">💡 如内容仍为空，建议点击"重roll"重新生成。</div>
           </div>`
-        currentAiLog.value.content = warningContent
-        gameLog.value.push(currentAiLog.value)
-        hasAddedLog = true
-        handleNewContent(contentAreaRef.value)
+          currentAiLog.value.content = warningContent
+          gameLog.value.push(currentAiLog.value)
+          hasAddedLog = true
+          handleNewContent(contentAreaRef.value)
+        }
+
+        if (hasAddedLog) {
+          delete currentAiLog.value.isStreaming
+        }
+      } else {
+        const thinkingLog = {
+          type: 'ai',
+          content: '思考中...',
+          isStreaming: true
+        }
+        gameLog.value.push(thinkingLog)
+        scrollToBottom(contentAreaRef.value)
+
+        fullResponse = await generateReply(finalPrompt, customHistory)
+        gameLog.value.pop()
       }
-      
+
+      // 检查是否需要重试
+      if (fullResponse === '__ERROR__') {
+        retryCount++
+        if (retryCount > maxRetries) {
+          break // 达到最大重试次数，退出循环
+        }
+        // 继续下一次循环重试
+        continue
+      }
+
+      // 成功或其他状态，退出循环
+      break
+    }
+
+    // 处理截断
+    if (fullResponse === '__TRUNCATED__') {
+      const truncatedWarning = `<div class="empty-reply-warning" style="background: #fff3cd; border-left: 4px solid #ffc107;">
+          <div class="warning-header">⚠️ 响应可能被截断</div>
+          <div class="warning-body">AI 响应似乎未完整生成，可能超出了 max_tokens 限制。</div>
+          <div class="warning-hint">💡 已跳过变量计算以避免错误。建议调整 max_tokens 或简化输入后重试。</div>
+        </div>`
+
       if (hasAddedLog) {
+        currentAiLog.value.content += truncatedWarning
         delete currentAiLog.value.isStreaming
+      } else {
+        gameLog.value.push({
+          type: 'ai',
+          content: truncatedWarning,
+          isWarning: true
+        })
       }
-    } else {
-      const thinkingLog = {
-        type: 'ai',
-        content: '思考中...',
-        isStreaming: true
-      }
-      gameLog.value.push(thinkingLog)
-      scrollToBottom(contentAreaRef.value)
-      
-      fullResponse = await generateReply(finalPrompt, customHistory)
-      gameLog.value.pop()
+      gameStore.currentFloor = gameLog.value.length
+      isGenerating.value = false
+      return
     }
 
     if (fullResponse === '__STOPPED__' || fullResponse === '__ERROR__') {
       const isStop = fullResponse === '__STOPPED__'
-      const warningContent = isStop
-        ? `<div class="empty-reply-warning">
+
+      let warningContent
+      if (isStop) {
+        warningContent = `<div class="empty-reply-warning">
             <div class="warning-header">⚠️ 生成已停止</div>
             <div class="warning-body">AI 生成已被手动中断。</div>
             <div class="warning-hint">💡 如需继续，请重新发送消息或点击"重roll"。</div>
           </div>`
-        : `<div class="empty-reply-warning error">
+      } else {
+        // 错误情况，显示详细错误信息
+        const errorDetail = retryCount > 0
+          ? `已重试 ${retryCount} 次后仍然失败。`
+          : '请检查后台日志。'
+
+        warningContent = `<div class="empty-reply-warning error">
             <div class="warning-header">❌ 生成出错</div>
-            <div class="warning-body">AI 生成过程中发生错误，请检查后台日志。</div>
-            <div class="warning-hint">💡 建议检查 API 连接状态，或点击"重roll"重试。</div>
+            <div class="warning-body">AI 生成过程中发生错误。${errorDetail}</div>
+            <div class="warning-hint">💡 建议检查 API 连接状态、API Key 是否有效，或点击"重roll"重试。</div>
           </div>`
+      }
 
       // 如果流式阶段已有日志，更新内容
       if (hasAddedLog) {
@@ -958,8 +1040,22 @@ const processAIResponse = async (response) => {
         .replace(/<image>[\s\S]*?<\/image>/gi, '')
         .replace(/<generate_image[^>]*\/?>/gi, '')
         .replace(/<image-ref\s+[^>]*\/?>/gi, '')
-      
-      const promises = [callAssistantAI(contentOnly)]
+
+      // 辅助AI重试逻辑
+      const retrySettings = gameStore.settings.retrySystem
+      const { withRetry } = await import('../utils/retryHelper')
+
+      const callWithRetry = retrySettings?.enabled
+        ? () => withRetry(() => callAssistantAI(contentOnly), {
+            maxRetries: retrySettings.maxRetries,
+            retryDelay: retrySettings.retryDelay,
+            onRetry: (attempt, err) => {
+              console.log(`[AssistantAI] Retry ${attempt}/${retrySettings.maxRetries}:`, err._parsed?.friendlyMessage)
+            }
+          })
+        : () => callAssistantAI(contentOnly)
+
+      const promises = [callWithRetry()]
       const isIndependentImageEnabled = gameStore.settings.independentImageGeneration
       
       if (isIndependentImageEnabled) {
@@ -1254,32 +1350,47 @@ const processAIResponse = async (response) => {
     if (imgRequests.length > 0) {
       const targetLogIndex = gameLog.value.length - 1
       const targetLog = gameLog.value[targetLogIndex]
-      
+
+      console.log(`[GameMain] Processing ${imgRequests.length} image requests for log index ${targetLogIndex}`)
+
       imgRequests.forEach((req) => {
-        let promise = imageGenerationCache.get(req.prompt)
-        if (!promise) {
+        // 为每个请求生成唯一的缓存键（包含 prompt 和其他参数）
+        const cacheKey = `${req.prompt}|${req.change || ''}|${req.width || ''}|${req.height || ''}`
+
+        let promise = imageGenerationCache.get(cacheKey)
+        if (promise) {
+          console.log(`[GameMain] Using cached promise for: ${req.prompt.substring(0, 50)}...`)
+        } else {
+          console.log(`[GameMain] Creating new request for: ${req.prompt.substring(0, 50)}...`)
           promise = requestImageGeneration(req.prompt, req.change, req.width, req.height)
-          imageGenerationCache.set(req.prompt, promise)
+          imageGenerationCache.set(cacheKey, promise)
+
+          // 在 Promise 完成后（无论成功或失败）从缓存中移除，避免缓存失败的 Promise
+          promise.finally(() => {
+            imageGenerationCache.delete(cacheKey)
+            console.log(`[GameMain] Removed promise from cache: ${req.prompt.substring(0, 50)}...`)
+          })
         }
-        
+
         const task = promise.then(async (base64Img) => {
           if (targetLog) {
+            console.log(`[GameMain] Image generated successfully for reqId: ${req.reqId}`)
             const imgId = 'img_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)
             await saveAndCache(imgId, base64Img)
             addToImageCache(req.prompt, { id: imgId, base64: base64Img })
 
             const refHtml = `<image-ref id="${imgId}" prompt="${req.prompt}" />`
-            
+
             const placeholderRegex = new RegExp(`<div id="${req.reqId}"[^>]*>([\\s\\S]*?)<\\/div>`, 'i')
             targetLog.content = targetLog.content.replace(placeholderRegex, refHtml)
             if (targetLog.rawContent) {
               targetLog.rawContent = targetLog.rawContent.replace(placeholderRegex, refHtml)
             }
-            
+
             handleNewContent(contentAreaRef.value)
           }
         }).catch(e => {
-          console.error('Image generation failed:', e)
+          console.error(`[GameMain] Image generation failed for reqId ${req.reqId}:`, e)
           if (targetLog) {
             const errorHtml = `<div class="image-error" data-req-id="${req.reqId}" data-prompt="${encodeURIComponent(req.prompt)}" data-log-index="${targetLogIndex}" style="padding: 10px; color: #d32f2f; background: #ffebee; border-radius: 4px; font-size: 0.9em; max-width: 100%; box-sizing: border-box; overflow: hidden;">❌ 图片生成失败: ${e.message} <button class="retry-image-btn" style="margin-left: 8px; padding: 2px 8px; cursor: pointer; border: 1px solid #d32f2f; background: white; color: #d32f2f; border-radius: 4px; font-size: 0.85em;">重试</button></div>`
             const placeholderRegex = new RegExp(`<div id="${req.reqId}"[^>]*>([\\s\\S]*?)<\\/div>`, 'i')
@@ -1484,7 +1595,28 @@ const handleAssistantReroll = async () => {
     
     // 生成详细的变量变化列表
     lastRoundChanges.value = generateDetailedChanges(preRerollSnapshot, lastLog.snapshot)
-    
+
+    // 提取并保存小总结
+    const rerollSummary = extractSummary(cleanAssistantResponse, 'minor')
+    if (rerollSummary) {
+      const summarySource = (lastLog.rawContent || lastLog.content)
+        .replace(/<minor_summary>[\s\S]*?<\/minor_summary>/g, '')
+        .replace(/\[GAME_DATA\][\s\S]*?\[\/GAME_DATA\]/g, '')
+        .trim()
+      await processPostReply(summarySource, gameStore.currentFloor, rerollSummary)
+    }
+
+    // 提取建议回复
+    if (gameStore.settings.suggestedReplies) {
+      const rerollReplies = extractSuggestedReplies(cleanAssistantResponse)
+      if (rerollReplies?.length > 0) {
+        suggestedReplies.value = rerollReplies
+      }
+    }
+
+    // 关闭变量错误提示
+    showVariableErrorTip.value = false
+
     // 自动保存
     gameStore.createAutoSave(gameLog.value, gameStore.currentFloor)
     
@@ -2004,6 +2136,20 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
 
       <!-- 底部输入栏 -->
       <div class="input-bar-container" ref="inputBarRef" :style="{ bottom: inputBarOffset + 'px' }">
+        <!-- 变量计算失败提示 - 输入框正上方 -->
+        <transition name="fade">
+          <div v-if="showVariableErrorTip" class="variable-error-tip">
+            <div class="variable-error-icon">⚠️</div>
+            <div class="variable-error-text">辅助AI变量计算失败</div>
+            <button class="variable-error-action" @click="handleAssistantReroll" title="重新计算变量">
+              🔄
+            </button>
+            <button class="variable-error-close" @click="closeVariableErrorTip" title="关闭提示">
+              ×
+            </button>
+          </div>
+        </transition>
+
         <!-- 建议回复面板 -->
         <SuggestionsPanel 
           v-if="gameStore.settings.suggestedReplies"
@@ -2109,20 +2255,6 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
             {{ tucaoContent }}
           </div>
         </div>
-      </div>
-    </transition>
-
-    <!-- 变量计算失败提示 -->
-    <transition name="fade">
-      <div v-if="showVariableErrorTip" class="variable-error-tip">
-        <div class="variable-error-icon">⚠️</div>
-        <div class="variable-error-text">变量计算失败</div>
-        <button class="variable-error-action" @click="handleAssistantReroll" title="重新计算变量">
-          🔄
-        </button>
-        <button class="variable-error-close" @click="closeVariableErrorTip" title="关闭提示">
-          ×
-        </button>
       </div>
     </transition>
 

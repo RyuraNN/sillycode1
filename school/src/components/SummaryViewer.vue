@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
-import { generateMajorSummary, generateBatchSummaries } from '../utils/summaryManager'
+import { generateDiary } from '../utils/summaryManager'
 
 const emit = defineEmits(['close'])
 const gameStore = useGameStore()
@@ -166,37 +166,81 @@ const toggleSelectionMode = () => {
   }
 }
 
-// 选择/取消选择楼层
+// 选择/取消选择楼层（只允许选择同一天的小总结）
 const toggleFloorSelection = (floor) => {
+  const summary = (gameStore.player.summaries || []).find(s => s.floor === floor && s.type === 'minor')
+  if (!summary) return
+
   const index = selectedFloors.value.indexOf(floor)
   if (index > -1) {
     selectedFloors.value.splice(index, 1)
   } else {
+    if (selectedDate.value && summary.gameDate !== selectedDate.value) {
+      alert('只能选择同一天的小总结来生成日记')
+      return
+    }
     selectedFloors.value.push(floor)
   }
 }
 
-// 批量生成大总结（从选中的小总结）
-const generateFromSelected = async () => {
-  if (selectedFloors.value.length < 2) {
-    alert('请至少选择2个小总结进行合并')
+// 获取选中小总结的日期
+const selectedDate = computed(() => {
+  if (selectedFloors.value.length === 0) return null
+  const firstFloor = selectedFloors.value[0]
+  const summary = (gameStore.player.summaries || []).find(s => s.floor === firstFloor && s.type === 'minor')
+  return summary?.gameDate || null
+})
+
+// 检查该日期是否已有日记
+const existingDiary = computed(() => {
+  if (!selectedDate.value) return null
+  return (gameStore.player.summaries || []).find(s => s.type === 'diary' && s.gameDate === selectedDate.value)
+})
+
+// 日记对比状态
+const showDiaryCompare = ref(false)
+const newDiaryContent = ref('')
+const comparingDate = ref('')
+
+// 生成日记
+const generateDiaryFromSelected = async () => {
+  if (selectedFloors.value.length < 1) {
+    alert('请至少选择1个小总结')
     return
   }
-  
+
+  if (!selectedDate.value) {
+    alert('选中的小总结缺少日期信息')
+    return
+  }
+
   if (!gameStore.settings.assistantAI?.enabled) {
     alert('请先在设置中开启辅助AI')
     return
   }
-  
+
   isGenerating.value = true
   try {
-    const result = await generateMajorSummary(selectedFloors.value.sort((a, b) => a - b))
-    if (result.success) {
-      alert('大总结生成成功！')
-      selectedFloors.value = []
-      selectionMode.value = false
+    if (existingDiary.value) {
+      // 已有日记，生成新版本用于对比
+      const result = await generateDiary(selectedDate.value, { dryRun: true })
+      if (result.success && result.content) {
+        newDiaryContent.value = result.content
+        comparingDate.value = selectedDate.value
+        showDiaryCompare.value = true
+      } else {
+        alert('生成失败：' + (result.error || '未知错误'))
+      }
     } else {
-      alert('生成失败：' + result.error)
+      // 直接生成并保存
+      const result = await generateDiary(selectedDate.value)
+      if (result.success) {
+        alert('日记生成成功！')
+        selectedFloors.value = []
+        selectionMode.value = false
+      } else {
+        alert('生成失败：' + result.error)
+      }
     }
   } catch (e) {
     alert('生成出错：' + e.message)
@@ -205,20 +249,22 @@ const generateFromSelected = async () => {
   }
 }
 
-// 快速选择未被覆盖的小总结
-const selectAllUncovered = () => {
-  const minors = (gameStore.player.summaries || []).filter(s => s.type === 'minor')
-  
-  // 找出已被大总结覆盖的楼层
-  const coveredByMajor = new Set()
-  ;(gameStore.player.summaries || [])
-    .filter(s => s.type === 'major' || s.type === 'super')
-    .forEach(s => s.coveredFloors.forEach(f => coveredByMajor.add(f)))
-  
-  // 选择未被覆盖的小总结
-  selectedFloors.value = minors
-    .filter(s => !coveredByMajor.has(s.floor))
-    .map(s => s.floor)
+// 对比后选择使用新日记
+const useNewDiary = async () => {
+  const oldIndex = gameStore.player.summaries.findIndex(s => s.type === 'diary' && s.gameDate === comparingDate.value)
+  if (oldIndex > -1) {
+    gameStore.player.summaries.splice(oldIndex, 1)
+  }
+  await generateDiary(comparingDate.value)
+  showDiaryCompare.value = false
+  selectedFloors.value = []
+  selectionMode.value = false
+  gameStore.saveToStorage()
+}
+
+// 对比后保留旧日记
+const keepOldDiary = () => {
+  showDiaryCompare.value = false
 }
 </script>
 
@@ -273,23 +319,23 @@ const selectAllUncovered = () => {
 
       <!-- 批量操作栏 (仅在小总结标签页显示) -->
       <div v-if="currentTab === 'minor'" class="action-bar">
-        <button 
-          class="action-btn" 
+        <button
+          class="action-btn"
           :class="{ active: selectionMode }"
           @click="toggleSelectionMode"
         >
-          {{ selectionMode ? '取消选择' : '选择合并' }}
+          {{ selectionMode ? '取消选择' : '生成日记' }}
         </button>
         <template v-if="selectionMode">
-          <button class="action-btn secondary" @click="selectAllUncovered">
-            选择全部未覆盖
-          </button>
-          <button 
-            class="action-btn primary" 
-            @click="generateFromSelected"
-            :disabled="selectedFloors.length < 2 || isGenerating"
+          <span v-if="selectedDate" class="selected-date-hint">
+            已选日期: {{ selectedDate }}
+          </span>
+          <button
+            class="action-btn primary"
+            @click="generateDiaryFromSelected"
+            :disabled="selectedFloors.length < 1 || isGenerating"
           >
-            {{ isGenerating ? '生成中...' : `合并 (${selectedFloors.length})` }}
+            {{ isGenerating ? '生成中...' : existingDiary ? '生成并对比' : `生成日记 (${selectedFloors.length})` }}
           </button>
         </template>
       </div>
@@ -322,6 +368,26 @@ const selectAllUncovered = () => {
             <button v-if="!selectionMode" class="delete-btn" @click.stop="deleteSummary(summary)">🗑️</button>
           </div>
           <div class="item-preview" :class="{ 'diary-content': summary.type === 'diary' }">{{ summary.content }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 日记对比弹窗 -->
+    <div v-if="showDiaryCompare" class="diary-compare-modal">
+      <div class="compare-header">
+        <h3>{{ comparingDate }} 日记对比</h3>
+        <button class="close-btn" @click="keepOldDiary">×</button>
+      </div>
+      <div class="compare-content">
+        <div class="compare-column">
+          <h4>现有日记</h4>
+          <div class="diary-preview">{{ existingDiary?.content }}</div>
+          <button class="keep-btn" @click="keepOldDiary">保留现有</button>
+        </div>
+        <div class="compare-column">
+          <h4>新生成日记</h4>
+          <div class="diary-preview">{{ newDiaryContent }}</div>
+          <button class="use-btn" @click="useNewDiary">使用新版</button>
         </div>
       </div>
     </div>
@@ -635,5 +701,116 @@ const selectAllUncovered = () => {
 .summary-item.selected {
   border: 2px solid #007aff;
   background: #f0f8ff;
+}
+
+/* 已选日期提示 */
+.selected-date-hint {
+  font-size: 12px;
+  color: #007aff;
+  padding: 4px 8px;
+  background: #e8f4fd;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+/* 日记对比弹窗 */
+.diary-compare-modal {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: #f2f2f7;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+}
+
+.compare-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #fff;
+  border-bottom: 0.5px solid rgba(0,0,0,0.1);
+}
+
+.compare-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #000;
+}
+
+.compare-header .close-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: #8e8e93;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.compare-content {
+  flex: 1;
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  overflow: hidden;
+}
+
+.compare-column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.compare-column h4 {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: #333;
+  background: #f8f8f8;
+  border-bottom: 0.5px solid rgba(0,0,0,0.1);
+  text-align: center;
+}
+
+.compare-column .diary-preview {
+  flex: 1;
+  padding: 12px;
+  font-size: 13px;
+  color: #333;
+  line-height: 1.6;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.keep-btn, .use-btn {
+  margin: 10px 12px;
+  padding: 10px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+}
+
+.keep-btn {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.use-btn {
+  background: #007aff;
+  color: #fff;
+}
+
+@media (max-width: 768px) {
+  .compare-content {
+    flex-direction: column;
+  }
 }
 </style>

@@ -39,18 +39,42 @@ export async function requestImageGeneration(prompt, change, width, height) {
 
         console.log(`[ImageGenerator] Requesting image: ${requestId}`, requestData);
 
-        // Define response handler
-        const imageResponseHandler = (responseData) => {
-            if (!responseData || responseData.id !== requestId) return;
+        // 标志位：防止重复处理响应
+        let isHandled = false;
+        let timeoutId = null;
 
-            console.log(`[ImageGenerator] Received response for ${requestId}`);
-            
-            // Clean up listener
+        // 清理函数：确保监听器被移除
+        const cleanup = () => {
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+                timeoutId = null;
+            }
             try {
                 window.eventRemoveListener(EventType.GENERATE_IMAGE_RESPONSE, imageResponseHandler);
+                console.log(`[ImageGenerator] Listener removed for ${requestId}`);
             } catch (e) {
                 console.warn('[ImageGenerator] Failed to remove listener:', e);
             }
+        };
+
+        // Define response handler
+        const imageResponseHandler = (responseData) => {
+            // 忽略不匹配的响应，但不要在这里 return（继续让其他监听器处理）
+            if (!responseData || responseData.id !== requestId) {
+                return;
+            }
+
+            // 防止重复处理（超时后又收到响应）
+            if (isHandled) {
+                console.warn(`[ImageGenerator] Response for ${requestId} already handled, ignoring`);
+                return;
+            }
+
+            isHandled = true;
+            console.log(`[ImageGenerator] Received response for ${requestId}`, { success: responseData.success });
+
+            // 清理监听器和超时
+            cleanup();
 
             const { success, imageData, error } = responseData;
 
@@ -62,21 +86,31 @@ export async function requestImageGeneration(prompt, change, width, height) {
         };
 
         // Set timeout to avoid hanging forever
-        setTimeout(() => {
-             // Remove listener if timed out
-             try {
-                window.eventRemoveListener(EventType.GENERATE_IMAGE_RESPONSE, imageResponseHandler);
-            } catch (e) {}
+        timeoutId = setTimeout(() => {
+            if (isHandled) return;
+
+            isHandled = true;
+            console.warn(`[ImageGenerator] Request ${requestId} timed out`);
+            cleanup();
             reject(new Error('Image generation timed out'));
         }, 120000); // 2 minutes timeout
 
         // Start listening
-        window.eventOn(EventType.GENERATE_IMAGE_RESPONSE, imageResponseHandler);
+        try {
+            window.eventOn(EventType.GENERATE_IMAGE_RESPONSE, imageResponseHandler);
+            console.log(`[ImageGenerator] Listener registered for ${requestId}`);
+        } catch (e) {
+            cleanup();
+            reject(new Error('Failed to register event listener: ' + e.message));
+            return;
+        }
 
         // Emit request
         try {
             await window.eventEmit(EventType.GENERATE_IMAGE_REQUEST, requestData);
+            console.log(`[ImageGenerator] Request emitted for ${requestId}`);
         } catch (e) {
+            cleanup();
             reject(e);
         }
     });

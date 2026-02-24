@@ -4,10 +4,34 @@ import { buildSystemInjection } from './prompts'
 let isGenerationStopped = false
 
 /**
+ * 检测响应是否可能被截断
+ * @param {string} response AI响应文本
+ * @returns {boolean} 是否可能被截断
+ */
+function checkTruncation(response) {
+  if (!response || response.length < 50) return false
+
+  // 检查是否以未闭合的标签结尾
+  const unclosedTag = /<[^>]*$/.test(response)
+  const unclosedBracket = /\[[^\]]*$/.test(response)
+
+  // 检查是否以不完整的句子结尾（没有标点符号）
+  const endsWithoutPunctuation = !/[。！？.!?]$/.test(response.trim())
+
+  // 如果有明显的未闭合标签，判定为截断
+  if (unclosedTag || unclosedBracket) return true
+
+  // 如果响应很短且没有标点，也可能是截断
+  if (response.length < 200 && endsWithoutPunctuation) return true
+
+  return false
+}
+
+/**
  * 请求 AI 生成回复
  * @param {string} userInput 用户输入
  * @param {Array} customHistory 自定义聊天历史（可选，用于总结系统替换上下文）
- * @returns {Promise<string>} AI 回复全文，或者特殊标记 '__STOPPED__' / '__ERROR__'
+ * @returns {Promise<string>} AI 回复全文，或者特殊标记 '__STOPPED__' / '__ERROR__' / '__TRUNCATED__'
  */
 export async function generateReply(userInput, customHistory = null) {
   const gameStore = useGameStore()
@@ -18,7 +42,7 @@ export async function generateReply(userInput, customHistory = null) {
   if (window.generate) {
     try {
       console.log('[ST Client] Calling ST generate API...')
-      
+
       const options = {
         user_input: userInput,
         // 注入系统提示词
@@ -38,13 +62,19 @@ export async function generateReply(userInput, customHistory = null) {
       }
 
       const result = await window.generate(options)
-      
+
       // 再次检查是否被停止（虽然 generate 应该会抛错或返回，但双重保险）
       if (isGenerationStopped) return '__STOPPED__'
-      
+
+      // 检测截断
+      if (checkTruncation(result)) {
+        console.warn('[ST Client] Response may be truncated')
+        return '__TRUNCATED__'
+      }
+
       // 生成成功后清空指令队列
       gameStore.clearCommands()
-      
+
       return result
     } catch (error) {
       console.error('[ST Client] Generation failed:', error)
@@ -133,9 +163,15 @@ export async function generateStreaming(userInput, onChunk, customHistory = null
 
     // 调用生成
     const result = await window.generate(options)
-    
+
     if (isGenerationStopped) return '__STOPPED__'
-    
+
+    // 检测截断
+    if (checkTruncation(result)) {
+      console.warn('[ST Client] Response may be truncated')
+      return '__TRUNCATED__'
+    }
+
     gameStore.clearCommands()
     return result
 

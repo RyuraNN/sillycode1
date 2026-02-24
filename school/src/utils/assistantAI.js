@@ -291,26 +291,27 @@ export async function callAssistantAI(mainAIResponse, options = {}) {
     throw new Error('辅助AI配置不完整')
   }
 
-  // 1. 构建上下文
-  // 获取系统提示词并过滤
-  let systemPrompt = buildSystemPromptContent(gameStore.$state)
-  // 移除 [Instructions] 部分
-  const instructionsIndex = systemPrompt.indexOf('[Instructions]')
-  if (instructionsIndex !== -1) {
-    systemPrompt = systemPrompt.substring(0, instructionsIndex)
-  }
+  let userContent
+  let finalSystemPrompt
+  let assistantPrefill = null
 
-  // 获取待处理队列中的提示词
-  const pendingPrompts = gameStore.player.pendingCommands.map(cmd => cmd.text).join('\n')
+  if (options.systemPrompt) {
+    // 纯总结模式：简化上下文，不使用 prefill
+    userContent = mainAIResponse
+    finalSystemPrompt = options.systemPrompt
+  } else {
+    // 正常变量解析模式：构建完整上下文
+    let systemPrompt = buildSystemPromptContent(gameStore.$state)
+    const instructionsIndex = systemPrompt.indexOf('[Instructions]')
+    if (instructionsIndex !== -1) {
+      systemPrompt = systemPrompt.substring(0, instructionsIndex)
+    }
 
-  // 获取开启的世界书内容
-  const activeWorldbooks = await getActiveWorldbooksContent()
+    const pendingPrompts = gameStore.player.pendingCommands.map(cmd => cmd.text).join('\n')
+    const activeWorldbooks = await getActiveWorldbooksContent()
+    const variableParsingBook = await getVariableParsingEntryContent()
 
-  // 获取 [变量解析] 条目内容
-  const variableParsingBook = await getVariableParsingEntryContent()
-  
-  // 构建用户输入
-  const userContent = `
+    userContent = `
 [System Context]
 ${systemPrompt}
 
@@ -323,26 +324,29 @@ ${activeWorldbooks}
 [Story Content]
 ${mainAIResponse}
 `
-
-  // 构建 System Prompt
-  let finalSystemPrompt = options.systemPrompt || ASSISTANT_SYSTEM_PROMPT
-  if (variableParsingBook) {
-    finalSystemPrompt += `\n${variableParsingBook}`
+    finalSystemPrompt = ASSISTANT_SYSTEM_PROMPT
+    if (variableParsingBook) {
+      finalSystemPrompt += `\n${variableParsingBook}`
+    }
+    assistantPrefill = ASSISTANT_PREFILL
   }
 
-  // 2. 构建请求
+  // 构建请求
   const messages = [
     { role: 'system', content: finalSystemPrompt },
-    { role: 'user', content: userContent },
-    { role: 'assistant', content: ASSISTANT_PREFILL }
+    { role: 'user', content: userContent }
   ]
+
+  if (assistantPrefill) {
+    messages.push({ role: 'assistant', content: assistantPrefill })
+  }
 
   // 处理 API URL (自动补全 /v1/chat/completions 如果需要，或者由用户填写完整)
   // 任务要求：自动进行补全（例如将/v1补全）
   // 这里我们假设用户输入的是 base URL，我们需要追加 /chat/completions
   // 或者用户输入的是 /v1，我们需要追加 /chat/completions
   // 通常 OpenAI 兼容接口是 POST /v1/chat/completions
-  
+
   let endpoint = apiUrl
   if (!endpoint.endsWith('/chat/completions')) {
     if (endpoint.endsWith('/')) {
@@ -353,6 +357,12 @@ ${mainAIResponse}
   }
 
   console.log('[AssistantAI] Calling API:', endpoint)
+
+  // Token 估算调试日志
+  if (gameStore.settings.debugMode) {
+    const estimatedTokens = Math.ceil((finalSystemPrompt.length + userContent.length) / 4)
+    console.log(`[AssistantAI] Estimated tokens: ~${estimatedTokens} (system: ${finalSystemPrompt.length} chars, user: ${userContent.length} chars)`)
+  }
 
   try {
     const response = await fetch(endpoint, {
@@ -377,10 +387,14 @@ ${mainAIResponse}
     const data = await response.json()
     let reply = data.choices[0].message.content
 
-    // 拼接 Prefill
-    return ASSISTANT_PREFILL + reply
+    // 仅在变量解析模式下拼接 Prefill
+    return assistantPrefill ? (assistantPrefill + reply) : reply
   } catch (error) {
     console.error('[AssistantAI] Request failed:', error)
+    // 增强错误信息
+    if (error.message && !error.message.startsWith('API Error:')) {
+      throw new Error(`API Error: ${error.message}`)
+    }
     throw error
   }
 }

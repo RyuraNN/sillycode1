@@ -36,45 +36,46 @@ const rerankModelList = ref([])
 const isLoadingEmbModels = ref(false)
 const isLoadingRerankModels = ref(false)
 const showBatchModal = ref(false)
-const batchSize = ref(10)
 const isBatchProcessing = ref(false)
 const batchProgress = ref({ current: 0, total: 0 })
+const batchType = ref('') // 'summary' | 'diary'
+const autoEmbedAfterBatch = ref(true)
 const newContentTag = ref('')
 
-// 批量生成总结
-const startBatchGeneration = async () => {
+// 批量补齐小总结
+const startBatchSummaryGeneration = async () => {
   if (!gameStore.currentChatLog || gameStore.currentChatLog.length === 0) {
     alert('没有聊天记录可供处理')
     return
   }
-  
+
   if (!gameStore.settings.assistantAI.enabled) {
     alert('请先开启辅助AI')
     return
   }
 
+  batchType.value = 'summary'
   isBatchProcessing.value = true
   batchProgress.value = { current: 0, total: 0 }
-  
+
+  const shouldEmbed = autoEmbedAfterBatch.value && gameStore.settings.ragSystem?.enabled
+
   try {
-    await generateBatchSummaries(gameStore.currentChatLog, batchSize.value, (current, total) => {
+    await generateBatchSummaries(gameStore.currentChatLog, (current, total) => {
       batchProgress.value = { current, total }
-    })
-    alert('批量生成完成！')
-    showBatchModal.value = false
+    }, { autoEmbed: shouldEmbed })
+    alert('小总结补齐完成！')
   } catch (e) {
     console.error(e)
     alert('生成过程中出错: ' + e.message)
   } finally {
     isBatchProcessing.value = false
+    batchType.value = ''
   }
 }
 
-// 手动批量生成日记
-const isDiaryProcessing = ref(false)
-const diaryProgress = ref({ current: 0, total: 0, date: '' })
-
-const startDiaryGeneration = async () => {
+// 批量补齐日记
+const startBatchDiaryGeneration = async () => {
   if (!gameStore.settings.assistantAI?.enabled) {
     alert('请先开启辅助AI')
     return
@@ -84,23 +85,25 @@ const startDiaryGeneration = async () => {
     return
   }
 
-  isDiaryProcessing.value = true
-  diaryProgress.value = { current: 0, total: 0, date: '' }
+  batchType.value = 'diary'
+  isBatchProcessing.value = true
+  batchProgress.value = { current: 0, total: 0 }
 
   try {
-    const result = await generateBatchDiaries((current, total, date) => {
-      diaryProgress.value = { current, total, date }
+    const result = await generateBatchDiaries((current, total) => {
+      batchProgress.value = { current, total }
     })
     if (result.generated === 0 && result.failed === 0) {
       alert('没有需要生成日记的日期')
     } else {
-      alert(`日记生成完成！成功 ${result.generated} 篇${result.failed > 0 ? `，失败 ${result.failed} 篇` : ''}`)
+      alert(`日记补齐完成！成功 ${result.generated} 篇${result.failed > 0 ? `，失败 ${result.failed} 篇` : ''}`)
     }
   } catch (e) {
     console.error(e)
     alert('生成过程中出错: ' + e.message)
   } finally {
-    isDiaryProcessing.value = false
+    isBatchProcessing.value = false
+    batchType.value = ''
   }
 }
 
@@ -798,14 +801,6 @@ const handleHomeClick = () => {
                           <button class="action-btn secondary" style="width: 100%;" @click="showBatchModal = true">
                             🤖 批量补齐总结
                           </button>
-                          <button
-                            class="action-btn secondary"
-                            style="width: 100%;"
-                            @click="startDiaryGeneration"
-                            :disabled="isDiaryProcessing"
-                          >
-                            {{ isDiaryProcessing ? `📔 生成日记中 (${diaryProgress.current}/${diaryProgress.total})...` : '📔 手动生成日记' }}
-                          </button>
                         </div>
                       </div>
                     </div>
@@ -887,7 +882,7 @@ const handleHomeClick = () => {
                           <div class="slider-container" :style="{ opacity: gameStore.settings.ragSystem.autoAdjust ? 0.45 : 1 }">
                             <input type="range" v-model.number="gameStore.settings.ragSystem.topK" min="10" max="100" step="5" @change="gameStore.saveToStorage()" class="setting-slider" :disabled="gameStore.settings.ragSystem.autoAdjust" />
                           </div>
-                          <!-- PLACEHOLDER_RAG_UI_2 -->
+
                           <div class="setting-item" style="margin-top: 8px;" :style="{ opacity: gameStore.settings.ragSystem.autoAdjust ? 0.45 : 1 }">
                             <span class="setting-label">Rerank 保留数量 (topN): {{ gameStore.settings.ragSystem.rerankTopN }}</span>
                           </div>
@@ -902,37 +897,51 @@ const handleHomeClick = () => {
                               <span class="slider"></span>
                             </label>
                           </div>
-                          <p class="hint">开启后将最近一轮 AI 回复拼入检索 query，提升召回相关性</p>
-                        </div>
+                          <p class="hint">拼接最近总结到检索query，提升语义丰富度</p>
 
-                        <div style="margin-top: 15px; display: flex; flex-direction: column; gap: 10px;">
-                          <button
-                            class="action-btn secondary"
-                            style="width: 100%;"
-                            @click="startBatchEmbed"
-                            :disabled="isEmbedding"
-                          >
-                            {{ isEmbedding ? `⚡ 生成向量中 (${embedProgress.current}/${embedProgress.total})...` : '⚡ 批量生成向量' }}
-                          </button>
-                          <div v-if="isEmbedding" class="batch-progress-bar" style="margin-top: -4px;">
-                            <div
-                              class="batch-progress-fill"
-                              :style="{ width: embedProgress.total ? (embedProgress.current / embedProgress.total * 100) + '%' : '0%' }"
-                            ></div>
-                          </div>
-                          <button class="action-btn primary" style="width: 100%;" @click="showMemoryGraph = true">
-                            🕸️ 查看记忆图谱
+                          <button class="action-btn primary" style="width: 100%; margin-top: 10px;" @click="startBatchEmbed" :disabled="isEmbedding">
+                            {{ isEmbedding ? `生成中 ${embedProgress.current}/${embedProgress.total}` : '🔢 批量生成向量' }}
                           </button>
                         </div>
                       </div>
                     </div>
 
                     <div class="settings-section">
+                      <h3 class="section-title">自动重试</h3>
+                      <div class="setting-item">
+                        <span class="setting-label">启用自动重试</span>
+                        <label class="switch">
+                          <input type="checkbox" v-model="gameStore.settings.retrySystem.enabled" @change="gameStore.saveToStorage()">
+                          <span class="slider"></span>
+                        </label>
+                      </div>
+                      <p class="hint">主AI、辅助AI或RAG请求失败时自动重试</p>
+
+                      <template v-if="gameStore.settings.retrySystem?.enabled">
+                        <div class="setting-item" style="margin-top: 10px;">
+                          <span class="setting-label">最大重试次数: {{ gameStore.settings.retrySystem.maxRetries }}</span>
+                        </div>
+                        <div class="slider-container">
+                          <input type="range" v-model.number="gameStore.settings.retrySystem.maxRetries"
+                            min="1" max="10" step="1" @change="gameStore.saveToStorage()" class="setting-slider" />
+                        </div>
+
+                        <div class="setting-item" style="margin-top: 8px;">
+                          <span class="setting-label">重试延迟: {{ (gameStore.settings.retrySystem.retryDelay / 1000).toFixed(1) }}秒</span>
+                        </div>
+                        <div class="slider-container">
+                          <input type="range" v-model.number="gameStore.settings.retrySystem.retryDelay"
+                            min="500" max="10000" step="500" @change="gameStore.saveToStorage()" class="setting-slider" />
+                        </div>
+                      </template>
+                    </div>
+
+                    <div class="settings-section">
                       <h3 class="section-title">制作名单</h3>
                       <div class="credits-body">
                         <p>原作者：墨沈</p>
-                        <p>重置：Elyrene</p>
-                        <p>版本号 V2.2EX</p>
+                        <p>重制：Elyrene</p>
+                        <p>版本号 V2.3</p>
                         <p>免费发布于DC类脑社区</p>
                       </div>
                     </div>
@@ -956,34 +965,34 @@ const handleHomeClick = () => {
                         <button class="batch-close-btn" @click="showBatchModal = false" v-if="!isBatchProcessing">×</button>
                       </div>
                       <div class="batch-modal-body">
-                        <p class="batch-description">
-                          将自动扫描缺失总结的楼层，并调用辅助AI分批生成大总结。
-                          <br>注意：此操作可能会消耗大量 Token。
-                        </p>
-                        
                         <div v-if="!isBatchProcessing">
-                          <div class="setting-item">
-                            <span class="setting-label">每批处理层数</span>
-                            <select v-model="batchSize" class="batch-select">
-                              <option :value="5">5层</option>
-                              <option :value="10">10层</option>
-                              <option :value="20">20层</option>
-                              <option :value="50">50层</option>
-                            </select>
-                          </div>
-                          
-                          <div style="margin-top: 20px; display: flex; gap: 10px;">
-                            <button class="action-btn secondary" style="flex: 1;" @click="showBatchModal = false">取消</button>
-                            <button class="action-btn primary" style="flex: 1;" @click="startBatchGeneration">开始生成</button>
+                          <p class="batch-description">
+                            自动扫描并补齐缺失的总结和日记。
+                            <br>连续缺失的楼层会合并为一个小总结。
+                            <br>注意：此操作可能会消耗大量 Token。
+                          </p>
+
+                          <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 15px;">
+                            <label v-if="gameStore.settings.ragSystem?.enabled" class="setting-item" style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                              <input type="checkbox" v-model="autoEmbedAfterBatch" style="width: 16px; height: 16px;">
+                              <span>自动计算向量（RAG）</span>
+                            </label>
+                            <button class="action-btn primary" style="width: 100%;" @click="startBatchSummaryGeneration">
+                              📝 补齐所有小总结
+                            </button>
+                            <button class="action-btn secondary" style="width: 100%;" @click="startBatchDiaryGeneration">
+                              📔 补齐所有日记
+                            </button>
+                            <button class="action-btn secondary" style="width: 100%;" @click="showBatchModal = false">取消</button>
                           </div>
                         </div>
 
                         <div v-else style="text-align: center; padding: 20px 0;">
                           <div class="setting-label" style="margin-bottom: 10px;">
-                            正在处理... ({{ batchProgress.current }} / {{ batchProgress.total }})
+                            {{ batchType === 'diary' ? '正在补齐日记' : '正在补齐小总结' }}... ({{ batchProgress.current }} / {{ batchProgress.total }})
                           </div>
                           <div class="batch-progress-bar">
-                            <div 
+                            <div
                               class="batch-progress-fill"
                               :style="{ width: batchProgress.total ? (batchProgress.current / batchProgress.total * 100) + '%' : '0%' }"
                             ></div>

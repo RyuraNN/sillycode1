@@ -2,9 +2,7 @@
 import { ref } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { fetchModels, IMAGE_ANALYSIS_PROMPT } from '../utils/assistantAI'
-import { generateBatchSummaries } from '../utils/summaryManager'
 import { DEFAULT_INSTRUCTIONS_PROMPT, DEFAULT_STYLE_PROMPT, DEFAULT_CORE_RULES_PROMPT, DEFAULT_BANNED_WORDS_PROMPT } from '../utils/prompts'
-import SummaryViewer from './SummaryViewer.vue'
 
 defineEmits(['back'])
 
@@ -16,11 +14,6 @@ const rerankModelList = ref([])
 const isLoadingEmbModels = ref(false)
 const isLoadingRerankModels = ref(false)
 const newContentTag = ref('')
-const showSummaryViewer = ref(false)
-const showBatchModal = ref(false)
-const batchSize = ref(10)
-const isBatchProcessing = ref(false)
-const batchProgress = ref({ current: 0, total: 0 })
 const debugClicks = ref(0)
 let debugClickTimer = null
 
@@ -107,34 +100,6 @@ const resetAllPrompts = () => {
   }
   gameStore.settings.bannedWords = { enabled: true, customContent: null, position: 'style' }
   gameStore.saveToStorage()
-}
-
-const startBatchGeneration = async () => {
-  if (!gameStore.currentChatLog || gameStore.currentChatLog.length === 0) {
-    alert('没有聊天记录可供处理')
-    return
-  }
-  
-  if (!gameStore.settings.assistantAI.enabled) {
-    alert('请先开启辅助AI')
-    return
-  }
-
-  isBatchProcessing.value = true
-  batchProgress.value = { current: 0, total: 0 }
-  
-  try {
-    await generateBatchSummaries(gameStore.currentChatLog, batchSize.value, (current, total) => {
-      batchProgress.value = { current, total }
-    })
-    alert('批量生成完成！')
-    showBatchModal.value = false
-  } catch (e) {
-    console.error(e)
-    alert('生成过程中出错: ' + e.message)
-  } finally {
-    isBatchProcessing.value = false
-  }
 }
 
 const handleCreditsClick = () => {
@@ -890,8 +855,8 @@ const loadRerankModels = async () => {
           </div>
           <div class="card-body credits-body">
             <p>原作者：墨沈</p>
-            <p @click="handleCreditsClick" style="cursor: pointer; user-select: none;">重置：Elyrene</p>
-            <p>版本号 V2.2EX</p>
+            <p @click="handleCreditsClick" style="cursor: pointer; user-select: none;">重制：Elyrene</p>
+            <p>版本号 V2.3</p>
             <p>免费发布于DC类脑社区</p>
           </div>
         </div>
@@ -918,62 +883,6 @@ const loadRerankModels = async () => {
           </div>
         </div>
 
-      </div>
-    </div>
-  </div>
-
-  <!-- 总结查看器覆盖层 -->
-  <transition name="fade">
-    <div v-if="showSummaryViewer" class="summary-overlay-container">
-      <SummaryViewer @close="showSummaryViewer = false" />
-    </div>
-  </transition>
-
-  <!-- 批量生成模态框 -->
-  <div v-if="showBatchModal" class="summary-overlay-container">
-    <div class="settings-card" style="width: 90%; max-width: 400px; background: #2d2d35; border: 1px solid rgba(255,255,255,0.1);">
-      <div class="card-header">
-        <span class="card-icon">🤖</span>
-        <h3 class="card-title">批量补齐总结</h3>
-      </div>
-      <div class="card-body">
-        <p class="card-description">
-          将自动扫描缺失总结的楼层，并调用辅助AI分批生成大总结。
-          <br>注意：此操作可能会消耗大量 Token。
-        </p>
-        
-        <div v-if="!isBatchProcessing">
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">每批处理层数</span>
-            </div>
-            <div class="setting-control">
-              <select v-model="batchSize" class="model-select" style="width: 80px;">
-                <option :value="5">5层</option>
-                <option :value="10">10层</option>
-                <option :value="20">20层</option>
-                <option :value="50">50层</option>
-              </select>
-            </div>
-          </div>
-          
-          <div style="margin-top: 20px; display: flex; gap: 10px;">
-            <button class="add-btn secondary" style="flex: 1;" @click="showBatchModal = false">取消</button>
-            <button class="add-btn" style="flex: 1;" @click="startBatchGeneration">开始生成</button>
-          </div>
-        </div>
-
-        <div v-else style="text-align: center; padding: 20px;">
-          <div class="setting-label" style="margin-bottom: 10px;">
-            正在处理... ({{ batchProgress.current }} / {{ batchProgress.total }})
-          </div>
-          <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden;">
-            <div 
-              style="height: 100%; background: #667eea; transition: width 0.3s;"
-              :style="{ width: batchProgress.total ? (batchProgress.current / batchProgress.total * 100) + '%' : '0%' }"
-            ></div>
-          </div>
-        </div>
       </div>
     </div>
   </div>

@@ -477,7 +477,7 @@ export function checkDiaryNeeded(currentGameDate) {
  * @param {string} gameDate 游戏日期 'YYYY-MM-DD'
  * @returns {Promise<{success: boolean, summary?: object, error?: string}>}
  */
-export async function generateDiary(gameDate) {
+export async function generateDiary(gameDate, options = {}) {
   const gameStore = useGameStore()
   const settings = gameStore.settings.summarySystem
 
@@ -490,13 +490,15 @@ export async function generateDiary(gameDate) {
     return { success: false, error: 'Assistant AI is required for diary generation' }
   }
 
-  // 检查是否已有该日期的日记
-  const existing = (gameStore.player.summaries || []).find(
-    s => s.type === 'diary' && s.gameDate === gameDate
-  )
-  if (existing) {
-    console.log(`[SummaryManager] Diary already exists for ${gameDate}, skipping`)
-    return { success: true, summary: existing }
+  // dryRun 模式下跳过已存在检查
+  if (!options.dryRun) {
+    const existing = (gameStore.player.summaries || []).find(
+      s => s.type === 'diary' && s.gameDate === gameDate
+    )
+    if (existing) {
+      console.log(`[SummaryManager] Diary already exists for ${gameDate}, skipping`)
+      return { success: true, summary: existing }
+    }
   }
 
   // 收集该日期的所有 minor 总结
@@ -534,6 +536,11 @@ export async function generateDiary(gameDate) {
       coveredFloors,
       timestamp: Date.now(),
       gameDate
+    }
+
+    // dryRun 模式下只返回内容，不保存
+    if (options.dryRun) {
+      return { success: true, content: diaryContent, summary }
     }
 
     addSummary(summary)
@@ -899,30 +906,24 @@ export async function buildSummarizedHistory(chatLog, currentFloor, userInput) {
 }
 
 /**
- * 批量生成总结
+ * 批量补齐小总结
+ * 连续缺失的楼层会合并为一个小总结，非连续的单独生成
  * @param {Array} chatLog 完整聊天记录
- * @param {number} batchSize 每批处理的层数
  * @param {Function} onProgress 进度回调 (current, total)
+ * @param {Object} [options] 额外选项
+ * @param {boolean} [options.autoEmbed] 自动为新生成的总结计算向量
  * @returns {Promise<void>}
  */
-export async function generateBatchSummaries(chatLog, batchSize, onProgress) {
+export async function generateBatchSummaries(chatLog, onProgress, options = {}) {
   const gameStore = useGameStore()
-  
+
   if (!gameStore.settings.summarySystem?.enabled) {
     throw new Error('Summary system is disabled')
   }
 
   // 1. 找出需要生成总结的楼层
-  // 条件：
-  // - 是 AI 回复 (type === 'ai')
-  // - 没有现有的总结 (minor/major/super) 覆盖
-  // - 且不包括最新的几层（通常不需要立即总结，比如最后 5 层）
-  //   但这里是“补齐”，所以只要符合条件都应该补。
-  //   不过为了安全，最新的层通常还在变动，但如果它是历史记录中的，应该没问题。
-  
   const floorsToProcess = []
-  
-  // 获取所有已被覆盖的楼层
+
   const coveredFloors = new Set()
   gameStore.player.summaries.forEach(s => {
     if (s.coveredFloors) {
@@ -932,7 +933,6 @@ export async function generateBatchSummaries(chatLog, batchSize, onProgress) {
     }
   })
 
-  // 遍历日志，识别缺口
   chatLog.forEach((log, index) => {
     const floor = index + 1
     if (log.type === 'ai' && !coveredFloors.has(floor)) {
@@ -940,97 +940,82 @@ export async function generateBatchSummaries(chatLog, batchSize, onProgress) {
     }
   })
 
-  // 如果没有需要处理的楼层
   if (floorsToProcess.length === 0) {
     return
   }
 
-  // 2. 分批
-  const batches = []
-  let currentBatch = []
-  
-  // 必须是连续的层才能放在一批里 (根据任务要求)
-  // floorsToProcess 已经是按顺序的，但不一定是连续的整数
-  
+  // 2. 将连续楼层分组（连续缺失的合并为一组）
+  const groups = []
+  let currentGroup = []
+
   for (let i = 0; i < floorsToProcess.length; i++) {
     const item = floorsToProcess[i]
-    
-    // 检查是否与上一个连续
-    if (currentBatch.length > 0) {
-      const lastItem = currentBatch[currentBatch.length - 1]
+    if (currentGroup.length > 0) {
+      const lastItem = currentGroup[currentGroup.length - 1]
       if (item.floor !== lastItem.floor + 1) {
-        // 不连续，结束当前批次
-        batches.push(currentBatch)
-        currentBatch = []
+        groups.push(currentGroup)
+        currentGroup = []
       }
     }
-    
-    currentBatch.push(item)
-    
-    // 检查是否达到批次大小
-    if (currentBatch.length >= batchSize) {
-      batches.push(currentBatch)
-      currentBatch = []
-    }
+    currentGroup.push(item)
   }
-  
-  // 添加最后一个批次
-  if (currentBatch.length > 0) {
-    batches.push(currentBatch)
+  if (currentGroup.length > 0) {
+    groups.push(currentGroup)
   }
 
-  // 3. 逐批处理
-  const totalBatches = batches.length
-  const currentFloor = chatLog.length
-  const settings = gameStore.settings.summarySystem
+  // 3. 逐组处理
+  const totalGroups = groups.length
 
-  for (let i = 0; i < totalBatches; i++) {
-    const batch = batches[i]
+  for (let i = 0; i < totalGroups; i++) {
+    const group = groups[i]
     if (onProgress) {
-      onProgress(i + 1, totalBatches)
+      onProgress(i + 1, totalGroups)
     }
 
-    // 根据楼层距离和批次大小判断应生成的总结类型：
-    // - 单个楼层，或所有楼层都在 minor 距离范围内 → 逐个生成 minor 总结
-    // - 多个连续楼层且已在 major 距离范围内 → 生成一个 major 总结
-    const shouldUseMinor = batch.length === 1 ||
-      batch.every(item => (currentFloor - item.floor) < settings.majorSummaryStartFloor)
-
-    if (shouldUseMinor) {
-      // 逐个楼层生成 minor 总结（复用已有的 generateMinorSummary）
-      console.log(`[SummaryManager] Batch generating ${batch.length} minor summaries for floors: ${batch.map(b => b.floor).join(',')}`)
-      for (const item of batch) {
-        try {
-          await generateMinorSummary(cleanImageTags(item.content), item.floor, true)
-        } catch (e) {
-          console.error(`[SummaryManager] Error generating minor summary for floor ${item.floor}:`, e)
+    if (group.length === 1) {
+      // 单层：直接生成 minor 总结
+      try {
+        await generateMinorSummary(cleanImageTags(group[0].content), group[0].floor, true)
+        // 自动计算向量
+        if (options.autoEmbed) {
+          const newSummary = (gameStore.player.summaries || []).find(s => s.floor === group[0].floor && s.type === 'minor' && !s.embedding)
+          if (newSummary) await embedSummary(newSummary)
         }
+      } catch (e) {
+        console.error(`[SummaryManager] Error generating minor summary for floor ${group[0].floor}:`, e)
       }
     } else {
-      // 生成一个 major 总结覆盖整个批次
-      console.log(`[SummaryManager] Batch generating major summary for floors: ${batch.map(b => b.floor).join(',')}`)
+      // 多个连续层：合并内容生成一个 minor 总结
+      console.log(`[SummaryManager] Merging floors ${group[0].floor}-${group[group.length - 1].floor} into one minor summary`)
 
-      const floorsText = batch
+      const mergedContent = group
         .map(item => `【第${item.floor}层】\n${cleanImageTags(item.content)}`)
         .join('\n\n')
 
-      const prompt = `[任务：批量生成剧情总结]
-请阅读以下连续的剧情片段（来自楼层 ${batch[0].floor} 到 ${batch[batch.length - 1].floor}），将其直接整合成一个连贯的大总结。
+      const prompt = `[任务：合并生成小总结]
+请阅读以下连续的剧情片段（楼层 ${group[0].floor} 到 ${group[group.length - 1].floor}），生成一个详细的剧情小总结。
 
 要求：
-1. 概括这段剧情的核心发展
-2. 保留关键转折和重要信息
-3. 字数控制在300字以内
-4. 直接输出总结内容，不要添加任何前言或解释
+1. 概括这段剧情的核心发展，保留关键转折和重要信息
+2. 严格用 <minor_summary>总结内容</minor_summary> 标签包裹
+3. 总结格式：
+    日期|年月日时分
+    标题|给这次总结的内容起一个20字左右的标题
+    地点|当前位置
+    人物|当前场景内的角色
+    描述|这次正文的摘要总结（200-400字）
+    人物关系|人物关系的变化
+    重要信息|重要信息
+    角色意图|场景中各角色接下来想要做的事情或目标
+    互动内容|与玩家的关键互动
+    待办事项|尚未完成的约定或任务（如有，没有则写”无”）
 
 剧情内容：
-${floorsText}
-
-请用以下格式输出（必须严格遵循格式）：
-<major_summary>你的合并总结</major_summary>`
+${mergedContent}`
 
       try {
         let response
+        const settings = gameStore.settings.summarySystem
         if (settings.useAssistantForSummary) {
           response = await callAssistantAI(prompt, { systemPrompt: SUMMARY_AI_SYSTEM_PROMPT })
         } else if (window.generate) {
@@ -1040,27 +1025,35 @@ ${floorsText}
             max_chat_history: 0
           })
         } else {
-          response = `<major_summary>（Mock批量总结）覆盖楼层 ${batch.map(b => b.floor).join(', ')}</major_summary>`
+          response = `<minor_summary>（Mock合并总结）覆盖楼层 ${group.map(b => b.floor).join(', ')}</minor_summary>`
         }
 
-        const summaryContent = extractSummary(response, 'major')
+        const summaryContent = extractSummary(response, 'minor')
 
         if (summaryContent) {
-          const coveredBatchFloors = batch.map(b => b.floor)
+          const coveredGroupFloors = group.map(b => b.floor)
+          // 尝试从总结中提取日期
+          const dateMatch = summaryContent.match(/日期[|｜]([^\n]+)/)
+          const gameDate = dateMatch ? dateMatch[1].trim() : undefined
           const summary = {
-            floor: Math.max(...coveredBatchFloors),
-            type: 'major',
+            floor: Math.max(...coveredGroupFloors),
+            type: 'minor',
             content: summaryContent,
-            coveredFloors: coveredBatchFloors,
-            timestamp: Date.now()
+            coveredFloors: coveredGroupFloors,
+            timestamp: Date.now(),
+            ...(gameDate && { gameDate })
           }
           addSummary(summary)
-          console.log(`[SummaryManager] Batch generated major summary for floors: ${coveredBatchFloors.join(',')}`)
+          // 自动计算向量
+          if (options.autoEmbed) {
+            await embedSummary(summary)
+          }
+          console.log(`[SummaryManager] Merged minor summary for floors: ${coveredGroupFloors.join(',')}`)
         } else {
-          console.warn(`[SummaryManager] Failed to extract summary for batch ${i}`)
+          console.warn(`[SummaryManager] Failed to extract summary for group ${i}`)
         }
       } catch (e) {
-        console.error(`[SummaryManager] Error processing batch ${i}:`, e)
+        console.error(`[SummaryManager] Error processing group ${i}:`, e)
       }
     }
   }

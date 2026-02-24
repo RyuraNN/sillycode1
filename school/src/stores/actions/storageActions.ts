@@ -67,19 +67,19 @@ async function safeExec(fn: () => Promise<any>, label: string, timeoutMs: number
  */
 function validateAndRepairSettings(settings: any): any {
   const defaults = createInitialState().settings
-  
+
   if (!settings || typeof settings !== 'object') {
     console.warn('[GameStore] Settings data is invalid, using defaults')
     return { ...defaults, _schemaVersion: CURRENT_SCHEMA_VERSION }
   }
-  
+
   // 确保 assistantAI 对象完整
   if (!settings.assistantAI || typeof settings.assistantAI !== 'object') {
     settings.assistantAI = { ...defaults.assistantAI }
   } else {
     settings.assistantAI = { ...defaults.assistantAI, ...settings.assistantAI }
   }
-  
+
   // 确保 summarySystem 对象完整
   if (!settings.summarySystem || typeof settings.summarySystem !== 'object') {
     settings.summarySystem = { ...defaults.summarySystem }
@@ -96,7 +96,14 @@ function validateAndRepairSettings(settings: any): any {
     settings.ragSystem.embedding = { ...defaults.ragSystem.embedding, ...(settings.ragSystem.embedding || {}) }
     settings.ragSystem.rerank = { ...defaults.ragSystem.rerank, ...(settings.ragSystem.rerank || {}) }
   }
-  
+
+  // 确保 retrySystem 对象完整
+  if (!settings.retrySystem || typeof settings.retrySystem !== 'object') {
+    settings.retrySystem = { ...defaults.retrySystem }
+  } else {
+    settings.retrySystem = { ...defaults.retrySystem, ...settings.retrySystem }
+  }
+
   // 确保数值字段有效
   if (typeof settings.snapshotLimit !== 'number' || settings.snapshotLimit <= 0) {
     settings.snapshotLimit = defaults.snapshotLimit
@@ -110,21 +117,21 @@ function validateAndRepairSettings(settings: any): any {
   if (typeof settings.forumWorldbookLimit !== 'number' || settings.forumWorldbookLimit <= 0) {
     settings.forumWorldbookLimit = defaults.forumWorldbookLimit
   }
-  
+
   // 确保布尔字段有效
-  const boolFields = ['darkMode', 'streamResponse', 'suggestedReplies', 'enterToSend', 
+  const boolFields = ['darkMode', 'streamResponse', 'suggestedReplies', 'enterToSend',
                        'independentImageGeneration', 'debugMode', 'debugUnlocked']
   for (const field of boolFields) {
     if (typeof settings[field] !== 'boolean') {
       settings[field] = (defaults as any)[field]
     }
   }
-  
+
   // 确保 customRegexList 是数组
   if (!Array.isArray(settings.customRegexList)) {
     settings.customRegexList = [...defaults.customRegexList]
   }
-  
+
   // 确保 customContentTags 是数组
   if (!Array.isArray(settings.customContentTags)) {
     settings.customContentTags = [...defaults.customContentTags]
@@ -159,9 +166,9 @@ function validateAndRepairSettings(settings: any): any {
   // （删除已知已废弃的字段）
   const knownFields = new Set(Object.keys(defaults))
   knownFields.add('_schemaVersion')
-  
+
   settings._schemaVersion = CURRENT_SCHEMA_VERSION
-  
+
   return settings
 }
 
@@ -487,11 +494,13 @@ export const storageActions = {
   async saveToStorage(this: any, force = false) {
     const doSave = async () => {
       try {
+        this.saveError = null
         await setItem('school_game_snapshots', JSON.parse(JSON.stringify(this.saveSnapshots)))
         await setItem('school_game_settings', JSON.parse(JSON.stringify(this.settings)))
         await setItem('school_game_run_id', this.currentRunId)
       } catch (e) {
         console.error('Failed to save to storage', e)
+        this.saveError = e.message || '存档保存失败'
         console.warn('存档保存可能失败，请检查控制台')
       }
     }

@@ -54,8 +54,8 @@ function openDB() {
 
 /**
  * Save data to the store
- * @param {string} key 
- * @param {any} data 
+ * @param {string} key
+ * @param {any} data
  * @param {string} storeName
  * @returns {Promise<void>}
  */
@@ -68,10 +68,22 @@ export async function setItem(key, data, storeName = DATA_STORE_NAME) {
       const request = store.put(data, key)
 
       request.onsuccess = () => resolve()
-      request.onerror = (event) => reject(event.target.error)
+      request.onerror = (event) => {
+        const error = event.target.error
+        // 检测 QuotaExceededError
+        if (error && error.name === 'QuotaExceededError') {
+          reject(new Error('存储空间不足，请清理旧存档或导出后删除'))
+        } else {
+          reject(error)
+        }
+      }
     })
   } catch (e) {
     console.error(`[IndexedDB] Error saving item to ${storeName}:`, e)
+    // 检测 QuotaExceededError
+    if (e.name === 'QuotaExceededError') {
+      throw new Error('存储空间不足，请清理旧存档或导出后删除')
+    }
     throw e
   }
 }
@@ -268,14 +280,14 @@ export async function clearAutoScheduleCheckpoint() {
 export async function migrateFromLocalStorage(keys) {
   console.log('[IndexedDB] Checking for migration...')
   let migratedCount = 0
-  
+
   for (const key of keys) {
     // Check if exists in DB
     const dbValue = await getItem(key)
     if (dbValue !== undefined) {
       continue // Already exists in DB, skip
     }
-    
+
     // Check LocalStorage
     const lsValue = localStorage.getItem(key)
     if (lsValue !== null) {
@@ -291,7 +303,7 @@ export async function migrateFromLocalStorage(keys) {
         } catch (e) {
             // Not a JSON string, keep as is
         }
-        
+
         await setItem(key, data)
         // Optional: Remove from LocalStorage after successful migration?
         // keeping it as backup might be safer for now, but to free up space we should remove.
@@ -303,8 +315,61 @@ export async function migrateFromLocalStorage(keys) {
       }
     }
   }
-  
+
   if (migratedCount > 0) {
     console.log(`[IndexedDB] Migrated ${migratedCount} items from LocalStorage.`)
   }
+}
+
+// ==================== 分片存储 ====================
+
+const CHUNK_SIZE = 200 // 每片200条消息
+
+/**
+ * 分片保存 chatLog
+ * @param {string} snapshotId 快照ID
+ * @param {Array} chatLog 聊天记录数组
+ * @returns {Promise<void>}
+ */
+export async function saveChunkedChatLog(snapshotId, chatLog) {
+  const totalChunks = Math.ceil(chatLog.length / CHUNK_SIZE)
+  for (let i = 0; i < totalChunks; i++) {
+    const chunk = chatLog.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
+    await setItem(`${snapshotId}_chunk_${i}`, chunk, SNAPSHOT_STORE_NAME)
+  }
+  // 保存元数据
+  await setItem(`${snapshotId}_meta`, { totalChunks, totalMessages: chatLog.length }, SNAPSHOT_STORE_NAME)
+}
+
+/**
+ * 分片加载 chatLog
+ * @param {string} snapshotId 快照ID
+ * @returns {Promise<Array|null>} 聊天记录数组
+ */
+export async function loadChunkedChatLog(snapshotId) {
+  const meta = await getItem(`${snapshotId}_meta`, SNAPSHOT_STORE_NAME)
+  if (!meta) return null
+  const chatLog = []
+  for (let i = 0; i < meta.totalChunks; i++) {
+    const chunk = await getItem(`${snapshotId}_chunk_${i}`, SNAPSHOT_STORE_NAME)
+    if (chunk) chatLog.push(...chunk)
+  }
+  return chatLog
+}
+
+/**
+ * 删除分片存储的 chatLog
+ * @param {string} snapshotId 快照ID
+ * @returns {Promise<void>}
+ */
+export async function removeChunkedChatLog(snapshotId) {
+  const meta = await getItem(`${snapshotId}_meta`, SNAPSHOT_STORE_NAME)
+  if (!meta) return
+
+  // 删除所有分片
+  for (let i = 0; i < meta.totalChunks; i++) {
+    await removeItem(`${snapshotId}_chunk_${i}`, SNAPSHOT_STORE_NAME)
+  }
+  // 删除元数据
+  await removeItem(`${snapshotId}_meta`, SNAPSHOT_STORE_NAME)
 }
