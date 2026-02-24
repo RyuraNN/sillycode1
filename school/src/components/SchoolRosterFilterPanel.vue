@@ -1587,7 +1587,11 @@ const handleDeleteClub = async (clubId) => {
   if (!club) return
   // 移入回收站
   deletedClubs.value.push({ id: clubId, name: club.name || clubId, data: { ...club } })
-  delete gameStore.allClubs[clubId]
+
+  // 使用 Vue 3 响应式方式删除属性（解构赋值）
+  const { [clubId]: removed, ...rest } = gameStore.allClubs
+  gameStore.allClubs = rest
+
   if (gameStore.player?.joinedClubs) {
     const idx = gameStore.player.joinedClubs.indexOf(clubId)
     if (idx !== -1) gameStore.player.joinedClubs.splice(idx, 1)
