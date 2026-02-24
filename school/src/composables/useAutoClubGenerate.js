@@ -25,8 +25,13 @@ export function useAutoClubGenerate() {
 
   /**
    * 构建社团生成Prompt
+   * @param {Array} characters - 角色列表
+   * @param {String} mode - 生成模式：'original' | 'creative'
+   * @param {Object} existingClubs - 现有社团
+   * @param {Array} extraTeachers - 额外的教师列表
+   * @param {Object} options - 额外选项 { filterClass, filterWork }
    */
-  function buildClubPrompt(characters, mode, existingClubs, extraTeachers = []) {
+  function buildClubPrompt(characters, mode, existingClubs, extraTeachers = [], options = {}) {
     const existingList = Object.entries(existingClubs || {})
       .map(([id, club]) => `- ${club.name || id} (${id}) 成员:${(club.members || []).join(',')}`)
       .join('\n') || '(无)'
@@ -63,9 +68,17 @@ export function useAutoClubGenerate() {
       ? '原作向：基于角色原作中的社团/组织进行还原'
       : '原创向：根据角色特点创造新的有趣社团'
 
+    // 添加筛选提示
+    let filterHint = ''
+    if (options.filterClass) {
+      filterHint = `\n[筛选范围] 仅为班级「${options.filterClass}」的学生生成社团`
+    } else if (options.filterWork) {
+      filterHint = `\n[筛选范围] 仅为作品「${options.filterWork}」的角色生成社团`
+    }
+
     return `你是社团生成助手。根据角色列表生成社团。
 
-模式: ${modeDesc}
+模式: ${modeDesc}${filterHint}
 
 [现有社团]
 ${existingList}
@@ -213,8 +226,12 @@ ${teacherList}
 
   /**
    * 生成社团（自动分批）
+   * @param {Array} characters - 角色列表
+   * @param {String} mode - 生成模式
+   * @param {Object} existingClubs - 现有社团
+   * @param {Object} options - 额外选项 { filterClass, filterWork }
    */
-  async function generateClubs(characters, mode, existingClubs) {
+  async function generateClubs(characters, mode, existingClubs, options = {}) {
     if (!window.generateRaw) {
       clubError.value = 'AI生成接口不可用'
       return { success: false, message: clubError.value }
@@ -237,7 +254,7 @@ ${teacherList}
       for (let i = 0; i < batches.length; i++) {
         progress.value = batches.length > 1 ? `${i + 1}/${batches.length}` : ''
 
-        const prompt = buildClubPrompt(batches[i], mode, accumulatedClubs, allNewAdvisors)
+        const prompt = buildClubPrompt(batches[i], mode, accumulatedClubs, allNewAdvisors, options)
         const result = await window.generateRaw({
           user_input: prompt,
           ordered_prompts: [
@@ -363,6 +380,70 @@ ${teacherList}
     newAdvisors.value = []
   }
 
+  /**
+   * 检测社团成员中的幽灵角色（不在角色池中的角色）
+   * @param {Object} clubs - 社团对象
+   * @param {Array} characterPool - 角色池
+   * @returns {Object} { clubId: [ghostNames] }
+   */
+  function detectGhostMembers(clubs, characterPool) {
+    const validNames = new Set(characterPool.map(c => c.name))
+    const ghostMap = {}
+
+    for (const [clubId, club] of Object.entries(clubs || {})) {
+      const ghosts = (club.members || []).filter(name => !validNames.has(name))
+      if (ghosts.length > 0) {
+        ghostMap[clubId] = ghosts
+      }
+    }
+
+    return ghostMap
+  }
+
+  /**
+   * 手动去重：移除社团中的重复成员
+   * @param {Object} clubs - 社团对象
+   * @returns {Object} { removed: number, details: [] }
+   */
+  function deduplicateClubMembers(clubs) {
+    let totalRemoved = 0
+    const details = []
+
+    for (const [clubId, club] of Object.entries(clubs || {})) {
+      if (!club.members || !Array.isArray(club.members)) continue
+
+      const originalLength = club.members.length
+      const uniqueMembers = [...new Set(club.members)]
+      const removed = originalLength - uniqueMembers.length
+
+      if (removed > 0) {
+        club.members = uniqueMembers
+        totalRemoved += removed
+        details.push({ clubId, clubName: club.name || clubId, removed })
+      }
+    }
+
+    return { removed: totalRemoved, details }
+  }
+
+  /**
+   * 清除所有社团成员
+   * @param {Object} clubs - 社团对象
+   * @returns {number} 清除的成员总数
+   */
+  function clearAllClubMembers(clubs) {
+    let totalCleared = 0
+
+    for (const club of Object.values(clubs || {})) {
+      if (club.members && Array.isArray(club.members)) {
+        totalCleared += club.members.length
+        club.members = []
+      }
+    }
+
+    return totalCleared
+  }
+
   return {
     generating,
     clubResults,
@@ -372,6 +453,9 @@ ${teacherList}
     newAdvisors,
     generateClubs,
     applyClubResults,
-    resetClubs
+    resetClubs,
+    detectGhostMembers,
+    deduplicateClubMembers,
+    clearAllClubMembers
   }
 }

@@ -51,6 +51,13 @@
           </div>
         </div>
 
+        <!-- 批量操作工具栏 -->
+        <div class="batch-toolbar">
+          <button class="btn-batch" @click="$emit('clear-all-ghosts')" title="清除所有幽灵角色">
+            👻 一键清除所有幽灵角色
+          </button>
+        </div>
+
         <!-- 关系搜索与排序 -->
         <div class="rel-toolbar">
           <input v-model="relSearchQuery" placeholder="搜索关系..." class="search-input small" />
@@ -220,7 +227,7 @@ const props = defineProps({
 defineEmits([
   'edit-relationship', 'delete-relationship', 'add-relationship',
   'clear-char-relations', 'clear-char-impressions', 'remove-character',
-  'clear-ghost-references'
+  'clear-ghost-references', 'clear-all-ghosts'
 ])
 
 const searchQuery = ref('')
@@ -428,6 +435,18 @@ function getBarStyle(axisKey, val) {
 .btn-warn:hover { background: #3a3a2a; color: #FF9800; }
 .btn-danger { border-color: #d32f2f; }
 .btn-danger:hover { background: #3a1a1a; color: #F44336; }
+/* 批量操作工具栏 */
+.batch-toolbar {
+  padding: 8px 16px; border-bottom: 1px solid #333; flex-shrink: 0;
+  display: flex; gap: 8px; background: rgba(255, 152, 0, 0.05);
+}
+.btn-batch {
+  padding: 6px 12px; background: #FF9800; color: white;
+  border: none; border-radius: 5px; cursor: pointer;
+  font-size: 12px; transition: all 0.15s;
+}
+.btn-batch:hover { background: #F57C00; }
+
 /* 关系工具栏 */
 .rel-toolbar {
   display: flex; gap: 6px; padding: 8px 16px; border-bottom: 1px solid #333; flex-shrink: 0;

@@ -10,12 +10,28 @@
           class="search-input"
         />
       </div>
+      <button class="btn-tools" @click="showToolsMenu = !showToolsMenu">
+        🔧 工具
+      </button>
       <button class="btn-ai-generate" :disabled="generating"
         @click="showGenPanel = !showGenPanel">
         🤖 AI自动生成
       </button>
       <button class="btn-add" @click="$emit('add-club')">
         ＋ 新建社团
+      </button>
+    </div>
+
+    <!-- 工具菜单 -->
+    <div v-if="showToolsMenu" class="tools-menu">
+      <button class="tool-item" @click="handleDetectGhosts">
+        👻 检测幽灵角色
+      </button>
+      <button class="tool-item" @click="handleDeduplicate">
+        🔄 手动去重
+      </button>
+      <button class="tool-item danger" @click="handleClearAll">
+        🗑️ 一键清空所有成员
       </button>
     </div>
 
@@ -29,10 +45,36 @@
           <input type="radio" v-model="clubMode" value="creative" /> 原创向
         </label>
         <button class="btn-start-gen" :disabled="generating"
-          @click="$emit('generate-clubs', clubMode)">
+          @click="handleStartGenerate">
           {{ generating ? (progress ? `⏳ 生成中 ${progress} 批...` : '⏳ 生成中...') : '🚀 开始生成' }}
         </button>
       </div>
+
+      <!-- 筛选选项 -->
+      <div class="gen-filter-options">
+        <label class="filter-option">
+          <input type="checkbox" v-model="filterByClass" @change="filterByWork = false" />
+          按班级筛选
+        </label>
+        <select v-if="filterByClass" v-model="selectedClass" class="filter-select-small">
+          <option value="">选择班级</option>
+          <option v-for="classId in availableClasses" :key="classId" :value="classId">
+            {{ classId }}
+          </option>
+        </select>
+
+        <label class="filter-option">
+          <input type="checkbox" v-model="filterByWork" @change="filterByClass = false" />
+          按作品筛选
+        </label>
+        <select v-if="filterByWork" v-model="selectedWork" class="filter-select-small">
+          <option value="">选择作品</option>
+          <option v-for="work in availableWorks" :key="work" :value="work">
+            {{ work }}
+          </option>
+        </select>
+      </div>
+
       <p class="gen-hint">活动地点需要生成后在社团编辑中通过地图编辑器手动设置</p>
       <div v-if="clubError" class="gen-error">❌ {{ clubError }}</div>
       <div v-if="clubResults.length > 0" class="gen-preview">
@@ -142,19 +184,76 @@ const props = defineProps({
   clubError: { type: String, default: '' },
   progress: { type: String, default: '' },
   newAdvisors: { type: Array, default: () => [] },
-  deletedClubs: { type: Array, default: () => [] }
+  deletedClubs: { type: Array, default: () => [] },
+  characterPool: { type: Array, default: () => [] },
+  fullRosterSnapshot: { type: Object, default: () => ({}) }
 })
 
-const emit = defineEmits(['add-club', 'edit-club', 'delete-club', 'generate-clubs', 'apply-clubs', 'cancel-generate', 'restore-club', 'confirm-delete'])
+const emit = defineEmits([
+  'add-club', 'edit-club', 'delete-club', 'generate-clubs',
+  'apply-clubs', 'cancel-generate', 'restore-club', 'confirm-delete',
+  'detect-ghosts', 'deduplicate', 'clear-all'
+])
 
 const searchQuery = ref('')
 const showGenPanel = ref(false)
 const clubMode = ref('original')
 const showRecycleBin = ref(false)
+const showToolsMenu = ref(false)
+
+// 筛选选项
+const filterByClass = ref(false)
+const filterByWork = ref(false)
+const selectedClass = ref('')
+const selectedWork = ref('')
+
+// 可用班级列表
+const availableClasses = computed(() => {
+  return Object.keys(props.fullRosterSnapshot || {}).sort()
+})
+
+// 可用作品列表
+const availableWorks = computed(() => {
+  const works = new Set()
+  for (const char of props.characterPool || []) {
+    if (char.origin) {
+      const cleanOrigin = char.origin.replace(/^《|》$/g, '').trim()
+      if (cleanOrigin) works.add(cleanOrigin)
+    }
+  }
+  return Array.from(works).sort()
+})
+
+function handleStartGenerate() {
+  const options = {}
+  if (filterByClass.value && selectedClass.value) {
+    options.filterClass = selectedClass.value
+  } else if (filterByWork.value && selectedWork.value) {
+    options.filterWork = selectedWork.value
+  }
+  emit('generate-clubs', clubMode.value, options)
+}
 
 function handleCancelGenerate() {
   showGenPanel.value = false
   emit('cancel-generate')
+}
+
+function handleDetectGhosts() {
+  showToolsMenu.value = false
+  emit('detect-ghosts')
+}
+
+function handleDeduplicate() {
+  showToolsMenu.value = false
+  emit('deduplicate')
+}
+
+function handleClearAll() {
+  showToolsMenu.value = false
+  if (confirm('⚠️ 确定要清空所有社团的成员吗？此操作不可撤销！')) {
+    emit('clear-all')
+  }
 }
 
 // 冲突检测
@@ -228,6 +327,41 @@ const isNewAdvisor = (name) => name && newAdvisorNames.value.has(name)
   font-size: 14px; white-space: nowrap; transition: all 0.2s;
 }
 .btn-add:hover { background: #45a049; }
+
+.btn-tools {
+  padding: 8px 16px; background: #FF9800; color: white;
+  border: none; border-radius: 6px; cursor: pointer;
+  font-size: 14px; white-space: nowrap; transition: all 0.2s;
+}
+.btn-tools:hover { background: #F57C00; }
+
+.tools-menu {
+  background: #2a2a2a; border: 1px solid #444;
+  border-radius: 6px; padding: 4px; margin-bottom: 8px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.tool-item {
+  padding: 8px 12px; background: transparent; color: #ccc;
+  border: none; border-radius: 4px; cursor: pointer;
+  font-size: 13px; text-align: left; transition: all 0.2s;
+}
+.tool-item:hover { background: #333; color: #fff; }
+.tool-item.danger { color: #f44336; }
+.tool-item.danger:hover { background: #3a1a1a; }
+
+.gen-filter-options {
+  display: flex; gap: 12px; align-items: center; margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.filter-option {
+  display: flex; align-items: center; gap: 4px;
+  color: #ccc; font-size: 13px; cursor: pointer;
+}
+.filter-option input[type="checkbox"] { accent-color: #7c4dff; }
+.filter-select-small {
+  padding: 4px 8px; background: #1a1a1a; border: 1px solid #444;
+  border-radius: 4px; color: #fff; font-size: 12px;
+}
 
 .btn-ai-generate {
   padding: 8px 16px; background: #7c4dff; color: white;

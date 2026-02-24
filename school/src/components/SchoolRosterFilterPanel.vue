@@ -82,7 +82,10 @@ const {
   newAdvisors: clubNewAdvisors,
   generateClubs,
   applyClubResults: applyGeneratedClubs,
-  resetClubs: resetGeneratedClubs
+  resetClubs: resetGeneratedClubs,
+  detectGhostMembers,
+  deduplicateClubMembers,
+  clearAllClubMembers
 } = useAutoClubGenerate()
 
 // ==================== 状态管理 ====================
@@ -1614,12 +1617,83 @@ const handleConfirmDelete = async (clubId) => {
 }
 
 // AI自动生成社团
-async function handleAutoGenerateClubs(mode) {
+async function handleAutoGenerateClubs(mode, options = {}) {
   const pool = characterPool.value || []
-  const result = await generateClubs(pool, mode, gameStore.allClubs || {})
+
+  // 根据筛选条件过滤角色
+  let filteredPool = pool
+  if (options.filterClass) {
+    filteredPool = pool.filter(c => c.classId === options.filterClass)
+  } else if (options.filterWork) {
+    const cleanWork = options.filterWork.replace(/^《|》$/g, '').trim()
+    filteredPool = pool.filter(c => {
+      const charOrigin = (c.origin || '').replace(/^《|》$/g, '').trim()
+      return charOrigin === cleanWork
+    })
+  }
+
+  if (filteredPool.length === 0) {
+    showMessage('筛选后没有可用角色')
+    return
+  }
+
+  const result = await generateClubs(filteredPool, mode, gameStore.allClubs || {}, options)
   if (!result.success) {
     showMessage(`社团生成失败: ${result.message}`)
   }
+}
+
+// 检测幽灵角色
+function handleDetectGhostMembers() {
+  const ghostMap = detectGhostMembers(gameStore.allClubs || {}, characterPool.value || [])
+
+  if (Object.keys(ghostMap).length === 0) {
+    showMessage('✅ 未检测到幽灵角色')
+    return
+  }
+
+  let msg = '检测到以下社团中存在幽灵角色（不在全校名册中）：\n\n'
+  for (const [clubId, ghosts] of Object.entries(ghostMap)) {
+    const club = gameStore.allClubs[clubId]
+    const clubName = club?.name || clubId
+    msg += `【${clubName}】: ${ghosts.join('、')}\n`
+  }
+  msg += '\n建议在角色编辑器中添加这些角色，或从社团中移除。'
+
+  alert(msg)
+}
+
+// 手动去重
+async function handleDeduplicateMembers() {
+  const result = deduplicateClubMembers(gameStore.allClubs || {})
+
+  if (result.removed === 0) {
+    showMessage('✅ 未发现重复成员')
+    return
+  }
+
+  let msg = `已移除 ${result.removed} 个重复成员：\n\n`
+  for (const detail of result.details) {
+    msg += `【${detail.clubName}】: 移除 ${detail.removed} 个重复\n`
+  }
+
+  await syncClubWorldbookState(gameStore.currentRunId, gameStore.settings?.useGeminiMode)
+  gameStore.saveToStorage(true)
+  showMessage(msg)
+}
+
+// 一键清空所有成员
+async function handleClearAllMembers() {
+  const count = clearAllClubMembers(gameStore.allClubs || {})
+
+  if (count === 0) {
+    showMessage('所有社团已经是空的')
+    return
+  }
+
+  await syncClubWorldbookState(gameStore.currentRunId, gameStore.settings?.useGeminiMode)
+  gameStore.saveToStorage(true)
+  showMessage(`已清空所有社团成员，共 ${count} 人`)
 }
 
 async function handleApplyGeneratedClubs() {
@@ -1771,6 +1845,45 @@ const handleClearGhostReferences = async (charName) => {
   await syncRelationshipsToWorldbook()
   await saveImpressionDataImmediate()
   showMessage(`已清除所有对幽灵角色「${charName}」的引用`)
+}
+
+const handleClearAllGhosts = async () => {
+  if (!confirm('⚠️ 确定要清除所有幽灵角色的引用吗？\n\n这将删除所有不在关系数据顶层但被其他角色引用的角色关系。')) return
+
+  const rels = gameStore.npcRelationships || {}
+  const topKeys = new Set(Object.keys(rels))
+
+  // 收集所有幽灵角色
+  const ghosts = new Set()
+  for (const charData of Object.values(rels)) {
+    for (const target of Object.keys(charData?.relations || {})) {
+      if (!topKeys.has(target)) {
+        ghosts.add(target)
+      }
+    }
+  }
+
+  if (ghosts.size === 0) {
+    showMessage('✅ 未检测到幽灵角色')
+    return
+  }
+
+  // 清除所有幽灵角色的引用
+  let totalCleared = 0
+  for (const ghostName of ghosts) {
+    for (const otherName in rels) {
+      const otherRels = rels[otherName]?.relations
+      if (otherRels?.[ghostName]) {
+        delete otherRels[ghostName]
+        totalCleared++
+      }
+    }
+  }
+
+  await flushPendingSocialData()
+  await syncRelationshipsToWorldbook()
+  await saveImpressionDataImmediate()
+  showMessage(`已清除 ${ghosts.size} 个幽灵角色的 ${totalCleared} 条引用关系`)
 }
 
 const handleSaveComposer = async () => {
@@ -1983,6 +2096,8 @@ const handleSaveComposer = async () => {
               :progress="clubGenProgress"
               :new-advisors="clubNewAdvisors"
               :deleted-clubs="deletedClubs"
+              :character-pool="characterPool"
+              :full-roster-snapshot="fullRosterSnapshot"
               @add-club="handleAddClub"
               @edit-club="handleEditClub"
               @delete-club="handleDeleteClub"
@@ -1991,6 +2106,9 @@ const handleSaveComposer = async () => {
               @generate-clubs="handleAutoGenerateClubs"
               @apply-clubs="handleApplyGeneratedClubs"
               @cancel-generate="handleCancelGenerateClubs"
+              @detect-ghosts="handleDetectGhostMembers"
+              @deduplicate="handleDeduplicateMembers"
+              @clear-all="handleClearAllMembers"
             />
           </div>
 
@@ -2029,6 +2147,7 @@ const handleSaveComposer = async () => {
               @clear-char-impressions="handleClearCharImpressions"
               @remove-character="handleRemoveCharacter"
               @clear-ghost-references="handleClearGhostReferences"
+              @clear-all-ghosts="handleClearAllGhosts"
             />
           </div>
 
