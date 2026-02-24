@@ -12,6 +12,13 @@
           <option value="ghostOnly">仅幽灵角色</option>
         </select>
       </div>
+
+      <!-- 批量操作工具栏 -->
+      <div class="batch-toolbar-left">
+        <button class="btn-batch-small" @click="$emit('clear-all-ghosts')" title="清除所有幽灵角色">
+          👻 清除所有幽灵角色
+        </button>
+      </div>
       <div class="char-list">
         <div
           v-for="char in filteredCharacters"
@@ -49,13 +56,6 @@
             <button class="btn-action btn-warn" @click="$emit('clear-char-impressions', selectedChar)" title="清除印象标签">🏷️ 清除印象</button>
             <button class="btn-action btn-danger" @click="$emit('remove-character', selectedChar)" title="完全移除角色">⚠️ 移除角色</button>
           </div>
-        </div>
-
-        <!-- 批量操作工具栏 -->
-        <div class="batch-toolbar">
-          <button class="btn-batch" @click="$emit('clear-all-ghosts')" title="清除所有幽灵角色">
-            👻 一键清除所有幽灵角色
-          </button>
         </div>
 
         <!-- 关系搜索与排序 -->
@@ -446,6 +446,18 @@ function getBarStyle(axisKey, val) {
   font-size: 12px; transition: all 0.15s;
 }
 .btn-batch:hover { background: #F57C00; }
+
+/* 左侧批量操作工具栏 */
+.batch-toolbar-left {
+  padding: 6px 10px; border-bottom: 1px solid #333; flex-shrink: 0;
+  display: flex; gap: 6px; background: rgba(255, 152, 0, 0.05);
+}
+.btn-batch-small {
+  padding: 5px 10px; background: #FF9800; color: white;
+  border: none; border-radius: 5px; cursor: pointer;
+  font-size: 11px; transition: all 0.15s; width: 100%;
+}
+.btn-batch-small:hover { background: #F57C00; }
 
 /* 关系工具栏 */
 .rel-toolbar {
