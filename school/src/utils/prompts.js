@@ -1256,7 +1256,7 @@ export const buildSystemPromptContent = (gameState) => {
           details += `Type: Off-campus personnel\n`
         }
 
-        // 心情状态
+        // NPC 心情状态（情绪类型，如 happy/sad/stressed，与玩家心境值 player.attributes.mood 不同）
         if (npc.mood) {
           details += `Mood: ${npc.mood} ${npc.moodReason ? `(Reason: ${npc.moodReason})` : ''}\n`
         }

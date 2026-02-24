@@ -12,7 +12,7 @@ export const VARIABLE_NAME_MAP = {
   money: '金钱',
   energy: '精力',
   health: '健康',
-  mood: '心情',
+  mood: '心境',
   strength: '体质',
   intelligence: '智力',
   charm: '魅力',
@@ -390,7 +390,7 @@ export const generateDetailedChanges = (oldState, newState) => {
     { path: 'player.attributes.physique', label: '体质' },
     { path: 'player.attributes.flexibility', label: '灵活' },
     { path: 'player.attributes.charm', label: '魅力' },
-    { path: 'player.attributes.mood', label: '心情' }
+    { path: 'player.attributes.mood', label: '心境' }
   ]
   
   // 学科

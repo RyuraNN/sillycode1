@@ -109,7 +109,7 @@ const labels = {
   physique: '体质',
   flexibility: '灵活',
   charm: '魅力',
-  mood: '心情',
+  mood: '心境',
   // 学科
   literature: '语文',
   math: '数学',
