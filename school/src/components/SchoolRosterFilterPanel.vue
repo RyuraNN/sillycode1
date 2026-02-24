@@ -749,7 +749,7 @@ const handleEditCharacter = (char) => {
     role: char.role || 'student',
     subject: char.subject || '',
     isHeadTeacher: char.isHeadTeacher || false,
-    assignments: char.assignments || [],
+    classAssignments: char.classAssignments || [],
     electivePreference: char.electivePreference || 'general',
     scheduleTag: char.scheduleTag || '',
     staffTitle: char.staffTitle || '',
@@ -762,6 +762,62 @@ const handleEditCharacter = (char) => {
   showCharacterEditor.value = true
 }
 
+// 同步教师数据到班级 fullRosterSnapshot
+const syncTeacherToClassData = (oldName, form) => {
+  // 1. 清除旧记录
+  if (oldName) {
+    for (const [, classInfo] of Object.entries(fullRosterSnapshot.value)) {
+      if (classInfo.headTeacher?.name === oldName) {
+        classInfo.headTeacher = { name: '', gender: 'female', origin: '', role: 'teacher' }
+      }
+      if (Array.isArray(classInfo.teachers)) {
+        classInfo.teachers = classInfo.teachers.filter(t => t.name !== oldName)
+      }
+    }
+  }
+
+  // 2. 写入新记录
+  const assignments = form.classAssignments || []
+  const validAssignments = assignments.filter(a => a.classId)
+
+  if (validAssignments.length > 0) {
+    for (const assignment of validAssignments) {
+      const classData = fullRosterSnapshot.value[assignment.classId]
+      if (!classData) continue
+
+      if (assignment.isHomeroom) {
+        classData.headTeacher = {
+          name: form.name, gender: form.gender, origin: form.origin, role: 'teacher'
+        }
+      }
+      if (assignment.subject || form.subject) {
+        if (!Array.isArray(classData.teachers)) classData.teachers = []
+        classData.teachers.push({
+          name: form.name, gender: form.gender, origin: form.origin,
+          subject: assignment.subject || form.subject, role: 'teacher'
+        })
+      }
+    }
+  } else if (form.subject) {
+    // 兼容旧的单 classId + subject 模式
+    if (form.classId) {
+      const classData = fullRosterSnapshot.value[form.classId]
+      if (classData) {
+        if (form.isHeadTeacher) {
+          classData.headTeacher = {
+            name: form.name, gender: form.gender, origin: form.origin, role: 'teacher'
+          }
+        }
+        if (!Array.isArray(classData.teachers)) classData.teachers = []
+        classData.teachers.push({
+          name: form.name, gender: form.gender, origin: form.origin,
+          subject: form.subject, role: 'teacher'
+        })
+      }
+    }
+  }
+}
+
 const handleSaveCharacter = async () => {
   const form = characterEditForm.value
 
@@ -769,7 +825,13 @@ const handleSaveCharacter = async () => {
     // 编辑模式
     const idx = characterPool.value.findIndex(c => c.name === editingCharacter.value.name)
     if (idx !== -1) {
-      characterPool.value[idx] = { ...form, userCreated: characterPool.value[idx].userCreated }
+      // 保留 userCreated 标记，更新所有字段包括性格和备注
+      characterPool.value[idx] = {
+        ...form,
+        userCreated: characterPool.value[idx].userCreated,
+        personality: form.personality,
+        notes: form.notes
+      }
     }
   } else {
     // 添加模式
@@ -780,6 +842,11 @@ const handleSaveCharacter = async () => {
     characterPool.value.push({ ...form, userCreated: true })
   }
 
+  // 如果是教师，同步到班级数据
+  if (form.role === 'teacher') {
+    syncTeacherToClassData(editingCharacter.value?.name, form)
+  }
+
   await saveCharacterPool()
   showCharacterEditor.value = false
   showMessage(editingCharacter.value ? '角色已更新' : '角色已添加')
@@ -787,6 +854,18 @@ const handleSaveCharacter = async () => {
 
 const handleDeleteCharacter = async (char) => {
   if (!confirm(`确定要删除角色 ${char.name} 吗？`)) return
+
+  // 如果是教师，从所有班级数据中清除
+  if (char.role === 'teacher') {
+    for (const [, classInfo] of Object.entries(fullRosterSnapshot.value)) {
+      if (classInfo.headTeacher?.name === char.name) {
+        classInfo.headTeacher = { name: '', gender: 'female', origin: '', role: 'teacher' }
+      }
+      if (Array.isArray(classInfo.teachers)) {
+        classInfo.teachers = classInfo.teachers.filter(t => t.name !== char.name)
+      }
+    }
+  }
 
   const idx = characterPool.value.findIndex(c => c.name === char.name)
   if (idx !== -1) {
@@ -817,26 +896,42 @@ const handleEditTeacher = (teacher) => {
   const assignments = []
   for (const [classId, classInfo] of Object.entries(fullRosterSnapshot.value)) {
     const isHomeroom = classInfo.headTeacher?.name === teacher.name
-    const teacherEntry = Array.isArray(classInfo.teachers)
-      ? classInfo.teachers.find(t => t.name === teacher.name)
-      : null
+    const teacherEntries = Array.isArray(classInfo.teachers)
+      ? classInfo.teachers.filter(t => t.name === teacher.name)
+      : []
 
-    if (isHomeroom || teacherEntry) {
-      assignments.push({
-        classId,
-        isHomeroom,
-        subject: teacherEntry?.subject || ''
-      })
+    // 如果是班主任或有科任记录，添加该班级
+    if (isHomeroom || teacherEntries.length > 0) {
+      // 如果有多个科目，为每个科目创建一个条目
+      if (teacherEntries.length > 0) {
+        teacherEntries.forEach(entry => {
+          assignments.push({
+            classId,
+            isHomeroom: isHomeroom && assignments.filter(a => a.classId === classId).length === 0, // 只在第一个条目标记班主任
+            subject: entry.subject || ''
+          })
+        })
+      } else if (isHomeroom) {
+        // 只是班主任，没有科任
+        assignments.push({
+          classId,
+          isHomeroom: true,
+          subject: ''
+        })
+      }
     }
   }
+
+  // 从角色池中获取性格和备注数据
+  const poolChar = characterPool.value.find(c => c.name === teacher.name)
 
   teacherEditForm.value = {
     name: teacher.name || '',
     gender: teacher.gender || 'female',
     origin: teacher.origin || '',
     classAssignments: assignments.length > 0 ? assignments : [{ classId: '', isHomeroom: false, subject: '' }],
-    personality: teacher.personality || { order: 0, altruism: 0, tradition: 0, peace: 50 },
-    notes: teacher.notes || ''
+    personality: poolChar?.personality || teacher.personality || { order: 0, altruism: 0, tradition: 0, peace: 50 },
+    notes: poolChar?.notes || teacher.notes || ''
   }
   showTeacherEditor.value = true
 }
@@ -863,8 +958,7 @@ const handleSaveTeacher = async () => {
         classInfo.headTeacher = { name: '', gender: 'female', origin: '', role: 'teacher' }
       }
       if (Array.isArray(classInfo.teachers)) {
-        const idx = classInfo.teachers.findIndex(t => t.name === oldName)
-        if (idx !== -1) classInfo.teachers.splice(idx, 1)
+        classInfo.teachers = classInfo.teachers.filter(t => t.name !== oldName)
       }
     }
   }
@@ -891,6 +985,13 @@ const handleSaveTeacher = async () => {
     }
   }
 
+  // 3. 更新角色池中的性格和备注数据
+  const poolCharIdx = characterPool.value.findIndex(c => c.name === form.name)
+  if (poolCharIdx !== -1) {
+    characterPool.value[poolCharIdx].personality = form.personality
+    characterPool.value[poolCharIdx].notes = form.notes
+  }
+
   showTeacherEditor.value = false
   await loadCharacterPool(fullRosterSnapshot.value)
   showMessage('教师信息已保存')
@@ -899,15 +1000,13 @@ const handleSaveTeacher = async () => {
 const handleDeleteTeacher = async (teacher) => {
   if (!confirm(`确定要删除教师 ${teacher.name} 吗？`)) return
 
-  const classData = fullRosterSnapshot.value[teacher.classId]
-  if (!classData) return
-
-  if (teacher.isHeadTeacher) {
-    classData.headTeacher = { name: '', gender: 'female', origin: '', role: 'teacher' }
-  } else {
-    const idx = classData.teachers?.findIndex(t => t.name === teacher.name)
-    if (idx !== -1) {
-      classData.teachers.splice(idx, 1)
+  // 从所有班级中清除该教师
+  for (const [, classInfo] of Object.entries(fullRosterSnapshot.value)) {
+    if (classInfo.headTeacher?.name === teacher.name) {
+      classInfo.headTeacher = { name: '', gender: 'female', origin: '', role: 'teacher' }
+    }
+    if (Array.isArray(classInfo.teachers)) {
+      classInfo.teachers = classInfo.teachers.filter(t => t.name !== teacher.name)
     }
   }
 

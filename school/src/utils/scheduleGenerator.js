@@ -865,10 +865,10 @@ export function getRandomLocation(subject, classId, classroomId) {
 export function generateWeeklySchedule(classId, classInfo, weekNumber = 1) {
   const seed = hashCode(`${classId}-${weekNumber}`)
   const random = seededRandom(seed)
-  
+
   const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
   const schedule = {}
-  
+
   // 初始化空课表
   for (const day of weekdays) {
     schedule[day] = Array(6).fill(null).map((_, index) => ({
@@ -884,114 +884,144 @@ export function generateWeeklySchedule(classId, classInfo, weekNumber = 1) {
     }))
   }
 
-  // 1. 优先安排必修课
-  // 获取必修课列表
+  // 同一天科目去重追踪
+  const daySubjects = new Map()
+  weekdays.forEach(day => daySubjects.set(day, new Set()))
+
+  // 从 classInfo 中获取自定义教室ID
+  const classroomId = classInfo?.classroomId || null
+
+  // === Phase 1: 必修课（跨周轮换，每周只排 60-75%） ===
   const requiredCourses = getRequiredCourses(classId) || []
-  const shuffledRequired = [...requiredCourses].sort(() => random() - 0.5)
-  
-  // 必修课优先填入上午第1-3节，其次下午第1节 (Period 4)
-  // 避免下午第2-3节 (Period 5-6)
+  const selectRatio = 0.6 + random() * 0.15
+  const selectCount = Math.max(3, Math.ceil(requiredCourses.length * selectRatio))
+  const shuffledRequired = [...requiredCourses].sort(() => random() - 0.5).slice(0, selectCount)
+
+  // 收集 Period 1-3 + Period 4 槽位
   const prioritySlots = []
   weekdays.forEach(day => {
-    // Morning 1-3 (Indices 0, 1, 2)
     prioritySlots.push({ day, index: 0 })
     prioritySlots.push({ day, index: 1 })
     prioritySlots.push({ day, index: 2 })
   })
-  
-  // 如果优先槽位不够，使用 Period 4 (Index 3)
   const secondarySlots = []
   weekdays.forEach(day => {
     secondarySlots.push({ day, index: 3 })
   })
-  
-  // 打乱槽位顺序，避免每天课程顺序固定
   prioritySlots.sort(() => random() - 0.5)
   secondarySlots.sort(() => random() - 0.5)
-  
   const allSlots = [...prioritySlots, ...secondarySlots]
-  
-  // 从 classInfo 中获取自定义教室ID（优先于硬编码映射）
-  const classroomId = classInfo?.classroomId || null
-  
-  // 填入必修课
-  const scheduledTeachers = new Set() // 记录已排课的老师/科目，避免重复
-  
+
   for (const course of shuffledRequired) {
-    // 找一个空槽位
-    const slotInfo = allSlots.find(s => schedule[s.day][s.index].isEmpty)
+    // 优先选当天没有该科目的槽位
+    let slotInfo = allSlots.find(s =>
+      schedule[s.day][s.index].isEmpty && !daySubjects.get(s.day).has(course.name)
+    )
+    // 回退：允许重复
+    if (!slotInfo) {
+      slotInfo = allSlots.find(s => schedule[s.day][s.index].isEmpty)
+    }
     if (slotInfo) {
       const slot = schedule[slotInfo.day][slotInfo.index]
-      
-      // 分配课程
-      // @ts-ignore
       const location = getRandomLocation(course.name, classId, classroomId)
-      
       slot.subject = course.name
       slot.teacher = course.teacher
       slot.location = location.locationName
       slot.locationId = location.locationId
       slot.isEmpty = false
-      
-      // 记录老师
-      if (course.teacher) {
-        scheduledTeachers.add(course.teacher)
-      }
+      daySubjects.get(slotInfo.day).add(course.name)
     }
   }
-  
-  // 2. 安排班会课 (Homeroom)
-  // 在下午选修课时间 (Period 5-6) 找一个空位，通常每周一节
-  // 优先周五下午，或者随机
+
+  // === Phase 2: 班会课 (Period 5-6，优先周五) ===
   const homeroomSlots = []
   weekdays.forEach(day => {
-    homeroomSlots.push({ day, index: 4 }) // Period 5
-    homeroomSlots.push({ day, index: 5 }) // Period 6
+    homeroomSlots.push({ day, index: 4 })
+    homeroomSlots.push({ day, index: 5 })
   })
-  // 倒序检查（优先周五）
   homeroomSlots.reverse()
-  
   const homeroomSlotInfo = homeroomSlots.find(s => schedule[s.day][s.index].isEmpty)
-  
   if (homeroomSlotInfo && classInfo.headTeacher) {
     const slot = schedule[homeroomSlotInfo.day][homeroomSlotInfo.index]
     slot.subject = '班会'
     slot.teacher = classInfo.headTeacher.name
-    // 班会通常在教室
     const location = getRandomLocation('班会', classId, classroomId)
     slot.location = location.locationName
     slot.locationId = location.locationId
     slot.isEmpty = false
   }
-  
-  // 3. 填充剩余空位 (模拟大学课表，保留部分空闲)
+
+  // === Phase 3: 填充剩余空位（空课率 45%，同天科目去重） ===
   const regularSubjects = extractSubjects(classInfo)
-  
   if (regularSubjects.length > 0) {
-    // 遍历所有 Period 1-4 的空位 (主课时间)
     for (const day of weekdays) {
-      for (let i = 0; i < 4; i++) { // Only fill Period 1-4 randomly
+      for (let i = 0; i < 4; i++) {
         const slot = schedule[day][i]
-        if (slot.isEmpty) {
-          // 约 30% 概率保留空课 (模拟大学)
-          if (random() < 0.3) continue
-          
-          // 随机选择一个科目
-          // 稍微倾向于选择还没有排太多课的老师？目前简单随机
-          const subjectInfo = regularSubjects[Math.floor(random() * regularSubjects.length)]
-          
-          const location = getRandomLocation(subjectInfo.subject, classId, classroomId)
-          
-          slot.subject = subjectInfo.subject
-          slot.teacher = subjectInfo.teacher
-          slot.location = location.locationName
-          slot.locationId = location.locationId
-          slot.isEmpty = false
+        if (!slot.isEmpty) continue
+        // 45% 概率保留空课
+        if (random() < 0.45) continue
+
+        // 尝试选一个当天没有的科目（最多重试 3 次）
+        let subjectInfo = null
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const candidate = regularSubjects[Math.floor(random() * regularSubjects.length)]
+          if (!daySubjects.get(day).has(candidate.subject)) {
+            subjectInfo = candidate
+            break
+          }
+          // 最后一次重试仍然失败，接受重复
+          if (attempt === 2) subjectInfo = candidate
         }
+        if (!subjectInfo) continue
+
+        const location = getRandomLocation(subjectInfo.subject, classId, classroomId)
+        slot.subject = subjectInfo.subject
+        slot.teacher = subjectInfo.teacher
+        slot.location = location.locationName
+        slot.locationId = location.locationId
+        slot.isEmpty = false
+        daySubjects.get(day).add(subjectInfo.subject)
       }
     }
   }
-  
+
+  // === Phase 4: 后处理安全约束 ===
+  // 每天 Period 1-4：如果空课 > 有课（空课 > 2），补课直到 空课 ≤ 有课
+  if (regularSubjects.length > 0) {
+    for (const day of weekdays) {
+      const mainSlots = schedule[day].slice(0, 4)
+      let emptyCount = mainSlots.filter(s => s.isEmpty).length
+      let filledCount = 4 - emptyCount
+      while (emptyCount > filledCount) {
+        const emptyIdx = mainSlots.findIndex(s => s.isEmpty)
+        if (emptyIdx === -1) break
+
+        // 选科目时遵守去重
+        let subjectInfo = null
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const candidate = regularSubjects[Math.floor(random() * regularSubjects.length)]
+          if (!daySubjects.get(day).has(candidate.subject)) {
+            subjectInfo = candidate
+            break
+          }
+          if (attempt === 2) subjectInfo = candidate
+        }
+        if (!subjectInfo) break
+
+        const slot = schedule[day][emptyIdx]
+        const location = getRandomLocation(subjectInfo.subject, classId, classroomId)
+        slot.subject = subjectInfo.subject
+        slot.teacher = subjectInfo.teacher
+        slot.location = location.locationName
+        slot.locationId = location.locationId
+        slot.isEmpty = false
+        daySubjects.get(day).add(subjectInfo.subject)
+        emptyCount--
+        filledCount++
+      }
+    }
+  }
+
   return schedule
 }
 

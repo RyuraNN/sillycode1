@@ -81,26 +81,23 @@
           <!-- 教师专属 -->
           <div v-if="localForm.role === 'teacher'" class="form-section">
             <h4>教师信息</h4>
-            <div class="form-row">
-              <label>任教科目</label>
-              <input v-model="localForm.subject" placeholder="如：数学、语文" />
-            </div>
 
-            <div class="form-row">
-              <label>
-                <input type="checkbox" v-model="localForm.isHeadTeacher" />
-                担任班主任
-              </label>
-            </div>
-
-            <div v-if="localForm.isHeadTeacher" class="form-row">
-              <label>班主任班级</label>
-              <select v-model="localForm.classId">
-                <option value="">未分配</option>
-                <option v-for="(classInfo, classId) in classes" :key="classId" :value="classId">
-                  {{ classInfo.name || classId }}
-                </option>
-              </select>
+            <div class="class-assignments">
+              <div v-for="(assignment, idx) in classAssignments" :key="idx" class="assignment-row">
+                <select v-model="assignment.classId" class="assignment-class">
+                  <option value="">选择班级</option>
+                  <option v-for="(classInfo, classId) in classes" :key="classId" :value="classId">
+                    {{ classInfo.name || classId }}
+                  </option>
+                </select>
+                <input v-model="assignment.subject" placeholder="任教科目" class="assignment-subject" />
+                <label class="assignment-homeroom">
+                  <input type="checkbox" v-model="assignment.isHomeroom" />
+                  班主任
+                </label>
+                <button v-if="classAssignments.length > 1" class="btn-remove-assignment" @click="removeAssignment(idx)">✕</button>
+              </div>
+              <button class="btn-add-assignment" @click="addAssignment">+ 添加班级</button>
             </div>
           </div>
 
@@ -271,6 +268,26 @@ const localForm = computed({
   get: () => props.form,
   set: (val) => emit('update:form', val)
 })
+
+// 教师多班级任课
+const classAssignments = computed(() => {
+  if (!localForm.value) return [{ classId: '', subject: '', isHomeroom: false }]
+  if (!localForm.value.classAssignments || localForm.value.classAssignments.length === 0) {
+    // 兼容旧数据：从 subject/classId/isHeadTeacher 构建
+    const initial = { classId: localForm.value.classId || '', subject: localForm.value.subject || '', isHomeroom: !!localForm.value.isHeadTeacher }
+    localForm.value.classAssignments = [initial]
+  }
+  return localForm.value.classAssignments
+})
+
+const addAssignment = () => {
+  if (!localForm.value.classAssignments) localForm.value.classAssignments = []
+  localForm.value.classAssignments.push({ classId: '', subject: '', isHomeroom: false })
+}
+
+const removeAssignment = (idx) => {
+  localForm.value.classAssignments.splice(idx, 1)
+}
 
 const availableTraits = computed(() => {
   return Object.entries(SUBJECT_TRAITS).map(([key, val]) => ({
@@ -552,5 +569,76 @@ const handleSave = () => {
 
 .btn-map-select:hover {
   background: #5a7fb5;
+}
+
+.class-assignments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.assignment-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.assignment-class {
+  flex: 1;
+  padding: 8px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 13px;
+}
+
+.assignment-subject {
+  flex: 1;
+  padding: 8px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 13px;
+}
+
+.assignment-homeroom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #ccc;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.btn-remove-assignment {
+  background: none;
+  border: none;
+  color: #e57373;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.btn-remove-assignment:hover {
+  color: #ff5252;
+}
+
+.btn-add-assignment {
+  padding: 6px 12px;
+  background: #333;
+  border: 1px dashed #666;
+  border-radius: 6px;
+  color: #aaa;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-add-assignment:hover {
+  border-color: #4CAF50;
+  color: #4CAF50;
 }
 </style>
