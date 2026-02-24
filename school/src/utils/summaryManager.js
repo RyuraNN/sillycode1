@@ -1064,4 +1064,8 @@ ${floorsText}
       }
     }
   }
+
+  // 批量处理完成后，统一保存到存储
+  gameStore.saveToStorage()
+  console.log('[SummaryManager] Batch summaries generation completed and saved')
 }

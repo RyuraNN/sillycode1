@@ -137,6 +137,13 @@ const imageGenerationCache = new Map()
 const completedImages = new Map()
 const IMAGE_CACHE_LIMIT = 50
 
+// RAG 计算结果缓存
+const cachedRAGHistory = ref(null)
+const cachedRAGUserInput = ref('')
+
+// 变量计算失败提示
+const showVariableErrorTip = ref(false)
+
 // 安全地添加到图片缓存，超出限制时淘汰最旧的
 const addToImageCache = (key, value) => {
   if (completedImages.size >= IMAGE_CACHE_LIMIT) {
@@ -541,20 +548,44 @@ const sendMessage = async () => {
 
   try {
     const historyLog = gameLog.value.slice(0, -1)
-    processingStage.value = 'rag'
-    ragErrors.value = []
-    const summarizedLog = await buildSummarizedHistory(historyLog, gameStore.currentFloor, messageContent)
-    if (summarizedLog._ragErrors?.length > 0) {
-      ragErrors.value = summarizedLog._ragErrors
-    }
-    processingStage.value = ''
 
-    const customHistory = summarizedLog.map(log => {
-      let role = 'user'
-      if (log.type === 'ai') role = 'assistant'
-      if (log.type === 'summary') role = 'system'
-      return { role, content: log.content }
-    })
+    // 检查是否可以复用缓存的 RAG 结果
+    let summarizedLog
+    let customHistory
+
+    if (isRetry && cachedRAGHistory.value && cachedRAGUserInput.value === messageContent) {
+      // 复用上次计算的 RAG 结果
+      console.log('[GameMain] Reusing cached RAG history')
+      summarizedLog = cachedRAGHistory.value.summarizedLog
+      customHistory = cachedRAGHistory.value.customHistory
+      if (cachedRAGHistory.value.ragErrors?.length > 0) {
+        ragErrors.value = cachedRAGHistory.value.ragErrors
+      }
+    } else {
+      // 重新计算 RAG
+      processingStage.value = 'rag'
+      ragErrors.value = []
+      summarizedLog = await buildSummarizedHistory(historyLog, gameStore.currentFloor, messageContent)
+      if (summarizedLog._ragErrors?.length > 0) {
+        ragErrors.value = summarizedLog._ragErrors
+      }
+      processingStage.value = ''
+
+      customHistory = summarizedLog.map(log => {
+        let role = 'user'
+        if (log.type === 'ai') role = 'assistant'
+        if (log.type === 'summary') role = 'system'
+        return { role, content: log.content }
+      })
+
+      // 缓存 RAG 结果
+      cachedRAGHistory.value = {
+        summarizedLog,
+        customHistory,
+        ragErrors: ragErrors.value
+      }
+      cachedRAGUserInput.value = messageContent
+    }
 
     let fullResponse = ''
     const isStreamEnabled = gameStore.settings.streamResponse !== false && gameStore.settings.streamResponse !== 'false'
@@ -828,7 +859,7 @@ const sendMessage = async () => {
             <div class="warning-body">AI 生成过程中发生错误，请检查后台日志。</div>
             <div class="warning-hint">💡 建议检查 API 连接状态，或点击"重roll"重试。</div>
           </div>`
-      
+
       // 如果流式阶段已有日志，更新内容
       if (hasAddedLog) {
         if (!currentAiLog.value.content?.trim()) {
@@ -845,6 +876,7 @@ const sendMessage = async () => {
       }
       gameStore.currentFloor = gameLog.value.length
       isGenerating.value = false
+      // 主AI失败时不清除RAG缓存，以便重试时复用
       return
     }
 
@@ -953,7 +985,7 @@ const processAIResponse = async (response) => {
       
       if (results[0].status === 'fulfilled') {
         const assistantResponse = results[0].value
-        
+
         if (gameStore.settings.debugMode) {
           assistantLogs.value.push({
             id: Date.now(),
@@ -964,7 +996,7 @@ const processAIResponse = async (response) => {
 
         const cleanAssistantResponse = removeThinking(assistantResponse)
         assistantDataList = parseGameData(cleanAssistantResponse)
-        
+
         const assistantSummary = extractSummary(cleanAssistantResponse, 'minor')
         if (assistantSummary) {
           preGeneratedSummary = assistantSummary
@@ -977,6 +1009,10 @@ const processAIResponse = async (response) => {
             suggestedReplies.value = assistantReplies
           }
         }
+      } else if (results[0].status === 'rejected') {
+        // 辅助AI变量解析失败，显示提示
+        console.error('[GameMain] Assistant AI variable parsing failed:', results[0].reason)
+        showVariableErrorNotification()
       }
 
       if (isIndependentImageEnabled && results[1]?.status === 'fulfilled') {
@@ -1349,13 +1385,13 @@ const handleRollbackToFloor = async (targetIndex) => {
   if (floorCount > 0 && !confirm(`确认回溯到第 ${targetIndex + 1} 层？将删除后续 ${floorCount} 条消息。`)) {
     return
   }
-  
+
   // 恢复状态
   gameStore.restoreFromMessageSnapshot(snapshotLog.snapshot, gameLog.value)
-  
+
   // 截断日志到目标位置
   gameLog.value.splice(targetIndex + 1)
-  
+
   // 如果回溯后最后一条是玩家消息，将其内容移入输入框并从日志中移除
   // 防止后续 sendMessage 拼接旧消息导致 AI 读取到错误内容
   const lastAfterSplice = gameLog.value[gameLog.value.length - 1]
@@ -1363,21 +1399,25 @@ const handleRollbackToFloor = async (targetIndex) => {
     inputText.value = lastAfterSplice.content || ''
     gameLog.value.pop()
   }
-  
+
   gameStore.currentFloor = gameLog.value.length
-  
+
   // 清理状态
   suggestedReplies.value = []
   lastRoundChanges.value = []
   contentRenderCache.clear()
-  
+
+  // 清除 RAG 缓存，因为历史已改变
+  cachedRAGHistory.value = null
+  cachedRAGUserInput.value = ''
+
   await gameStore.syncWorldbook()
-  
+
   showDanmaku([`✅ 已回溯到第 ${targetIndex + 1} 层`])
-  
+
   // 自动保存
   gameStore.createAutoSave(gameLog.value, gameStore.currentFloor)
-  
+
   scrollToBottom(contentAreaRef.value)
 }
 
@@ -1480,6 +1520,16 @@ const handleSummarySubmit = async (content) => {
 const handleSummaryCancel = () => {
   showSummaryInput.value = false
   pendingSummaryData.value = null
+}
+
+// 显示变量计算失败提示
+const showVariableErrorNotification = () => {
+  showVariableErrorTip.value = true
+}
+
+// 关闭变量计算失败提示
+const closeVariableErrorTip = () => {
+  showVariableErrorTip.value = false
 }
 
 const handleMessageContextMenu = (e, index) => {
@@ -2040,15 +2090,15 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
     <transition name="fade">
       <div v-if="tucaoContent" class="tucao-container" :class="{ 'expanded': showTucaoPanel }">
         <!-- 小圆圈按钮 -->
-        <button 
-          v-if="!showTucaoPanel" 
-          class="tucao-btn" 
+        <button
+          v-if="!showTucaoPanel"
+          class="tucao-btn"
           @click="showTucaoPanel = true"
           title="点击查看小剧场"
         >
           🎭
         </button>
-        
+
         <!-- 展开面板 -->
         <div v-else class="tucao-panel" @click="showTucaoPanel = false">
           <div class="tucao-header">
@@ -2059,6 +2109,20 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
             {{ tucaoContent }}
           </div>
         </div>
+      </div>
+    </transition>
+
+    <!-- 变量计算失败提示 -->
+    <transition name="fade">
+      <div v-if="showVariableErrorTip" class="variable-error-tip">
+        <div class="variable-error-icon">⚠️</div>
+        <div class="variable-error-text">变量计算失败</div>
+        <button class="variable-error-action" @click="handleAssistantReroll" title="重新计算变量">
+          🔄
+        </button>
+        <button class="variable-error-close" @click="closeVariableErrorTip" title="关闭提示">
+          ×
+        </button>
       </div>
     </transition>
 

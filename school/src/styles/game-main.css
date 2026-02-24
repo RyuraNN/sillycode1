@@ -769,3 +769,156 @@
   color: #b0bec5;
   border-top-color: rgba(99, 102, 241, 0.15);
 }
+
+/* ==================== 变量计算失败提示 ==================== */
+.variable-error-tip {
+  position: fixed;
+  bottom: 120px;
+  right: 20px;
+  background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
+  border: 2px solid rgba(255, 152, 0, 0.3);
+  border-left: 4px solid #ff9800;
+  border-radius: 12px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 12px rgba(255, 152, 0, 0.2), 0 0 20px rgba(255, 152, 0, 0.1);
+  z-index: 1000;
+  animation: pulse-glow 2s ease-in-out infinite;
+  max-width: 200px;
+  font-size: 0.85rem;
+  cursor: default;
+  user-select: none;
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 4px 12px rgba(255, 152, 0, 0.2), 0 0 20px rgba(255, 152, 0, 0.1);
+  }
+  50% {
+    box-shadow: 0 4px 16px rgba(255, 152, 0, 0.35), 0 0 30px rgba(255, 152, 0, 0.2);
+  }
+}
+
+.variable-error-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+  animation: shake 0.5s ease-in-out infinite;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2px); }
+  75% { transform: translateX(2px); }
+}
+
+.variable-error-text {
+  flex: 1;
+  color: #e65100;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.variable-error-action {
+  background: rgba(255, 152, 0, 0.15);
+  border: 1px solid rgba(255, 152, 0, 0.3);
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.9rem;
+  color: #e65100;
+  flex-shrink: 0;
+}
+
+.variable-error-action:hover {
+  background: rgba(255, 152, 0, 0.25);
+  transform: scale(1.05);
+}
+
+.variable-error-action:active {
+  transform: scale(0.95);
+}
+
+.variable-error-close {
+  background: transparent;
+  border: none;
+  font-size: 1.2rem;
+  color: #e65100;
+  cursor: pointer;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.variable-error-close:hover {
+  background: rgba(255, 152, 0, 0.2);
+  transform: rotate(90deg);
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .variable-error-tip {
+    bottom: 100px;
+    right: 10px;
+    max-width: 160px;
+    font-size: 0.8rem;
+    padding: 6px 10px;
+    gap: 6px;
+  }
+
+  .variable-error-icon {
+    font-size: 1rem;
+  }
+
+  .variable-error-action {
+    padding: 3px 6px;
+    font-size: 0.85rem;
+  }
+
+  .variable-error-close {
+    width: 18px;
+    height: 18px;
+    font-size: 1.1rem;
+  }
+}
+
+/* 夜间模式 */
+.dark-mode .variable-error-tip {
+  background: linear-gradient(135deg, rgba(255, 152, 0, 0.15) 0%, rgba(255, 152, 0, 0.1) 100%);
+  border-color: rgba(255, 152, 0, 0.4);
+  border-left-color: #ff9800;
+}
+
+.dark-mode .variable-error-text {
+  color: #ffb74d;
+}
+
+.dark-mode .variable-error-action {
+  background: rgba(255, 152, 0, 0.2);
+  border-color: rgba(255, 152, 0, 0.4);
+  color: #ffb74d;
+}
+
+.dark-mode .variable-error-action:hover {
+  background: rgba(255, 152, 0, 0.3);
+}
+
+.dark-mode .variable-error-close {
+  color: #ffb74d;
+}
+
+.dark-mode .variable-error-close:hover {
+  background: rgba(255, 152, 0, 0.25);
+}
+
