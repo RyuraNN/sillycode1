@@ -1344,44 +1344,48 @@ export async function setPlayerClass(classId, useGeminiMode = false) {
   }
 
   try {
-    const bookName = getCurrentBookName()
+    const bookNames = getAllBookNames()
 
-    if (!bookName) return
+    console.log(`[WorldbookParser] Setting player class to ${classId} in worldbooks: ${bookNames} (geminiMode: ${useGeminiMode})`)
 
-    console.log(`[WorldbookParser] Setting player class to ${classId} in worldbook: ${bookName} (geminiMode: ${useGeminiMode})`)
-
-    await window.updateWorldbookWith(bookName, (entries) => {
-      return entries.map(entry => {
-        // 识别标题格式： [Class:1-A] ...
-        const match = entry.name.match(/\[Class:([\w.-]+)\]/)
-        if (match) {
-          const entryClassId = match[1]
-          if (entryClassId === classId) {
-            // 选中班级：蓝灯 (constant)
-            console.log(`[WorldbookParser] Setting entry ${entry.name} to constant`)
-            return {
-              ...entry,
-              strategy: {
-                ...entry.strategy,
-                type: 'constant'
+    for (const bookName of bookNames) {
+      try {
+        await window.updateWorldbookWith(bookName, (entries) => {
+          return entries.map(entry => {
+            // 识别标题格式： [Class:1-A] 或 [Class:1-A:runId]
+            const match = entry.name.match(/\[Class:([\w.-]+?)(?::[\w.-]+)?\]/)
+            if (match) {
+              const entryClassId = match[1]
+              if (entryClassId === classId) {
+                // 选中班级：蓝灯 (constant)
+                console.log(`[WorldbookParser] Setting entry ${entry.name} to constant`)
+                return {
+                  ...entry,
+                  strategy: {
+                    ...entry.strategy,
+                    type: 'constant'
+                  }
+                }
+              } else {
+                // 其他班级：非 gemini 模式全部蓝灯，gemini 模式绿灯
+                const type = useGeminiMode ? 'selective' : 'constant'
+                console.log(`[WorldbookParser] Setting entry ${entry.name} to ${type}`)
+                return {
+                  ...entry,
+                  strategy: {
+                    ...entry.strategy,
+                    type
+                  }
+                }
               }
             }
-          } else {
-            // 其他班级：非 gemini 模式全部蓝灯，gemini 模式绿灯
-            const type = useGeminiMode ? 'selective' : 'constant'
-            console.log(`[WorldbookParser] Setting entry ${entry.name} to ${type}`)
-            return {
-              ...entry,
-              strategy: {
-                ...entry.strategy,
-                type
-              }
-            }
-          }
-        }
-        return entry
-      })
-    })
+            return entry
+          })
+        })
+      } catch (e) {
+        console.warn(`[WorldbookParser] Error setting player class in book ${bookName}:`, e)
+      }
+    }
 
   } catch (e) {
     console.error('[WorldbookParser] Error setting player class:', e)
@@ -2447,7 +2451,11 @@ export async function syncClassWorldbookState(currentRunId, allClassData, useGem
               }
               return {
                 ...entry,
-                enabled: true
+                enabled: true,
+                strategy: {
+                  ...entry.strategy,
+                  type: useGeminiMode ? 'selective' : 'constant'
+                }
               }
             } else {
               // 其他存档的条目，一律禁用
