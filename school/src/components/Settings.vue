@@ -291,39 +291,23 @@ const loadRerankModels = async () => {
             <div class="setting-row">
               <div class="setting-info">
                 <span class="setting-label">消息快照保留层数</span>
-                <span class="setting-hint">控制保留游戏状态快照的消息数量（用于撤回）。减少层数可显著降低内存占用和卡顿。</span>
+                <span class="setting-hint">保留最近 N 层的快照用于回溯。增量模式占用内存很小，可以保留更多层数。</span>
               </div>
               <div class="setting-control">
-                <input 
-                  type="range" 
-                  v-model.number="gameStore.settings.snapshotLimit" 
-                  min="2" 
-                  max="50" 
-                  step="1"
+                <input
+                  type="range"
+                  v-model.number="gameStore.settings.snapshotLimit"
+                  min="100"
+                  max="2000"
+                  step="50"
                   class="range-slider"
                   @change="gameStore.saveToStorage()"
                 >
-                <span class="range-value">{{ gameStore.settings.snapshotLimit || 10 }}</span>
+                <span class="range-value">{{ gameStore.settings.snapshotLimit || 500 }}</span>
               </div>
             </div>
 
-            <div class="setting-row">
-              <div class="setting-info">
-                <span class="setting-label">快照模式</span>
-                <span class="setting-hint">增量模式只记录变化，大幅降低内存占用（推荐长期游戏使用）</span>
-              </div>
-              <div class="setting-control">
-                <select 
-                  v-model="gameStore.settings.snapshotMode" 
-                  class="model-select"
-                  style="width: 100px;"
-                  @change="gameStore.saveToStorage()"
-                >
-                  <option value="delta">增量模式</option>
-                  <option value="full">完整模式</option>
-                </select>
-              </div>
-            </div>
+            <!-- 快照模式设置已移除，统一使用增量模式 -->
           </div>
         </div>
 
@@ -599,16 +583,17 @@ const loadRerankModels = async () => {
                 <div class="input-group">
                   <label class="input-label">温度 (Temperature)</label>
                   <div class="range-row">
-                    <input 
-                      type="range" 
-                      v-model.number="gameStore.settings.assistantAI.temperature" 
-                      min="0" 
-                      max="2" 
+                    <input
+                      type="range"
+                      v-model.number="gameStore.settings.assistantAI.temperature"
+                      min="0"
+                      max="2"
                       step="0.05"
                       class="range-slider"
+                      :disabled="gameStore.settings.assistantAI.model?.toLowerCase().includes('gpt')"
                       @change="gameStore.saveToStorage()"
                     >
-                    <span class="range-value">{{ gameStore.settings.assistantAI.temperature.toFixed(2) }}</span>
+                    <span class="range-value">{{ gameStore.settings.assistantAI.model?.toLowerCase().includes('gpt') ? '1 (GPT固定)' : gameStore.settings.assistantAI.temperature.toFixed(2) }}</span>
                   </div>
                 </div>
               </div>
@@ -856,7 +841,7 @@ const loadRerankModels = async () => {
           <div class="card-body credits-body">
             <p>原作者：墨沈</p>
             <p @click="handleCreditsClick" style="cursor: pointer; user-select: none;">重制：Elyrene</p>
-            <p>版本号 V2.3</p>
+            <p>版本号 V2.4</p>
             <p>免费发布于DC类脑社区</p>
           </div>
         </div>

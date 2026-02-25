@@ -654,14 +654,15 @@ const handleHomeClick = () => {
                           </select>
                         </div>
                         <div class="input-row">
-                          <label>温度: {{ gameStore.settings.assistantAI.temperature }}</label>
+                          <label>温度: {{ gameStore.settings.assistantAI.model?.toLowerCase().includes('gpt') ? '1 (GPT固定)' : gameStore.settings.assistantAI.temperature }}</label>
                           <div class="slider-container">
-                            <input 
-                              type="range" 
-                              v-model.number="gameStore.settings.assistantAI.temperature" 
-                              min="0" 
-                              max="2" 
+                            <input
+                              type="range"
+                              v-model.number="gameStore.settings.assistantAI.temperature"
+                              min="0"
+                              max="2"
                               step="0.05"
+                              :disabled="gameStore.settings.assistantAI.model?.toLowerCase().includes('gpt')"
                               @change="gameStore.saveToStorage()"
                               class="setting-slider"
                             >
@@ -902,6 +903,9 @@ const handleHomeClick = () => {
                           <button class="action-btn primary" style="width: 100%; margin-top: 10px;" @click="startBatchEmbed" :disabled="isEmbedding">
                             {{ isEmbedding ? `生成中 ${embedProgress.current}/${embedProgress.total}` : '🔢 批量生成向量' }}
                           </button>
+                          <button class="action-btn" style="width: 100%; margin-top: 8px;" @click="showMemoryGraph = true">
+                            🕸️ 记忆图谱
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -941,7 +945,7 @@ const handleHomeClick = () => {
                       <div class="credits-body">
                         <p>原作者：墨沈</p>
                         <p>重制：Elyrene</p>
-                        <p>版本号 V2.3</p>
+                        <p>版本号 V2.4</p>
                         <p>免费发布于DC类脑社区</p>
                       </div>
                     </div>

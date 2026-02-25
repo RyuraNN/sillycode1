@@ -24,7 +24,8 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:docs.siliconflow.cn)",
-      "WebFetch(domain:siliconflow.cn)"
+      "WebFetch(domain:siliconflow.cn)",
+      "Bash(sort:*)"
     ]
   }
 }

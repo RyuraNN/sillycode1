@@ -181,10 +181,19 @@ export function removeThinking(content) {
   }
 
   // 第二轮：移除未闭合的思维标签（从开标签到字符串末尾）
+  // 只有当存在闭合标签，或者有多个开标签时才移除
+  // （多个开标签说明 AI 确实输出了 thinking，只是没闭合）
   for (const tag of THINKING_TAGS) {
     const escapedTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const regex = new RegExp(`<${escapedTag}>[\\s\\S]*$`, 'gi')
-    cleaned = cleaned.replace(regex, '')
+    const openTagMatches = cleaned.match(new RegExp(`<${escapedTag}>`, 'gi'))
+    const closeTagMatches = cleaned.match(new RegExp(`<\\/${escapedTag}>`, 'gi'))
+    const openCount = openTagMatches ? openTagMatches.length : 0
+    const closeCount = closeTagMatches ? closeTagMatches.length : 0
+    // 有闭合标签，或者有多个开标签（说明 AI 输出了未闭合的 thinking）
+    if (closeCount > 0 || openCount > 1) {
+      const regex = new RegExp(`<${escapedTag}>[\\s\\S]*$`, 'gi')
+      cleaned = cleaned.replace(regex, '')
+    }
   }
 
   // 第三轮（新增）：移除孤立的闭合思维标签及其之前的内容

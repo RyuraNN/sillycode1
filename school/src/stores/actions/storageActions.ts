@@ -530,10 +530,40 @@ export const storageActions = {
           fullSnapshot = { ...fullSnapshot, ...details }
         }
       }
+
+      // 如果chatLog为空，尝试加载分片数据
+      if (!fullSnapshot.chatLog) {
+        try {
+          const { loadChunkedChatLog } = await import('../../utils/indexedDB')
+          const chunkedLog = await loadChunkedChatLog(snapshot.id)
+          if (chunkedLog) {
+            fullSnapshot.chatLog = chunkedLog
+          }
+        } catch (e) {
+          console.warn(`[Export] Failed to load chunked chatLog for ${snapshot.id}:`, e)
+        }
+      }
+
+      // 保留快照数据用于导入后回溯
+      // 增量快照已经过优化，每个只有 5-15KB，1600层约 16MB（可接受）
+      // 基准快照每20层一个，1600层约 80个 × 250KB = 20MB
+      // 总计约 36MB，相比之前的 375MB 已经大幅减少
+      if (fullSnapshot.chatLog && Array.isArray(fullSnapshot.chatLog)) {
+        fullSnapshot.chatLog = fullSnapshot.chatLog.map((log: any) => ({
+          type: log.type,
+          content: log.content,
+          rawContent: log.rawContent,
+          snapshot: log.snapshot // 保留快照数据
+          // 不导出: preVariableSnapshot（仅用于辅助AI重卷）
+        }))
+      }
+
       fullSnapshots.push(fullSnapshot)
     }
 
-    // 导出时剥离 embedding 向量，减小文件体积
+    // 保留 embedding 向量数据（用户要求保留，导入后无需重新生成）
+    // 注释掉原来的 embedding 移除代码
+    /*
     for (const snap of fullSnapshots) {
       if (snap.gameState?.player?.summaries) {
         for (const s of snap.gameState.player.summaries) {
@@ -541,6 +571,7 @@ export const storageActions = {
         }
       }
     }
+    */
 
     // 获取扩展数据 (IndexedDB)
     const rosterBackup = await getRosterBackup()

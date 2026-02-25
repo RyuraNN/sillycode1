@@ -175,7 +175,7 @@ ${contextBlock}
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
       ],
-      temperature: 0.3,
+      temperature: model && model.toLowerCase().includes('gpt') ? 1 : 0.3,
       max_tokens: 300
     })
   })
@@ -338,7 +338,7 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
   if (!chatLog || chatLog.length === 0) return { history: chatLog, errors }
 
   const result = []
-  const recentThreshold = settings.minorSummaryStartFloor || 8
+  const recentThreshold = settings.minorSummaryStartFloor || 6
   const bridgeCount = 5 // 桥接层：正文边界外最近 5 轮小总结
 
   // 构建检索 query：拼接最近2条小总结 + 用户输入，提升语义丰富度

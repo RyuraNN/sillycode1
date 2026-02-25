@@ -647,15 +647,23 @@ export function generateIndependentTeacherSchedule(teacherInfo, currentDate, all
   // 获取所有需要安排的课程实例
   const requiredTasks = []
   if (teachingClasses && teachingClasses.length > 0) {
+    console.log('[ScheduleGenerator] Teaching classes:', teachingClasses)
     teachingClasses.forEach(classId => {
       // 优先使用 classSubjectMap，回退到 legacySubjects
       const subjects = (classSubjectMap[classId] && classSubjectMap[classId].length > 0)
         ? classSubjectMap[classId]
         : legacySubjects
-      if (!subjects || subjects.length === 0) return
+      console.log(`[ScheduleGenerator] Class ${classId} subjects:`, subjects)
+      if (!subjects || subjects.length === 0) {
+        console.warn(`[ScheduleGenerator] No subjects found for class ${classId}`)
+        return
+      }
       subjects.forEach(subject => {
         // 如果该科目是选修课，跳过必修课排课逻辑
-        if (electiveNames.has(subject)) return
+        if (electiveNames.has(subject)) {
+          console.log(`[ScheduleGenerator] Skipping elective ${subject} for ${classId}`)
+          return
+        }
 
         // 大学风格排课：每门课每周 1 节，仅 30% 概率加 1 节
         // 这样课表更稀疏，符合大学课表特点
@@ -668,11 +676,14 @@ export function generateIndependentTeacherSchedule(teacherInfo, currentDate, all
       })
     })
   }
-  
-  // 打乱顺序
+
+  console.log(`[ScheduleGenerator] Total required tasks: ${requiredTasks.length}`, requiredTasks)
+
+  // 打乱顺序，确保所有班级的课程公平分配
   requiredTasks.sort(() => random() - 0.5)
-  
+
   // 尝试填入空位 (仅 Period 1-4, Index 0-3)
+  let assignedCount = 0
   for (const task of requiredTasks) {
     const availableSlots = []
     weekdays.forEach(day => {
@@ -681,20 +692,27 @@ export function generateIndependentTeacherSchedule(teacherInfo, currentDate, all
         if (schedule[day][i].isEmpty) availableSlots.push({ day, index: i })
       }
     })
-    
+
     if (availableSlots.length > 0) {
       // 随机选一个位置
       const slotInfo = availableSlots[Math.floor(random() * availableSlots.length)]
       const slot = schedule[slotInfo.day][slotInfo.index]
-      
+
       slot.subject = task.subject
       slot.className = allClassData[task.classId]?.name || task.classId
       const location = getRandomLocation(task.subject, task.classId, allClassData[task.classId]?.classroomId)
       slot.location = location.locationName
       slot.locationId = location.locationId
       slot.isEmpty = false
+      assignedCount++
+      console.log(`[ScheduleGenerator] Assigned ${task.classId} - ${task.subject} to ${slotInfo.day} Period ${slotInfo.index + 1}`)
+    } else {
+      // 如果上午没有空位，记录警告（但不会导致课程丢失）
+      console.warn(`[ScheduleGenerator] No available morning slots for ${task.classId} - ${task.subject}`)
     }
   }
+
+  console.log(`[ScheduleGenerator] Assigned ${assignedCount} out of ${requiredTasks.length} required tasks`)
   
   // 3. 安排选修课 (Teaching Electives & Custom Courses) - 严格限制在下午 Period 5-6 (Index 4-5)
   
@@ -986,13 +1004,15 @@ export function generateWeeklySchedule(classId, classInfo, weekNumber = 1) {
   }
 
   // === Phase 4: 后处理安全约束 ===
-  // 每天 Period 1-4：如果空课 > 有课（空课 > 2），补课直到 空课 ≤ 有课
+  // 调整：降低最低课程要求，允许更多空课
+  // 每天 Period 1-4：如果有课 < 2，补课到至少 2 节（而不是空课≤有课）
   if (regularSubjects.length > 0) {
     for (const day of weekdays) {
       const mainSlots = schedule[day].slice(0, 4)
-      let emptyCount = mainSlots.filter(s => s.isEmpty).length
-      let filledCount = 4 - emptyCount
-      while (emptyCount > filledCount) {
+      let filledCount = mainSlots.filter(s => !s.isEmpty).length
+
+      // 只在有课少于2节时补课（降低课程密度）
+      while (filledCount < 2) {
         const emptyIdx = mainSlots.findIndex(s => s.isEmpty)
         if (emptyIdx === -1) break
 
@@ -1016,7 +1036,6 @@ export function generateWeeklySchedule(classId, classInfo, weekNumber = 1) {
         slot.locationId = location.locationId
         slot.isEmpty = false
         daySubjects.get(day).add(subjectInfo.subject)
-        emptyCount--
         filledCount++
       }
     }

@@ -21,12 +21,25 @@ import {
  * @returns 精简后的聊天记录
  */
 function createLightChatLogCopy(chatLog: ChatLogEntry[]): ChatLogEntry[] {
-  return chatLog.map(log => ({
-    type: log.type,
-    content: log.content,
-    snapshot: log.snapshot,
-    // 不保存: rawContent, preVariableSnapshot（可从 snapshot 恢复）
-  } as ChatLogEntry))
+  return chatLog.map(log => {
+    const lightLog: any = {
+      type: log.type,
+      content: log.content,
+      // 不保存: rawContent, preVariableSnapshot（可从 snapshot 恢复）
+    }
+
+    // 深拷贝 snapshot，移除 Proxy 和不可克隆对象
+    if (log.snapshot) {
+      try {
+        lightLog.snapshot = JSON.parse(JSON.stringify(log.snapshot))
+      } catch (e) {
+        console.warn('[createLightChatLogCopy] Failed to serialize snapshot:', e)
+        // 如果序列化失败，跳过该 snapshot
+      }
+    }
+
+    return lightLog as ChatLogEntry
+  })
 }
 
 export const snapshotActions = {
@@ -101,68 +114,81 @@ export const snapshotActions = {
    * 创建/更新自动存档
    */
   async createAutoSave(this: any, chatLog: ChatLogEntry[], messageIndex: number) {
-    const gameState: GameStateData = JSON.parse(JSON.stringify({
-      player: this.player,
-      npcs: this.npcs,
-      npcRelationships: this.npcRelationships,
-      graduatedNpcs: this.graduatedNpcs || [],
-      lastAcademicYear: this.lastAcademicYear || 0,
-      gameTime: this.gameTime,
-      // settings: this.settings, // Settings are global and should not be part of the snapshot
-      worldState: this.worldState,
-      allClassData: this.allClassData,
-      allClubs: this.allClubs,
-      currentRunId: this.currentRunId,
-      currentFloor: this.currentFloor,
-      examHistory: this.examHistory || [],
-      // 补充遗漏的动态数据
-      electiveAcademicData: this.electiveAcademicData || {},
-      lastExamDate: this.lastExamDate || null,
-      eventChecks: this.eventChecks || { lastDaily: '', lastWeekly: '', lastMonthly: '' },
-      clubApplication: this.clubApplication || null,
-      clubRejection: this.clubRejection || null,
-      clubInvitation: this.clubInvitation || null,
-      npcElectiveSelections: this.npcElectiveSelections || {}
-      // 注意：characterNotes, customCoursePool, eventLibrary, eventTriggers 为全局或外部数据，不回溯
-    }))
+    try {
+      const gameState: GameStateData = JSON.parse(JSON.stringify({
+        player: this.player,
+        npcs: this.npcs,
+        npcRelationships: this.npcRelationships,
+        graduatedNpcs: this.graduatedNpcs || [],
+        lastAcademicYear: this.lastAcademicYear || 0,
+        gameTime: this.gameTime,
+        // settings: this.settings, // Settings are global and should not be part of the snapshot
+        worldState: this.worldState,
+        allClassData: this.allClassData,
+        allClubs: this.allClubs,
+        currentRunId: this.currentRunId,
+        currentFloor: this.currentFloor,
+        examHistory: this.examHistory || [],
+        // 补充遗漏的动态数据
+        electiveAcademicData: this.electiveAcademicData || {},
+        lastExamDate: this.lastExamDate || null,
+        eventChecks: this.eventChecks || { lastDaily: '', lastWeekly: '', lastMonthly: '' },
+        clubApplication: this.clubApplication || null,
+        clubRejection: this.clubRejection || null,
+        clubInvitation: this.clubInvitation || null,
+        npcElectiveSelections: this.npcElectiveSelections || {}
+        // 注意：characterNotes, customCoursePool, eventLibrary, eventTriggers 为全局或外部数据，不回溯
+      }))
 
-    const autoSaveId = `autosave_${this.currentRunId}`
+      const autoSaveId = `autosave_${this.currentRunId}`
 
-    // 精简 chatLog：移除冗余字段
-    const logCopy = createLightChatLogCopy(chatLog)
+      // 精简 chatLog：移除冗余字段
+      const logCopy = createLightChatLogCopy(chatLog)
 
-    // 使用分片存储保存 chatLog
-    const { saveChunkedChatLog } = await import('../../utils/indexedDB')
-    await saveChunkedChatLog(autoSaveId, logCopy)
+      // 使用分片存储保存 chatLog
+      const { saveChunkedChatLog } = await import('../../utils/indexedDB')
+      await saveChunkedChatLog(autoSaveId, logCopy)
 
-    // 保存 gameState（不分片，因为相对较小）
-    const { saveSnapshotData } = await import('../../utils/indexedDB')
-    await saveSnapshotData(autoSaveId, { gameState })
+      // 保存 gameState（不分片，因为相对较小）
+      const { saveSnapshotData } = await import('../../utils/indexedDB')
+      await saveSnapshotData(autoSaveId, { gameState })
 
-    const snapshot: SaveSnapshot = {
-      id: autoSaveId,
-      timestamp: Date.now(),
-      label: `自动存档 (${this.player.name})`,
-      messageIndex,
-      gameTime: {
-        year: this.gameTime.year,
-        month: this.gameTime.month,
-        day: this.gameTime.day,
-        hour: this.gameTime.hour,
-        minute: this.gameTime.minute
-      },
-      location: this.player.location
+      const snapshot: SaveSnapshot = {
+        id: autoSaveId,
+        timestamp: Date.now(),
+        label: `自动存档 (${this.player.name})`,
+        messageIndex,
+        gameTime: {
+          year: this.gameTime.year,
+          month: this.gameTime.month,
+          day: this.gameTime.day,
+          hour: this.gameTime.hour,
+          minute: this.gameTime.minute
+        },
+        location: this.player.location
+      }
+
+      const existingIndex = this.saveSnapshots.findIndex((s: SaveSnapshot) => s.id === autoSaveId)
+
+      if (existingIndex !== -1) {
+        this.saveSnapshots[existingIndex] = snapshot
+      } else {
+        this.saveSnapshots.unshift(snapshot)
+      }
+
+      this.saveToStorage()
+    } catch (e: any) {
+      console.error('[createAutoSave] Failed to create auto save:', e)
+      this.saveError = e.message || '自动存档失败'
+
+      // 如果是 DataCloneError，提供更具体的错误信息
+      if (e.name === 'DataCloneError') {
+        this.saveError = '自动存档失败：数据包含不可序列化的对象'
+        console.error('[createAutoSave] DataCloneError - chatLog may contain non-cloneable objects (Proxy, functions, etc.)')
+      } else if (e.message?.includes('QuotaExceeded')) {
+        this.saveError = '存储空间不足，请清理旧存档'
+      }
     }
-
-    const existingIndex = this.saveSnapshots.findIndex((s: SaveSnapshot) => s.id === autoSaveId)
-
-    if (existingIndex !== -1) {
-      this.saveSnapshots[existingIndex] = snapshot
-    } else {
-      this.saveSnapshots.unshift(snapshot)
-    }
-
-    this.saveToStorage()
   },
 
   /**
@@ -209,6 +235,14 @@ export const snapshotActions = {
         return null
       }
       fullSnapshot = { ...snapshotMeta, ...details }
+    }
+
+    // 自动存档的 chatLog 是分片存储的，需要单独加载
+    if (!fullSnapshot.chatLog) {
+      const chunkedLog = await loadChunkedChatLog(snapshotId)
+      if (chunkedLog && chunkedLog.length > 0) {
+        fullSnapshot = { ...fullSnapshot, chatLog: chunkedLog }
+      }
     }
 
     const state = JSON.parse(JSON.stringify(fullSnapshot.gameState))
@@ -376,22 +410,15 @@ export const snapshotActions = {
   },
 
   /**
-   * 创建消息内联快照（根据模式选择完整或增量）
+   * 创建消息内联快照（使用增量模式）
    * @param previousSnapshot 上一条消息的快照（用于计算增量）
    * @param floor 当前楼层
    * @param chatLog 聊天日志（用于查找基准快照计算更精确的增量）
    */
   createMessageSnapshot(this: any, previousSnapshot: any, floor: number, chatLog?: any[]): any {
-    const mode = this.settings.snapshotMode || 'delta'
-    
-    if (mode === 'full') {
-      // 完整模式：返回完整游戏状态
-      return this.getGameState()
-    }
-    
-    // 增量模式
+    // 统一使用增量模式
     const currentState = this.getGameState()
-    
+
     // 如果没有上一个快照，必须创建基准快照
     if (!previousSnapshot) {
       this._lastBaseFloor = floor
@@ -401,7 +428,7 @@ export const snapshotActions = {
         _floor: floor
       }
     }
-    
+
     // 如果上一个快照是基准快照
     if (previousSnapshot._isBase) {
       // 检查是否应该创建新的基准快照
@@ -417,12 +444,12 @@ export const snapshotActions = {
       // 从基准快照开始计算增量
       return computeDelta(previousSnapshot, currentState, previousSnapshot._floor)
     }
-    
+
     // 如果上一个快照是增量快照，尝试找到基准快照进行更精确的增量计算
     if (isDeltaSnapshot(previousSnapshot)) {
       const baseFloor = previousSnapshot._baseFloor
       let baseSnapshot = null
-      
+
       // 在聊天日志中查找基准快照
       if (chatLog) {
         for (let i = 0; i < chatLog.length; i++) {
@@ -433,7 +460,7 @@ export const snapshotActions = {
           }
         }
       }
-      
+
       // 检查是否应该创建新的基准快照
       const lastBaseFloor = this._lastBaseFloor || 0
       if (shouldCreateBaseSnapshot(floor, lastBaseFloor)) {
@@ -444,11 +471,11 @@ export const snapshotActions = {
           _floor: floor
         }
       }
-      
+
       // 使用找到的基准快照计算增量，如果找不到则传 null（会记录所有字段的当前值）
       return computeDelta(baseSnapshot, currentState, baseFloor)
     }
-    
+
     // 默认：创建增量快照（以楼层 0 为基准）
     return computeDelta(previousSnapshot, currentState, 0)
   },
@@ -482,7 +509,7 @@ export const snapshotActions = {
     
     if (!baseSnapshot) {
       console.warn('[snapshotActions] Base snapshot not found for delta, trying fallback...')
-      
+
       // 尝试在日志中寻找最近的完整快照或基准快照
       for (let i = chatLog.length - 1; i >= 0; i--) {
         const log = chatLog[i]
@@ -493,11 +520,9 @@ export const snapshotActions = {
           break
         }
       }
-      
+
       if (!baseSnapshot) {
-        console.error('[snapshotActions] Critical: No valid base snapshot found!')
-        // 只有在实在找不到任何快照时才回退到当前状态，但这是危险的
-        baseSnapshot = this.getGameState()
+        throw new Error('无法找到基准快照，无法恢复增量快照。请尝试回溯到更早的消息，或切换到完整快照模式。')
       }
     }
     
@@ -554,8 +579,8 @@ export const snapshotActions = {
         }
       }
 
-      // 同样清理 preVariableSnapshot
-      if (log.preVariableSnapshot) {
+      // 只清理超出范围的 preVariableSnapshot
+      if (i < cutoffIndex && log.preVariableSnapshot) {
         delete log.preVariableSnapshot
       }
     }
@@ -568,19 +593,13 @@ export const snapshotActions = {
    * @returns 更新后的快照
    */
   updateMessageSnapshot(this: any, existingSnapshot: any, chatLog?: any[]): any {
-    const mode = this.settings.snapshotMode || 'delta'
     const currentState = this.getGameState()
-    
-    // 完整模式：直接返回完整状态
-    if (mode === 'full') {
-      return currentState
-    }
-    
+
     // 如果没有现有快照，创建完整快照
     if (!existingSnapshot) {
       return currentState
     }
-    
+
     // 如果现有快照是基准快照，更新后仍然保持为基准快照
     if (existingSnapshot._isBase) {
       return {
@@ -589,12 +608,12 @@ export const snapshotActions = {
         _floor: existingSnapshot._floor
       }
     }
-    
+
     // 如果现有快照是增量快照，需要重新计算增量
     if (isDeltaSnapshot(existingSnapshot)) {
       const baseFloor = existingSnapshot._baseFloor
       let baseSnapshot = null
-      
+
       // 在聊天日志中查找基准快照
       if (chatLog) {
         for (let i = 0; i < chatLog.length; i++) {
@@ -605,11 +624,11 @@ export const snapshotActions = {
           }
         }
       }
-      
+
       // 重新计算增量
       return computeDelta(baseSnapshot, currentState, baseFloor)
     }
-    
+
     // 普通完整快照：直接返回完整状态
     return currentState
   },

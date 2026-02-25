@@ -200,8 +200,9 @@ async function getWorldbookContent(name) {
     
     // 过滤掉禁用的条目和 [COT] 条目
     // [COT] 条目是思维链提示词，不应传递给辅助AI
+    // enabled 为 false 的条目不应传递给辅助AI（[变量解析] 由独立函数获取，不受此影响）
     return entries
-      .filter(e => e.name !== '[COT]')
+      .filter(e => e.name !== '[COT]' && e.enabled !== false)
       .map(e => e.content)
       .join('\n\n')
   } catch (e) {
@@ -285,7 +286,9 @@ async function getActiveWorldbooksContent() {
  */
 export async function callAssistantAI(mainAIResponse, options = {}) {
   const gameStore = useGameStore()
-  const { apiUrl, apiKey, model, temperature } = gameStore.settings.assistantAI
+  const { apiUrl, apiKey, model, temperature: rawTemperature } = gameStore.settings.assistantAI
+  // GPT 系列模型（如 gpt-5-mini）只接受温度为 1
+  const temperature = model && model.toLowerCase().includes('gpt') ? 1 : rawTemperature
 
   if (!apiUrl || !apiKey) {
     throw new Error('辅助AI配置不完整')
@@ -407,7 +410,9 @@ ${mainAIResponse}
  */
 export async function callImageAnalysisAI(storyContent, characterAnchors = {}) {
   const gameStore = useGameStore()
-  const { apiUrl, apiKey, model, temperature } = gameStore.settings.assistantAI
+  const { apiUrl, apiKey, model, temperature: rawTemperature } = gameStore.settings.assistantAI
+  // GPT 系列模型（如 gpt-5-mini）只接受温度为 1
+  const temperature = model && model.toLowerCase().includes('gpt') ? 1 : rawTemperature
   const { imageGenerationPrompt, customImageAnalysisPrompt } = gameStore.settings
 
   if (!apiUrl || !apiKey) {

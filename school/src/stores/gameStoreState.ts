@@ -188,7 +188,7 @@ export function createInitialState(): GameState {
       summarySystem: {
         enabled: true,
         enableSuperSummary: false,
-        minorSummaryStartFloor: 8,
+        minorSummaryStartFloor: 6,
         majorSummaryStartFloor: 25,
         minorCountForMajor: 5,
         majorCountForSuper: 3,
@@ -220,7 +220,7 @@ export function createInitialState(): GameState {
       },
       debugMode: false,
       debugUnlocked: false,
-      snapshotLimit: 10,
+      snapshotLimit: 500,
       snapshotMode: 'delta',
       useGeminiMode: false,
       retrySystem: {

@@ -19,14 +19,14 @@
         <span class="tab-icon">📅</span>
         <span class="tab-label">课表</span>
       </div>
-      <div 
-        class="tab-item" 
+      <div
+        class="tab-item"
         :class="{ active: activeTab === 'clubs' }"
         @click="activeTab = 'clubs'"
       >
         <span class="tab-icon">🎭</span>
         <span class="tab-label">社团</span>
-        <span v-if="joinedClubsCount > 0" class="tab-badge">{{ joinedClubsCount }}</span>
+        <span v-if="hasNewClubNotification" class="tab-badge">!</span>
       </div>
       <div
         class="tab-item"
@@ -843,7 +843,7 @@ const gameStore = useGameStore()
 // 标签页状态
 const activeTab = ref('schedule')
 
-// 红点清除：切换到社团 tab 时标记所有社团为已查看，切换到成绩 tab 时清除考试红点
+// 红点清除：切换到社团 tab 时标记所有社团为已查看，切换到成绩 tab 时清除考试红点，切换到论坛 tab 时清除论坛红点
 watch(activeTab, (val) => {
   if (val === 'clubs') {
     const allClubs = gameStore.allClubs || {}
@@ -852,6 +852,12 @@ watch(activeTab, (val) => {
   if (val === 'grades') {
     if (gameStore.unviewedExamIds?.length) {
       gameStore.unviewedExamIds = []
+    }
+  }
+  if (val === 'forum') {
+    // 清除论坛待处理指令（红点）
+    if (gameStore.player.forum?.pendingCommands?.length) {
+      gameStore.player.forum.pendingCommands = []
     }
   }
 })
@@ -1041,6 +1047,11 @@ const getElectiveNames = (ids) => {
 // 待处理论坛指令数量
 const pendingForumCount = computed(() => {
   return gameStore.player.forum?.pendingCommands?.length || 0
+})
+
+// 是否有新社团通知（邀请或申请结果）
+const hasNewClubNotification = computed(() => {
+  return !!(gameStore.clubInvitation || gameStore.clubRejection)
 })
 
 // 已加入社团数量

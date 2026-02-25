@@ -1457,11 +1457,19 @@ const handleReroll = async () => {
   }
   
   if (playerMsg && snapshot) {
-    // 使用支持增量快照的方法
-    gameStore.restoreFromMessageSnapshot(snapshot, gameLog.value)
-    await gameStore.syncWorldbook()
-    inputText.value = ''
-    await sendMessage()
+    try {
+      // 使用支持增量快照的方法
+      gameStore.restoreFromMessageSnapshot(snapshot, gameLog.value)
+      await gameStore.syncWorldbook()
+      inputText.value = ''
+      await sendMessage()
+    } catch (e) {
+      console.error('回溯失败:', e)
+      showDanmaku([
+        '⚠️ 回溯失败: ' + e.message,
+        '建议：增加快照保留层数或切换到完整快照模式'
+      ])
+    }
   }
 }
 
@@ -1498,7 +1506,16 @@ const handleRollbackToFloor = async (targetIndex) => {
   }
 
   // 恢复状态
-  gameStore.restoreFromMessageSnapshot(snapshotLog.snapshot, gameLog.value)
+  try {
+    gameStore.restoreFromMessageSnapshot(snapshotLog.snapshot, gameLog.value)
+  } catch (e) {
+    console.error('回溯失败:', e)
+    showDanmaku([
+      '⚠️ 回溯失败: ' + e.message,
+      '建议：增加快照保留层数或切换到完整快照模式'
+    ])
+    return
+  }
 
   // 截断日志到目标位置
   gameLog.value.splice(targetIndex + 1)
