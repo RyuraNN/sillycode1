@@ -3,7 +3,7 @@
  */
 
 import type { ClubData, Group, NpcStats } from '../gameStoreTypes'
-import { fetchClassDataFromWorldbook, fetchClubDataFromWorldbook, addPlayerToClubInWorldbook, removePlayerFromClubInWorldbook, syncClubWorldbookState, syncClassWorldbookState, setPlayerClass, setVariableParsingWorldbookStatus, addNpcToClubInWorldbook, createClubInWorldbook, ensureClubExistsInWorldbook, setupTeacherClassEntries } from '../../utils/worldbookParser'
+import { fetchClassDataFromWorldbook, fetchClubDataFromWorldbook, addPlayerToClubInWorldbook, removePlayerFromClubInWorldbook, syncClubWorldbookState, syncClassWorldbookState, setPlayerClass, setVariableParsingWorldbookStatus, addNpcToClubInWorldbook, createClubInWorldbook, ensureClubExistsInWorldbook, setupTeacherClassEntries, fetchMapDataFromWorldbook, fetchAcademicDataFromWorldbook, fetchTagDataFromWorldbook } from '../../utils/worldbookParser'
 import { DEFAULT_FORUM_POSTS, saveForumToWorldbook, switchForumSlot } from '../../utils/forumWorldbook'
 import { saveSocialData, switchSaveSlot, saveSocialRelationshipOverview, restoreWorldbookFromStore } from '../../utils/socialWorldbook'
 import { switchPartTimeSaveSlot, restorePartTimeWorldbookFromStore } from '../../utils/partTimeWorldbook'
@@ -791,10 +791,14 @@ export const classClubActions = {
     } else {
       await safeRebuildStep(() => this.loadClassData(), 'loadClassData', 15000)
     }
-    
+    // 记录班级数据加载结果
+    this.worldbookLoadResults.classData = !!(this.allClassData && Object.keys(this.allClassData).length > 0)
+
     await new Promise(r => setTimeout(r, 50)) // Yield
 
     await safeRebuildStep(() => this.loadClubData(), 'loadClubData', 15000)
+    // 记录社团数据加载结果
+    this.worldbookLoadResults.clubData = !!(this.allClubs && Object.keys(this.allClubs).length > 0)
     
     // 【调试】检查加载后的社团状态
     const allClubIdsAfter = this.allClubs ? Object.keys(this.allClubs) : []
@@ -949,6 +953,8 @@ export const classClubActions = {
       () => this.loadEventData(),
       'loadEventData', 10000
     )
+    // 记录事件数据加载结果
+    this.worldbookLoadResults.eventData = !!(this.eventLibrary && this.eventLibrary.size > 0)
 
     // === 兜底：最终班级条目状态同步 ===
     // Phase 2 中 syncClassWorldbookState 设置的 enabled 状态可能被后续大量 updateWorldbookWith 调用覆盖，
@@ -970,6 +976,47 @@ export const classClubActions = {
         'finalTeacherClassSetup', 15000
       )
     }
+
+    // === Phase 6: 探测额外数据模块（不阻塞主流程） ===
+
+    await safeRebuildStep(async () => {
+      const mapData = await fetchMapDataFromWorldbook()
+      this.worldbookLoadResults.mapData = !!(mapData && (Array.isArray(mapData) ? mapData.length > 0 : Object.keys(mapData).length > 0))
+      // 检查兼职数据：地图数据中包含 partTimeJob 字段的项
+      if (mapData && Array.isArray(mapData)) {
+        this.worldbookLoadResults.partTimeData = mapData.some((item: any) => item.partTimeJob || item.partTimeJobs)
+      } else {
+        this.worldbookLoadResults.partTimeData = false
+      }
+    }, 'probeMapData', 10000)
+
+    await safeRebuildStep(async () => {
+      const { loadScheduleDataFromWorldbook } = await import('../../utils/npcScheduleSystem.js')
+      const result = await loadScheduleDataFromWorldbook()
+      this.worldbookLoadResults.scheduleData = !!result
+    }, 'probeScheduleData', 10000)
+
+    await safeRebuildStep(async () => {
+      const { fetchProductCatalogFromWorldbook } = await import('../../utils/deliveryWorldbook.js')
+      const catalog = await fetchProductCatalogFromWorldbook()
+      this.worldbookLoadResults.shopData = !!(catalog && (Array.isArray(catalog) ? catalog.length > 0 : Object.keys(catalog).length > 0))
+    }, 'probeShopData', 10000)
+
+    await safeRebuildStep(async () => {
+      const academicData = await fetchAcademicDataFromWorldbook()
+      this.worldbookLoadResults.academicData = !!(academicData && Object.keys(academicData).length > 0)
+    }, 'probeAcademicData', 10000)
+
+    await safeRebuildStep(async () => {
+      const tagData = await fetchTagDataFromWorldbook()
+      this.worldbookLoadResults.tagData = !!(tagData && ((tagData instanceof Map) ? tagData.size > 0 : Object.keys(tagData).length > 0))
+    }, 'probeTagData', 10000)
+
+    await safeRebuildStep(async () => {
+      const { fetchSocialData } = await import('../../utils/socialRelationshipsWorldbook.js')
+      const socialData = await fetchSocialData()
+      this.worldbookLoadResults.socialData = !!(socialData && Object.keys(socialData).length > 0)
+    }, 'probeSocialData', 10000)
 
     const elapsed = Date.now() - startTime
     console.log(`[GameStore] Worldbook state rebuild complete in ${elapsed}ms`)

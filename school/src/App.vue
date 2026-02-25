@@ -1,6 +1,7 @@
 <script setup>
 import { ref, watch, onMounted } from 'vue'
 import HomeLayout from './components/HomeLayout.vue'
+import SplashScreen from './components/SplashScreen.vue'
 import { useGameStore } from './stores/gameStore'
 import { requestPersistence, clearAllData } from './utils/indexedDB'
 import { loadCoursePoolFromWorldbook } from './data/coursePoolData'
@@ -18,6 +19,13 @@ const showCrashRecovery = ref(false)
 const crashError = ref('')
 const isClearing = ref(false)
 const initTimedOut = ref(false)
+
+// 开屏面板状态
+const showSplashScreen = ref(false)
+
+function onEnterGame() {
+  showSplashScreen.value = false
+}
 
 /**
  * 检测世界书 API 是否已就绪（名称 + 内容都已加载）
@@ -100,18 +108,22 @@ async function doInitialize() {
     await gameStore.initFromStorage()
 
     // 加载自定义课程池 (需要 currentRunId)
+    let courseLoaded = false
     try {
-      await loadCoursePoolFromWorldbook(gameStore.currentRunId)
+      courseLoaded = await loadCoursePoolFromWorldbook(gameStore.currentRunId)
     } catch (e) {
       console.warn('[App] loadCoursePoolFromWorldbook failed:', e)
     }
-    
+    gameStore.worldbookLoadResults.courseData = !!courseLoaded
+
     clearTimeout(initTimeoutTimer)
-    
+
     if (!initTimedOut.value) {
       console.log('[App] Initialization complete')
       showWorldbookWaitModal.value = false
       showCrashRecovery.value = false
+      // 显示开屏面板，等待用户点击进入
+      showSplashScreen.value = true
     }
   } catch (e) {
     console.error('[App] ❌ Critical initialization error:', e)
@@ -191,13 +203,15 @@ async function onSkipCacheAndContinue() {
   try {
     isInitializing.value = true
     // 尝试加载课程池
-    await loadCoursePoolFromWorldbook(gameStore.currentRunId)
+    const courseLoaded = await loadCoursePoolFromWorldbook(gameStore.currentRunId)
+    gameStore.worldbookLoadResults.courseData = !!courseLoaded
     await gameStore.rebuildWorldbookState()
     await gameStore.initializeNpcRelationships()
   } catch (e) {
     console.warn('[App] rebuildWorldbookState failed after skip:', e)
   } finally {
     isInitializing.value = false
+    showSplashScreen.value = true
   }
 }
 
@@ -297,7 +311,14 @@ watch(() => gameStore.settings.darkMode, (isDark) => {
       </div>
     </div>
 
-    <HomeLayout />
+    <!-- 开屏提示面板 -->
+    <SplashScreen
+      v-if="showSplashScreen"
+      :load-results="gameStore.worldbookLoadResults"
+      @enter="onEnterGame"
+    />
+
+    <HomeLayout v-if="!showSplashScreen && !isInitializing" />
   </div>
 </template>
 

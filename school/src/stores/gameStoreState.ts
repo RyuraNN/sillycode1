@@ -255,6 +255,19 @@ export function createInitialState(): GameState {
     weeklyPreviewData: null as any,
     showWeeklyPreview: false,
     lastWeeklyPreviewWeek: 0,
+    worldbookLoadResults: {
+      classData: null,
+      clubData: null,
+      mapData: null,
+      partTimeData: null,
+      courseData: null,
+      eventData: null,
+      scheduleData: null,
+      shopData: null,
+      academicData: null,
+      tagData: null,
+      socialData: null,
+    },
     worldState: {
       economy: 100,
       weather: {

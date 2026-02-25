@@ -717,6 +717,19 @@ export interface GameState {
   weeklyPreviewData: any
   showWeeklyPreview: boolean
   lastWeeklyPreviewWeek: number
+  worldbookLoadResults: {
+    classData: boolean | null
+    clubData: boolean | null
+    mapData: boolean | null
+    partTimeData: boolean | null
+    courseData: boolean | null
+    eventData: boolean | null
+    scheduleData: boolean | null
+    shopData: boolean | null
+    academicData: boolean | null
+    tagData: boolean | null
+    socialData: boolean | null
+  }
   worldState: {
     economy: number
     weather: {
