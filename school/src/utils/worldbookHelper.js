@@ -30,6 +30,28 @@ export function getCurrentBookName() {
 }
 
 /**
+ * 获取主世界书名称（仅用于写操作，不 fallback 到附加世界书）
+ * @returns {string|null} 主世界书名称，或 null
+ */
+export function getPrimaryBookName() {
+  try {
+    if (typeof window.getCharWorldbookNames === 'function') {
+      const books = window.getCharWorldbookNames('current')
+      if (books?.primary) return books.primary
+    }
+    // 写操作不 fallback 到 additional
+    if (typeof window.getChatWorldbookName === 'function') {
+      const chatBook = window.getChatWorldbookName('current')
+      if (chatBook) return chatBook
+    }
+    return null
+  } catch (e) {
+    console.warn('[WorldbookHelper] Error getting primary book name:', e?.message || e)
+    return null
+  }
+}
+
+/**
  * 获取所有可用的世界书名称列表（去重）
  * @returns {string[]} 世界书名称数组
  */

@@ -826,7 +826,8 @@ const handleSaveCharacter = async () => {
 
   if (editingCharacter.value) {
     // 编辑模式
-    const idx = characterPool.value.findIndex(c => c.name === editingCharacter.value.name)
+    const oldName = editingCharacter.value.name
+    const idx = characterPool.value.findIndex(c => c.name === oldName)
     if (idx !== -1) {
       // 保留 userCreated 标记，更新所有字段包括性格和备注
       characterPool.value[idx] = {
@@ -834,6 +835,54 @@ const handleSaveCharacter = async () => {
         userCreated: characterPool.value[idx].userCreated,
         personality: form.personality,
         notes: form.notes
+      }
+    }
+
+    // 同步更新 fullRosterSnapshot 中的基本信息
+    const oldClassId = editingCharacter.value.classId
+    const newClassId = form.classId
+
+    // 如果班级变更，从旧班级移除
+    if (oldClassId && oldClassId !== newClassId) {
+      const oldClass = fullRosterSnapshot.value[oldClassId]
+      if (oldClass) {
+        if (form.role === 'student' || editingCharacter.value.role === 'student') {
+          if (Array.isArray(oldClass.students)) {
+            oldClass.students = oldClass.students.filter(s => s.name !== oldName)
+          }
+        }
+      }
+      // 同步 gameStore.allClassData
+      const gcdOld = gameStore.allClassData?.[oldClassId]
+      if (gcdOld && Array.isArray(gcdOld.students)) {
+        gcdOld.students = gcdOld.students.filter(s => s.name !== oldName)
+      }
+    }
+
+    // 更新新班级中的角色数据
+    if (newClassId) {
+      const newClass = fullRosterSnapshot.value[newClassId]
+      if (newClass && form.role === 'student') {
+        if (!Array.isArray(newClass.students)) newClass.students = []
+        const sIdx = newClass.students.findIndex(s => s.name === oldName || s.name === form.name)
+        const studentData = { name: form.name, gender: form.gender, origin: form.origin, role: 'student' }
+        if (sIdx !== -1) {
+          Object.assign(newClass.students[sIdx], studentData)
+        } else if (oldClassId !== newClassId) {
+          newClass.students.push(studentData)
+        }
+      }
+      // 同步 gameStore.allClassData
+      const gcdNew = gameStore.allClassData?.[newClassId]
+      if (gcdNew && form.role === 'student') {
+        if (!Array.isArray(gcdNew.students)) gcdNew.students = []
+        const gsIdx = gcdNew.students.findIndex(s => s.name === oldName || s.name === form.name)
+        const studentData = { name: form.name, gender: form.gender, origin: form.origin, role: 'student' }
+        if (gsIdx !== -1) {
+          Object.assign(gcdNew.students[gsIdx], studentData)
+        } else if (oldClassId !== newClassId) {
+          gcdNew.students.push(studentData)
+        }
       }
     }
   } else {
@@ -866,6 +915,30 @@ const handleDeleteCharacter = async (char) => {
       }
       if (Array.isArray(classInfo.teachers)) {
         classInfo.teachers = classInfo.teachers.filter(t => t.name !== char.name)
+      }
+    }
+  }
+
+  // 同时从 fullRosterSnapshot 中移除学生角色
+  if (char.role === 'student' && char.classId) {
+    const classInfo = fullRosterSnapshot.value[char.classId]
+    if (classInfo && Array.isArray(classInfo.students)) {
+      classInfo.students = classInfo.students.filter(s => s.name !== char.name)
+    }
+  }
+
+  // 同步更新 gameStore.allClassData
+  if (char.classId && gameStore.allClassData?.[char.classId]) {
+    const gcd = gameStore.allClassData[char.classId]
+    if (char.role === 'student' && Array.isArray(gcd.students)) {
+      gcd.students = gcd.students.filter(s => s.name !== char.name)
+    }
+    if (char.role === 'teacher') {
+      if (gcd.headTeacher?.name === char.name) {
+        gcd.headTeacher = { name: '', gender: 'female', origin: '', role: 'teacher' }
+      }
+      if (Array.isArray(gcd.teachers)) {
+        gcd.teachers = gcd.teachers.filter(t => t.name !== char.name)
       }
     }
   }
@@ -1531,10 +1604,15 @@ const handleSaveClub = async () => {
         members: form.members || club.members || []
       })
       // 社团编辑器是游戏外管理工具，直接更新基础条目内容
-      await batchUpdateClubsInWorldbook([club], null)
+      const updateResult = await batchUpdateClubsInWorldbook([club], null)
+      if (updateResult === false) {
+        console.warn('[handleSaveClub] batchUpdateClubsInWorldbook failed for club:', clubId)
+        showMessage('社团已更新（世界书同步失败，请检查是否已绑定主世界书）')
+      } else {
+        showMessage('社团已更新')
+      }
       await syncClubWorldbookState(gameStore.currentRunId, gameStore.settings?.useGeminiMode)
     }
-    showMessage('社团已更新')
   } else if (form.customId?.trim()) {
     // 自定义ID新建 — 直接写入 allClubs
     const clubId = form.customId.trim()
@@ -1597,7 +1675,11 @@ const handleDeleteClub = async (clubId) => {
     if (idx !== -1) gameStore.player.joinedClubs.splice(idx, 1)
   }
   // 禁用世界书条目（不删除，恢复时可重新启用）
-  await removeClubFromWorldbook(clubId)
+  const removeResult = await removeClubFromWorldbook(clubId)
+  if (removeResult === false) {
+    console.warn('[handleDeleteClub] removeClubFromWorldbook failed for club:', clubId)
+    showMessage('社团已删除（世界书同步失败，请检查是否已绑定主世界书）')
+  }
   gameStore.saveToStorage(true)
 }
 
@@ -1799,6 +1881,17 @@ const handleDeleteRelationship = async (source, target) => {
   await flushPendingSocialData()
   await syncRelationshipsToWorldbook()
   showMessage(`已删除 ${source} ↔ ${target} 的关系`)
+}
+
+const handleBatchDeleteRelationships = async (pairs) => {
+  if (!pairs || pairs.length === 0) return
+  if (!confirm(`确定批量删除 ${pairs.length} 条关系？`)) return
+  for (const { source, target } of pairs) {
+    removeRelationship(source, target)
+  }
+  await flushPendingSocialData()
+  await syncRelationshipsToWorldbook()
+  showMessage(`已批量删除 ${pairs.length} 条关系`)
 }
 
 const handleClearCharRelations = async (charName) => {
@@ -2144,6 +2237,8 @@ const handleSaveComposer = async () => {
             </div>
             <RelationshipEditorPanel
               :npc-relationships="gameStore.npcRelationships"
+              :all-class-data="gameStore.allClassData"
+              :character-pool="characterPool"
               @edit-relationship="handleEditRelationship"
               @delete-relationship="handleDeleteRelationship"
               @add-relationship="handleAddRelationship"
@@ -2152,6 +2247,7 @@ const handleSaveComposer = async () => {
               @remove-character="handleRemoveCharacter"
               @clear-ghost-references="handleClearGhostReferences"
               @clear-all-ghosts="handleClearAllGhosts"
+              @batch-delete-relationships="handleBatchDeleteRelationships"
             />
           </div>
 

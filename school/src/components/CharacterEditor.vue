@@ -26,6 +26,27 @@
             {{ work }}
           </option>
         </select>
+
+        <select v-model="genderFilter" class="filter-select">
+          <option value="">全部性别</option>
+          <option value="male">男</option>
+          <option value="female">女</option>
+        </select>
+
+        <select v-model="classFilter" class="filter-select">
+          <option value="">全部班级</option>
+          <option v-for="cls in availableClasses" :key="cls.id" :value="cls.id">
+            {{ cls.name }}
+          </option>
+        </select>
+
+        <select v-model="sortBy" class="filter-select">
+          <option value="default">默认排序</option>
+          <option value="name">按名字</option>
+          <option value="gender">按性别</option>
+          <option value="class">按班级</option>
+          <option value="origin">按作品</option>
+        </select>
       </div>
 
       <button class="btn-add" @click="$emit('add')">
@@ -96,7 +117,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 
 const props = defineProps({
   characterPool: Array,
@@ -114,6 +135,10 @@ const emit = defineEmits([
   'update:roleFilter',
   'update:workFilter'
 ])
+
+const genderFilter = ref('')
+const classFilter = ref('')
+const sortBy = ref('default')
 
 const localSearchQuery = computed({
   get: () => props.searchQuery,
@@ -160,6 +185,15 @@ const availableWorks = computed(() => {
   return Array.from(works).sort()
 })
 
+// 可用班级列表
+const availableClasses = computed(() => {
+  if (!props.classes) return []
+  return Object.entries(props.classes).map(([id, info]) => ({
+    id,
+    name: info.name || id
+  })).sort((a, b) => a.name.localeCompare(b.name, 'zh'))
+})
+
 // 过滤后的角色列表
 const filteredCharacters = computed(() => {
   let result = props.characterPool
@@ -178,6 +212,16 @@ const filteredCharacters = computed(() => {
     result = result.filter(c => getCleanOrigin(c.origin) === props.workFilter)
   }
 
+  // 性别筛选
+  if (genderFilter.value) {
+    result = result.filter(c => c.gender === genderFilter.value)
+  }
+
+  // 班级筛选
+  if (classFilter.value) {
+    result = result.filter(c => c.classId === classFilter.value)
+  }
+
   // 搜索筛选
   if (props.searchQuery) {
     const query = props.searchQuery.toLowerCase()
@@ -185,6 +229,24 @@ const filteredCharacters = computed(() => {
       c.name.toLowerCase().includes(query) ||
       (c.origin && c.origin.toLowerCase().includes(query))
     )
+  }
+
+  // 排序
+  if (sortBy.value !== 'default') {
+    result = [...result].sort((a, b) => {
+      switch (sortBy.value) {
+        case 'name':
+          return (a.name || '').localeCompare(b.name || '', 'zh')
+        case 'gender':
+          return (a.gender || '').localeCompare(b.gender || '')
+        case 'class':
+          return (a.classId || '').localeCompare(b.classId || '', 'zh')
+        case 'origin':
+          return getCleanOrigin(a.origin).localeCompare(getCleanOrigin(b.origin), 'zh')
+        default:
+          return 0
+      }
+    })
   }
 
   return result

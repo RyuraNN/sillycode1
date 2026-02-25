@@ -485,50 +485,69 @@ export const snapshotActions = {
    * @param snapshot 快照（可能是完整或增量）
    * @param chatLog 聊天日志（用于查找基准快照）
    */
-  restoreFromMessageSnapshot(this: any, snapshot: any, chatLog: ChatLogEntry[]): void {
+  async restoreFromMessageSnapshot(this: any, snapshot: any, chatLog: ChatLogEntry[]): Promise<void> {
     if (!snapshot) return
 
     // 如果是完整快照（包含 _isBase 或普通完整快照）
     if (snapshot._isBase || !isDeltaSnapshot(snapshot)) {
-      this.restoreGameState(snapshot)  // fire-and-forget: async fallback only when npcRelationships missing
-      return
-    }
-    
-    // 如果是增量快照，需要找到基准快照并应用增量
-    const baseFloor = snapshot._baseFloor
-    let baseSnapshot: GameStateData | null = null
-    
-    // 在聊天日志中查找基准快照
-    for (let i = 0; i < chatLog.length; i++) {
-      const log = chatLog[i]
-      if (log.snapshot && (log.snapshot as any)._isBase && (log.snapshot as any)._floor === baseFloor) {
-        baseSnapshot = log.snapshot as GameStateData
-        break
-      }
-    }
-    
-    if (!baseSnapshot) {
-      console.warn('[snapshotActions] Base snapshot not found for delta, trying fallback...')
+      await this.restoreGameState(snapshot)
+    } else {
+      // 如果是增量快照，需要找到基准快照并应用增量
+      const baseFloor = snapshot._baseFloor
+      let baseSnapshot: GameStateData | null = null
 
-      // 尝试在日志中寻找最近的完整快照或基准快照
-      for (let i = chatLog.length - 1; i >= 0; i--) {
+      // 在聊天日志中查找基准快照
+      for (let i = 0; i < chatLog.length; i++) {
         const log = chatLog[i]
-        // 找到任何一个基准快照或者非增量的完整快照
-        if (log.snapshot && ((log.snapshot as any)._isBase || !isDeltaSnapshot(log.snapshot))) {
-          console.log(`[snapshotActions] Found fallback snapshot at floor ${(log.snapshot as any)._floor || i}`)
+        if (log.snapshot && (log.snapshot as any)._isBase && (log.snapshot as any)._floor === baseFloor) {
           baseSnapshot = log.snapshot as GameStateData
           break
         }
       }
 
       if (!baseSnapshot) {
-        throw new Error('无法找到基准快照，无法恢复增量快照。请尝试回溯到更早的消息，或切换到完整快照模式。')
+        console.warn('[snapshotActions] Base snapshot not found for delta, trying fallback...')
+
+        // 尝试在日志中寻找最近的完整快照或基准快照
+        for (let i = chatLog.length - 1; i >= 0; i--) {
+          const log = chatLog[i]
+          // 找到任何一个基准快照或者非增量的完整快照
+          if (log.snapshot && ((log.snapshot as any)._isBase || !isDeltaSnapshot(log.snapshot))) {
+            console.log(`[snapshotActions] Found fallback snapshot at floor ${(log.snapshot as any)._floor || i}`)
+            baseSnapshot = log.snapshot as GameStateData
+            break
+          }
+        }
+
+        if (!baseSnapshot) {
+          throw new Error('无法找到基准快照，无法恢复增量快照。请尝试回溯到更早的消息，或切换到完整快照模式。')
+        }
       }
+
+      // 应用增量（此时 baseSnapshot 一定不为 null）
+      const restoredState = applyDelta(baseSnapshot!, snapshot as DeltaSnapshot)
+      await this.restoreGameState(restoredState)
     }
-    
-    // 应用增量（此时 baseSnapshot 一定不为 null）
-    const restoredState = applyDelta(baseSnapshot!, snapshot as DeltaSnapshot)
-    this.restoreGameState(restoredState)
+
+    // Post-restore: 保存关系数据到 IndexedDB，确保存档隔离
+    try {
+      const { saveNpcRelationships } = await import('../../utils/indexedDB')
+      const { clearPendingSocialData } = await import('../../utils/relationshipManager')
+      clearPendingSocialData()
+      if (this.currentRunId && this.npcRelationships) {
+        await saveNpcRelationships(
+          this.currentRunId,
+          JSON.parse(JSON.stringify(this.npcRelationships))
+        )
+      }
+    } catch (e) {
+      console.warn('[snapshotActions] Failed to save relationships after message restore:', e)
+    }
+
+    // 确保所有 NPC 都被初始化
+    if (this.initializeAllClassNpcs) {
+      this.initializeAllClassNpcs()
+    }
   },
 
   /**

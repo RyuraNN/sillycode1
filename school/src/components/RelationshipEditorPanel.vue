@@ -15,7 +15,7 @@
 
       <!-- 批量操作工具栏 -->
       <div class="batch-toolbar-left">
-        <button class="btn-batch-small" @click="$emit('clear-all-ghosts')" title="清除所有幽灵角色">
+        <button class="btn-batch-small" @click="emit('clear-all-ghosts')" title="清除所有幽灵角色">
           👻 清除所有幽灵角色
         </button>
       </div>
@@ -29,6 +29,7 @@
         >
           <span class="gender-icon">{{ char.ghost ? '👻' : (char.gender === 'male' ? '♂' : char.gender === 'female' ? '♀' : '?') }}</span>
           <span class="char-name">{{ char.name }}</span>
+          <span class="char-origin-tag" v-if="char.origin">{{ cleanOrigin(char.origin) }}</span>
           <span class="ref-badge" v-if="char.ghost">被引用 ×{{ char.refCount }}</span>
           <span class="rel-badge" v-else-if="char.relCount > 0">{{ char.relCount }}</span>
         </div>
@@ -51,10 +52,12 @@
             <span class="rel-count">{{ selectedRelations.length }} 条关系</span>
           </div>
           <div class="char-actions">
-            <button class="btn-action btn-add" @click="$emit('add-relationship', selectedChar)" title="添加关系">➕ 添加</button>
-            <button class="btn-action btn-clear" @click="$emit('clear-char-relations', selectedChar)" title="清空所有关系">🗑️ 清空关系</button>
-            <button class="btn-action btn-warn" @click="$emit('clear-char-impressions', selectedChar)" title="清除印象标签">🏷️ 清除印象</button>
-            <button class="btn-action btn-danger" @click="$emit('remove-character', selectedChar)" title="完全移除角色">⚠️ 移除角色</button>
+            <button class="btn-action btn-add" @click="emit('add-relationship', selectedChar)" title="添加关系">➕ 添加</button>
+            <button class="btn-action" :class="batchMode ? 'btn-active' : 'btn-batch'" @click="toggleBatchMode" title="批量选择">☑️ 批量</button>
+            <button v-if="batchMode && batchSelected.size > 0" class="btn-action btn-danger" @click="handleBatchDelete" title="删除选中">🗑️ 删除({{ batchSelected.size }})</button>
+            <button class="btn-action btn-clear" @click="emit('clear-char-relations', selectedChar)" title="清空所有关系">🗑️ 清空关系</button>
+            <button class="btn-action btn-warn" @click="emit('clear-char-impressions', selectedChar)" title="清除印象标签">🏷️ 清除印象</button>
+            <button class="btn-action btn-danger" @click="emit('remove-character', selectedChar)" title="完全移除角色">⚠️ 移除角色</button>
           </div>
         </div>
 
@@ -71,8 +74,11 @@
 
         <!-- 关系列表 -->
         <div class="rel-list">
-          <div v-for="rel in sortedRelations" :key="rel.target" class="rel-card">
+          <div v-for="rel in sortedRelations" :key="rel.target" class="rel-card" :class="{ 'batch-selected': batchMode && batchSelected.has(rel.target) }">
             <div class="rel-card-header">
+              <label v-if="batchMode" class="batch-checkbox" @click.stop>
+                <input type="checkbox" :checked="batchSelected.has(rel.target)" @change="toggleRelSelection(rel.target)" />
+              </label>
               <span class="rel-target-name">{{ rel.target }}</span>
               <div class="rel-groups">
                 <span
@@ -83,8 +89,8 @@
                 >{{ getGroupName(g) }}</span>
               </div>
               <div class="rel-card-actions">
-                <button class="btn-sm btn-edit" @click="$emit('edit-relationship', selectedChar, rel.target)">✏️</button>
-                <button class="btn-sm btn-del" @click="$emit('delete-relationship', selectedChar, rel.target)">🗑️</button>
+                <button class="btn-sm btn-edit" @click="emit('edit-relationship', selectedChar, rel.target)">✏️</button>
+                <button class="btn-sm btn-del" @click="emit('delete-relationship', selectedChar, rel.target)">🗑️</button>
               </div>
             </div>
 
@@ -168,7 +174,7 @@
             <span class="rel-count ghost-hint">幽灵角色</span>
           </div>
           <div class="char-actions">
-            <button class="btn-action btn-danger" @click="$emit('clear-ghost-references', selectedChar)">🗑️ 清除所有引用</button>
+            <button class="btn-action btn-danger" @click="emit('clear-ghost-references', selectedChar)">🗑️ 清除所有引用</button>
           </div>
         </div>
         <div class="ghost-notice">
@@ -221,13 +227,15 @@ import { ref, computed } from 'vue'
 import { RELATIONSHIP_GROUPS } from '../data/relationshipData'
 
 const props = defineProps({
-  npcRelationships: { type: Object, default: () => ({}) }
+  npcRelationships: { type: Object, default: () => ({}) },
+  allClassData: { type: Object, default: () => ({}) },
+  characterPool: { type: Array, default: () => [] }
 })
 
-defineEmits([
+const emit = defineEmits([
   'edit-relationship', 'delete-relationship', 'add-relationship',
   'clear-char-relations', 'clear-char-impressions', 'remove-character',
-  'clear-ghost-references', 'clear-all-ghosts'
+  'clear-ghost-references', 'clear-all-ghosts', 'batch-delete-relationships'
 ])
 
 const searchQuery = ref('')
@@ -236,6 +244,8 @@ const selectedChar = ref('')
 const relSearchQuery = ref('')
 const relSortBy = ref('name')
 const showReverse = ref(false)
+const batchMode = ref(false)
+const batchSelected = ref(new Set())
 
 const axisNames = { intimacy: '亲密', trust: '信赖', passion: '激情', hostility: '敌意' }
 
@@ -243,6 +253,28 @@ const axisNames = { intimacy: '亲密', trust: '信赖', passion: '激情', host
 const allCharacters = computed(() => {
   const rels = props.npcRelationships || {}
   const topKeys = new Set(Object.keys(rels))
+
+  // 构建 name -> origin 映射
+  const originMap = {}
+  // 从 characterPool 获取
+  if (props.characterPool) {
+    for (const c of props.characterPool) {
+      if (c.name && c.origin) originMap[c.name] = c.origin
+    }
+  }
+  // 从 allClassData 补充
+  if (props.allClassData) {
+    for (const classInfo of Object.values(props.allClassData)) {
+      const persons = [
+        ...(classInfo.headTeacher ? [classInfo.headTeacher] : []),
+        ...(classInfo.teachers || []),
+        ...(classInfo.students || [])
+      ]
+      for (const p of persons) {
+        if (p.name && p.origin && !originMap[p.name]) originMap[p.name] = p.origin
+      }
+    }
+  }
 
   // 收集幽灵角色：只作为关系目标存在，自身无顶层条目
   const ghostRefCount = {}
@@ -257,6 +289,7 @@ const allCharacters = computed(() => {
   const normal = Object.keys(rels).map(name => ({
     name,
     gender: rels[name]?.gender || 'unknown',
+    origin: originMap[name] || '',
     relCount: Object.keys(rels[name]?.relations || {}).length,
     ghost: false,
     refCount: 0
@@ -265,6 +298,7 @@ const allCharacters = computed(() => {
   const ghosts = Object.entries(ghostRefCount).map(([name, count]) => ({
     name,
     gender: 'unknown',
+    origin: originMap[name] || '',
     relCount: 0,
     ghost: true,
     refCount: count
@@ -371,6 +405,35 @@ function getBarStyle(axisKey, val) {
   if (val >= 0) return { left: '50%', width: pct + '%' }
   return { right: '50%', width: pct + '%' }
 }
+
+function cleanOrigin(origin) {
+  if (!origin) return ''
+  const match = origin.match(/^[\(（\[【](.+?)[\)）\]】]$/)
+  return match ? match[1] : origin
+}
+
+function toggleBatchMode() {
+  batchMode.value = !batchMode.value
+  if (!batchMode.value) batchSelected.value = new Set()
+}
+
+function toggleRelSelection(target) {
+  const s = new Set(batchSelected.value)
+  if (s.has(target)) s.delete(target)
+  else s.add(target)
+  batchSelected.value = s
+}
+
+function handleBatchDelete() {
+  if (batchSelected.value.size === 0) return
+  const pairs = Array.from(batchSelected.value).map(target => ({
+    source: selectedChar.value,
+    target
+  }))
+  emit('batch-delete-relationships', pairs)
+  batchSelected.value = new Set()
+  batchMode.value = false
+}
 </script>
 
 <style scoped>
@@ -403,6 +466,7 @@ function getBarStyle(axisKey, val) {
 .gender-icon { font-size: 14px; width: 18px; text-align: center; }
 .gender-icon.large { font-size: 22px; width: 28px; }
 .char-card .char-name { flex: 1; color: #ddd; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.char-origin-tag { font-size: 11px; color: #888; background: #2a2a2a; padding: 1px 5px; border-radius: 3px; white-space: nowrap; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
 .rel-badge {
   background: #4CAF50; color: #fff; font-size: 11px; padding: 1px 6px;
   border-radius: 10px; min-width: 18px; text-align: center;
@@ -435,6 +499,11 @@ function getBarStyle(axisKey, val) {
 .btn-warn:hover { background: #3a3a2a; color: #FF9800; }
 .btn-danger { border-color: #d32f2f; }
 .btn-danger:hover { background: #3a1a1a; color: #F44336; }
+.btn-active { border-color: #6366f1; background: #2a2a4a; color: #818cf8; }
+.btn-batch { border-color: #666; }
+.batch-checkbox { display: flex; align-items: center; margin-right: 4px; }
+.batch-checkbox input { width: 16px; height: 16px; cursor: pointer; accent-color: #6366f1; }
+.rel-card.batch-selected { border-color: #6366f1; background: rgba(99, 102, 241, 0.08); }
 /* 批量操作工具栏 */
 .batch-toolbar {
   padding: 8px 16px; border-bottom: 1px solid #333; flex-shrink: 0;

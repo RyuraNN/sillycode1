@@ -19,10 +19,26 @@
                 <span class="char-name target">{{ localForm.targetName || targetName }}</span>
               </template>
               <template v-else>
-                <select v-model="localForm.targetName" class="target-select">
-                  <option value="">选择目标角色...</option>
-                  <option v-for="name in availableCharacters" :key="name" :value="name">{{ name }}</option>
-                </select>
+                <div class="searchable-select" v-click-outside="closeDropdown">
+                  <input
+                    v-model="targetSearch"
+                    placeholder="搜索角色名..."
+                    class="target-search-input"
+                    @focus="showDropdown = true"
+                    @input="showDropdown = true"
+                  />
+                  <div v-if="showDropdown && filteredTargets.length > 0" class="dropdown-list">
+                    <div
+                      v-for="name in filteredTargets"
+                      :key="name"
+                      class="dropdown-item"
+                      @mousedown.prevent="selectTarget(name)"
+                    >{{ name }}</div>
+                  </div>
+                  <div v-if="showDropdown && targetSearch && filteredTargets.length === 0" class="dropdown-list">
+                    <div class="dropdown-empty">无匹配角色</div>
+                  </div>
+                </div>
               </template>
             </div>
           </div>
@@ -119,6 +135,37 @@ const emit = defineEmits(['close', 'save', 'update:form'])
 
 const axes = RELATIONSHIP_AXES
 const newTag = ref('')
+const targetSearch = ref('')
+const showDropdown = ref(false)
+
+const filteredTargets = computed(() => {
+  const q = targetSearch.value.toLowerCase()
+  if (!q) return props.availableCharacters
+  return props.availableCharacters.filter(name => name.toLowerCase().includes(q))
+})
+
+function selectTarget(name) {
+  localForm.value.targetName = name
+  targetSearch.value = name
+  showDropdown.value = false
+}
+
+function closeDropdown() {
+  showDropdown.value = false
+}
+
+// v-click-outside 自定义指令
+const vClickOutside = {
+  mounted(el, binding) {
+    el._clickOutside = (e) => {
+      if (!el.contains(e.target)) binding.value()
+    }
+    document.addEventListener('mousedown', el._clickOutside)
+  },
+  unmounted(el) {
+    document.removeEventListener('mousedown', el._clickOutside)
+  }
+}
 
 const localForm = ref({
   targetName: '',
@@ -138,6 +185,8 @@ watch(() => props.show, (val) => {
       tags: [...(props.form.tags || [])]
     }
     newTag.value = ''
+    targetSearch.value = props.targetName || ''
+    showDropdown.value = false
   }
 })
 
@@ -282,6 +331,54 @@ function handleSave() {
   border-radius: 6px; cursor: pointer; font-size: 14px;
 }
 .btn-cancel:hover { background: #555; }
+
+/* 可搜索下拉框 */
+.searchable-select {
+  position: relative;
+  flex: 1;
+}
+.target-search-input {
+  width: 100%;
+  padding: 8px 12px;
+  background: #1a1a1a;
+  border: 1px solid #555;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+.target-search-input:focus {
+  border-color: #6366f1;
+  outline: none;
+}
+.dropdown-list {
+  position: absolute;
+  top: 100%;
+  left: 0; right: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  background: #1a1a1a;
+  border: 1px solid #555;
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  z-index: 10;
+}
+.dropdown-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  color: #ddd;
+  font-size: 13px;
+}
+.dropdown-item:hover {
+  background: #333;
+  color: #fff;
+}
+.dropdown-empty {
+  padding: 8px 12px;
+  color: #888;
+  font-size: 13px;
+  text-align: center;
+}
 
 @media (max-width: 768px) {
   .rel-edit-modal {

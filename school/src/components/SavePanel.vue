@@ -36,6 +36,11 @@ const showChatPreview = ref(false)
 const previewSnapshot = ref(null)
 const loadingPreview = ref(false)
 
+// 读档进度
+const restoreProgress = ref(0)
+const restoreStep = ref('')
+const isRestoring = ref(false)
+
 // 获取存档列表（按时间倒序）
 const snapshots = computed(() => {
   return [...gameStore.saveSnapshots].sort((a, b) => b.timestamp - a.timestamp)
@@ -134,46 +139,72 @@ const handleSnapshotClick = async (snapshot) => {
 const restoreToChatIndex = async (index) => {
   if (!previewSnapshot.value) return
 
-  // 1. 恢复存档
-  const snapshot = await gameStore.restoreSnapshot(previewSnapshot.value.id)
-  if (!snapshot) return
+  isRestoring.value = true
+  restoreProgress.value = 0
+  restoreStep.value = '加载存档数据...'
 
-  // 2. 获取目标聊天记录
-  const targetLog = snapshot.chatLog[index]
-  
-  // 3. 如果目标记录有快照，直接使用；否则向前查找最近一条有快照的消息
-  let snapshotToRestore = null
-  for (let i = index; i >= 0; i--) {
-    if (snapshot.chatLog[i] && snapshot.chatLog[i].snapshot) {
-      snapshotToRestore = snapshot.chatLog[i].snapshot
-      break
+  try {
+    // 1. 恢复存档
+    restoreProgress.value = 20
+    const snapshot = await gameStore.restoreSnapshot(previewSnapshot.value.id)
+    if (!snapshot) {
+      isRestoring.value = false
+      return
     }
+
+    // 2. 查找快照
+    restoreStep.value = '查找回溯点...'
+    restoreProgress.value = 40
+    let snapshotToRestore = null
+    for (let i = index; i >= 0; i--) {
+      if (snapshot.chatLog[i] && snapshot.chatLog[i].snapshot) {
+        snapshotToRestore = snapshot.chatLog[i].snapshot
+        break
+      }
+    }
+
+    // 3. 恢复游戏状态
+    restoreStep.value = '恢复游戏状态...'
+    restoreProgress.value = 60
+    if (snapshotToRestore) {
+      await gameStore.restoreFromMessageSnapshot(snapshotToRestore, snapshot.chatLog)
+    } else {
+      console.warn('未找到任何可用快照，使用存档最终状态')
+    }
+
+    // 4. 同步世界书
+    restoreStep.value = '同步世界书...'
+    restoreProgress.value = 80
+    await gameStore.syncWorldbook()
+
+    restoreStep.value = '完成'
+    restoreProgress.value = 100
+
+    // 5. 截断聊天记录
+    const restoredSnapshot = {
+      ...snapshot,
+      chatLog: snapshot.chatLog.slice(0, index + 1)
+    }
+
+    // 6. 更新 currentFloor 为截断后的长度，并持久化
+    gameStore.currentFloor = index + 1
+    gameStore.saveToStorage(true)
+
+    emit('restore', restoredSnapshot)
+
+    // 关闭所有面板
+    showChatPreview.value = false
+    emit('close')
+  } catch (e) {
+    console.error('回溯失败:', e)
+    restoreStep.value = '回溯失败'
+  } finally {
+    setTimeout(() => {
+      isRestoring.value = false
+      restoreProgress.value = 0
+      restoreStep.value = ''
+    }, 500)
   }
-  if (snapshotToRestore) {
-    gameStore.restoreFromMessageSnapshot(snapshotToRestore, snapshot.chatLog)
-  } else {
-    console.warn('未找到任何可用快照，使用存档最终状态')
-  }
-
-  // 修复：回溯后强制同步世界书，以清除未来的记录
-  await gameStore.syncWorldbook()
-
-  // 4. 截断聊天记录
-  // 创建副本以避免修改 store 中的存档
-  const restoredSnapshot = {
-    ...snapshot,
-    chatLog: snapshot.chatLog.slice(0, index + 1)
-  }
-
-  // 5. 更新 currentFloor 为截断后的长度，并持久化
-  gameStore.currentFloor = index + 1
-  gameStore.saveToStorage(true)
-
-  emit('restore', restoredSnapshot)
-  
-  // 关闭所有面板
-  showChatPreview.value = false
-  emit('close')
 }
 
 // 关闭预览
@@ -326,6 +357,17 @@ const closeDebugImportPanel = () => {
                 <span class="has-snapshot">✓ 可回溯</span>
               </div>
             </div>
+          </div>
+        </div>
+        <!-- 读档进度遮罩 -->
+        <div v-if="isRestoring" class="restore-overlay">
+          <div class="restore-progress-box">
+            <div class="restore-spinner"></div>
+            <div class="restore-step">{{ restoreStep }}</div>
+            <div class="restore-bar-track">
+              <div class="restore-bar-fill" :style="{ width: restoreProgress + '%' }"></div>
+            </div>
+            <div class="restore-percent">{{ restoreProgress }}%</div>
           </div>
         </div>
       </div>
@@ -1500,5 +1542,64 @@ const closeDebugImportPanel = () => {
   .debug-actions {
     flex-direction: column;
   }
+}
+
+/* 读档进度遮罩 */
+.restore-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  backdrop-filter: blur(4px);
+}
+
+.restore-progress-box {
+  text-align: center;
+  padding: 30px 40px;
+  background: rgba(30, 30, 50, 0.95);
+  border-radius: 12px;
+  border: 1px solid rgba(100, 100, 255, 0.3);
+  min-width: 260px;
+}
+
+.restore-spinner {
+  width: 36px; height: 36px;
+  border: 3px solid rgba(255,255,255,0.15);
+  border-top-color: #6366f1;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin: 0 auto 16px;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.restore-step {
+  color: #e0e7ff;
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+
+.restore-bar-track {
+  width: 100%;
+  height: 6px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.restore-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #818cf8);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.restore-percent {
+  color: #94a3b8;
+  font-size: 12px;
+  margin-top: 8px;
 }
 </style>

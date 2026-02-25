@@ -16,7 +16,7 @@
 import { ELECTIVE_PREFERENCES } from '../data/coursePoolData'
 import { DEFAULT_TEMPLATES } from './npcScheduleSystem'
 import { parseAcademicTag } from '../data/academicData'
-import { getAllBookNames, getCurrentBookName } from './worldbookHelper'
+import { getAllBookNames, getPrimaryBookName } from './worldbookHelper'
 
 // ==================== 社团数据格式规范 ====================
 /**
@@ -178,7 +178,7 @@ export async function updateAcademicDataInWorldbook(allStudents) {
   }
 
   try {
-    const bookName = getCurrentBookName()
+    const bookName = getPrimaryBookName()
 
     if (!bookName) return false
 
@@ -254,7 +254,7 @@ export async function updateTagDataInWorldbook(allClassData) {
   if (typeof window.updateWorldbookWith !== 'function') return false
 
   try {
-    const bookName = getCurrentBookName()
+    const bookName = getPrimaryBookName()
     if (!bookName) return false
 
     let content = '# 格式: 姓名|选课偏好|日程模板\n'
@@ -624,7 +624,7 @@ export async function createClubInWorldbook(clubInfo, runId) {
   }
 
   try {
-    const bookName = getCurrentBookName()
+    const bookName = getPrimaryBookName()
     console.log(`[WorldbookParser] Available worldbook:`, bookName)
 
     if (!bookName) {
@@ -724,7 +724,7 @@ export async function batchUpdateClubsInWorldbook(clubs, runId) {
   }
 
   try {
-    const bookName = getCurrentBookName()
+    const bookName = getPrimaryBookName()
     if (!bookName) {
       console.warn('[WorldbookParser] No worldbook available for batch club update')
       return false
@@ -920,7 +920,7 @@ export async function ensureClubExistsInWorldbook(clubData, runId, useGeminiMode
   }
 
   try {
-    const bookName = getCurrentBookName()
+    const bookName = getPrimaryBookName()
 
     if (!bookName) return false
 
@@ -1481,7 +1481,7 @@ export async function deleteClassDataFromWorldbook(classId) {
   }
 
   try {
-    const bookName = getCurrentBookName()
+    const bookName = getPrimaryBookName()
 
     if (!bookName) return false
 
@@ -1522,7 +1522,7 @@ export async function updateClassDataInWorldbook(classId, classData, excludeAcad
   }
 
   try {
-    const bookName = getCurrentBookName()
+    const bookName = getPrimaryBookName()
 
     if (!bookName) return false
 
@@ -1973,7 +1973,7 @@ export async function updateCompactMapEntry() {
     })
 
     // 4. 创建或更新世界书条目
-    const bookName = getCurrentBookName()
+    const bookName = getPrimaryBookName()
 
     if (!bookName) return
 
@@ -2288,7 +2288,7 @@ export async function setupTeacherClassEntries(teachingClasses, homeroomClassIds
   }
 
   try {
-    const bookName = getCurrentBookName()
+    const bookName = getPrimaryBookName()
     if (!bookName) return false
 
     console.log(`[WorldbookParser] Setting up teacher class entries for run ${runId}`)
@@ -2538,7 +2538,7 @@ export async function createRunSpecificClassEntry(classId, classData, runId, pla
   }
 
   try {
-    const bookName = getCurrentBookName()
+    const bookName = getPrimaryBookName()
     if (!bookName) return false
 
     console.log(`[WorldbookParser] Creating run-specific class entry [Class:${classId}:${runId}]`)
@@ -2722,7 +2722,7 @@ export async function updateStaffRosterInWorldbook(staffList, runId) {
   }
 
   try {
-    const bookName = getCurrentBookName()
+    const bookName = getPrimaryBookName()
 
     if (!bookName) return false
 
