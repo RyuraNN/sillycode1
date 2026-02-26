@@ -474,4 +474,48 @@ const pendingCount = computed(() => {
   background: #1a1a1a;
   border-radius: 4px;
 }
+
+/* 窄屏适配 */
+@media (max-width: 768px) {
+  .editor-toolbar {
+    padding: 10px;
+    gap: 8px;
+  }
+
+  .search-box {
+    min-width: 100%;
+    order: -1;
+  }
+
+  .filter-group {
+    flex-wrap: wrap;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .filter-select {
+    flex: 1;
+    min-width: calc(50% - 4px);
+    padding: 8px;
+    font-size: 13px;
+  }
+
+  .btn-add {
+    width: 100%;
+    padding: 10px;
+  }
+
+  .character-list {
+    padding: 10px;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .editor-stats {
+    padding: 10px;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 12px;
+  }
+}
 </style>

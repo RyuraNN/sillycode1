@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
+import { getEditionShortLabel, GAME_VERSION } from '../utils/editionDetector'
 
 const props = defineProps({
   mode: {
@@ -82,9 +83,24 @@ const createSave = () => {
 
 // 加载存档
 const loadSave = async (snapshotId) => {
-  const snapshot = await gameStore.restoreSnapshot(snapshotId)
-  if (snapshot) {
-    emit('restore', snapshot)
+  const result = await gameStore.restoreSnapshot(snapshotId)
+  if (result && result.mismatch) {
+    const snapshotLabel = getEditionShortLabel(result.snapshotEdition) || result.snapshotEdition
+    const currentLabel = getEditionShortLabel(result.currentEdition) || result.currentEdition
+    const confirmed = confirm(
+      `此存档为「${snapshotLabel}」版，当前绑定「${currentLabel}」版世界书，强行加载可能导致数据异常。\n\n是否继续？`
+    )
+    if (confirmed) {
+      const snapshot = await gameStore.restoreSnapshot(snapshotId, true)
+      if (snapshot) {
+        emit('restore', snapshot)
+        emit('close')
+      }
+    }
+    return
+  }
+  if (result) {
+    emit('restore', result)
     emit('close')
   }
 }
@@ -146,10 +162,28 @@ const restoreToChatIndex = async (index) => {
   try {
     // 1. 恢复存档
     restoreProgress.value = 20
-    const snapshot = await gameStore.restoreSnapshot(previewSnapshot.value.id)
-    if (!snapshot) {
+    let snapshot = null
+    const result = await gameStore.restoreSnapshot(previewSnapshot.value.id)
+    if (result && result.mismatch) {
+      const snapshotLabel = getEditionShortLabel(result.snapshotEdition) || result.snapshotEdition
+      const currentLabel = getEditionShortLabel(result.currentEdition) || result.currentEdition
+      const confirmed = confirm(
+        `此存档为「${snapshotLabel}」版，当前绑定「${currentLabel}」版世界书，强行加载可能导致数据异常。\n\n是否继续？`
+      )
+      if (!confirmed) {
+        isRestoring.value = false
+        return
+      }
+      snapshot = await gameStore.restoreSnapshot(previewSnapshot.value.id, true)
+      if (!snapshot) {
+        isRestoring.value = false
+        return
+      }
+    } else if (!result) {
       isRestoring.value = false
       return
+    } else {
+      snapshot = result
     }
 
     // 2. 查找快照
@@ -512,6 +546,11 @@ const closeDebugImportPanel = () => {
                   <span class="info-value">第 {{ snapshot.messageIndex + 1 }} 条</span>
                 </div>
               </div>
+
+              <!-- 版本标识 -->
+              <div v-if="snapshot.cardEdition && getEditionShortLabel(snapshot.cardEdition)" class="snapshot-version-badge">
+                {{ getEditionShortLabel(snapshot.cardEdition) }} · {{ snapshot.gameVersion || '?' }}
+              </div>
             </div>
 
             <!-- 操作按钮 -->
@@ -770,6 +809,17 @@ const closeDebugImportPanel = () => {
 .snapshot-main {
   flex: 1;
   min-width: 0;
+  position: relative;
+}
+
+.snapshot-version-badge {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  font-size: 11px;
+  color: #a08060;
+  opacity: 0.7;
+  white-space: nowrap;
 }
 
 .snapshot-label {
@@ -1187,6 +1237,10 @@ const closeDebugImportPanel = () => {
   background: linear-gradient(135deg, rgba(30, 30, 50, 0.95) 0%, rgba(40, 40, 70, 0.95) 100%);
   border-color: rgba(99, 102, 241, 0.15);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.dark-mode .snapshot-version-badge {
+  color: #8a9bb0;
 }
 
 .dark-mode .snapshot-item.clickable:hover {

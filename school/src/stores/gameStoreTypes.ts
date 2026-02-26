@@ -31,6 +31,8 @@ export interface SaveSnapshot {
     minute: number
   }
   location?: string
+  cardEdition?: string    // 'elyrene' | 'original' | 'unknown'
+  gameVersion?: string    // e.g. 'V2.4EX'
 }
 
 /** 纯游戏状态数据（不含快照，用于存档） */

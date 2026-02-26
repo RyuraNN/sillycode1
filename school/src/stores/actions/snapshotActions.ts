@@ -14,6 +14,7 @@ import {
   createLightSnapshot,
   type DeltaSnapshot
 } from '../../utils/snapshotUtils'
+import { detectCardEdition, GAME_VERSION } from '../../utils/editionDetector'
 
 /**
  * 精简 chatLog 拷贝，移除冗余字段
@@ -102,7 +103,9 @@ export const snapshotActions = {
         hour: this.gameTime.hour,
         minute: this.gameTime.minute
       },
-      location: this.player.location
+      location: this.player.location,
+      cardEdition: detectCardEdition(),
+      gameVersion: GAME_VERSION
     }
 
     this.saveSnapshots.push(snapshot)
@@ -165,7 +168,9 @@ export const snapshotActions = {
           hour: this.gameTime.hour,
           minute: this.gameTime.minute
         },
-        location: this.player.location
+        location: this.player.location,
+        cardEdition: detectCardEdition(),
+        gameVersion: GAME_VERSION
       }
 
       const existingIndex = this.saveSnapshots.findIndex((s: SaveSnapshot) => s.id === autoSaveId)
@@ -223,9 +228,17 @@ export const snapshotActions = {
   /**
    * 恢复存档快照
    */
-  async restoreSnapshot(this: any, snapshotId: string): Promise<SaveSnapshot | null> {
+  async restoreSnapshot(this: any, snapshotId: string, force?: boolean): Promise<SaveSnapshot | null | { mismatch: true, snapshotEdition: string, currentEdition: string }> {
     const snapshotMeta = this.saveSnapshots.find((s: SaveSnapshot) => s.id === snapshotId)
     if (!snapshotMeta) return null
+
+    // 版本不匹配检查
+    if (!force && snapshotMeta.cardEdition && snapshotMeta.cardEdition !== 'unknown') {
+      const currentEdition = detectCardEdition()
+      if (currentEdition !== 'unknown' && currentEdition !== snapshotMeta.cardEdition) {
+        return { mismatch: true, snapshotEdition: snapshotMeta.cardEdition, currentEdition }
+      }
+    }
 
     let fullSnapshot = snapshotMeta
     if (!snapshotMeta.gameState) {

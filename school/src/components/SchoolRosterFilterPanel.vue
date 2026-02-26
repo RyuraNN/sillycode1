@@ -2599,7 +2599,9 @@ const handleSaveComposer = async () => {
   }
 
   .panel-header {
-    padding: 15px;
+    padding: 12px 15px;
+    flex-wrap: wrap;
+    gap: 8px;
   }
 
   .panel-header h2 {
@@ -2608,22 +2610,48 @@ const handleSaveComposer = async () => {
 
   .header-actions {
     gap: 5px;
+    flex-wrap: wrap;
   }
 
   .header-actions button {
-    padding: 8px 12px;
-    font-size: 13px;
+    padding: 6px 10px;
+    font-size: 12px;
   }
 
   .tab-navigation {
-    padding: 0 10px;
+    padding: 0;
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .tab-navigation::-webkit-scrollbar {
+    display: none;
   }
 
   .tab-navigation button {
-    padding: 12px 15px;
-    font-size: 14px;
+    padding: 10px 14px;
+    font-size: 13px;
     white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .filter-sub-tabs {
+    padding: 0 10px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .filter-sub-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .filter-sub-tabs button {
+    padding: 8px 14px;
+    font-size: 13px;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
 }
 

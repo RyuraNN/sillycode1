@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { fetchModels, IMAGE_ANALYSIS_PROMPT } from '../utils/assistantAI'
 import { DEFAULT_INSTRUCTIONS_PROMPT, DEFAULT_STYLE_PROMPT, DEFAULT_CORE_RULES_PROMPT, DEFAULT_BANNED_WORDS_PROMPT } from '../utils/prompts'
+import { GAME_VERSION } from '../utils/editionDetector'
 
 defineEmits(['back'])
 
@@ -841,7 +842,7 @@ const loadRerankModels = async () => {
           <div class="card-body credits-body">
             <p>原作者：墨沈</p>
             <p @click="handleCreditsClick" style="cursor: pointer; user-select: none;">重制：Elyrene</p>
-            <p>版本号 V2.4EX</p>
+            <p>版本号 {{ GAME_VERSION }}</p>
             <p>免费发布于DC类脑社区</p>
           </div>
         </div>

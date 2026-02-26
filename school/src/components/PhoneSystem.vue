@@ -6,6 +6,7 @@ import { generateBatchSummaries, generateBatchDiaries } from '../utils/summaryMa
 import { batchEmbedSummaries } from '../utils/ragService'
 import { setVariableParsingWorldbookStatus } from '../utils/worldbookParser'
 import { setItem, getItem, removeItem } from '../utils/indexedDB'
+import { GAME_VERSION } from '../utils/editionDetector'
 import SocialApp from './SocialApp.vue'
 import SummaryViewer from './SummaryViewer.vue'
 import MemoryGraph from './MemoryGraph.vue'
@@ -945,7 +946,7 @@ const handleHomeClick = () => {
                       <div class="credits-body">
                         <p>原作者：墨沈</p>
                         <p>重制：Elyrene</p>
-                        <p>版本号 V2.4EX</p>
+                        <p>版本号 {{ GAME_VERSION }}</p>
                         <p>免费发布于DC类脑社区</p>
                       </div>
                     </div>

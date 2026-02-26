@@ -512,4 +512,71 @@ const getElectiveLabel = (pref) => {
 .roster-list::-webkit-scrollbar-thumb:hover {
   background: #555;
 }
+
+/* 窄屏适配 */
+@media (max-width: 768px) {
+  .filter-toolbar {
+    padding: 8px;
+  }
+
+  .search-box {
+    min-width: 120px;
+  }
+
+  .btn-filters,
+  .btn-expand-all {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .advanced-filters {
+    padding: 8px;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .filter-row label {
+    min-width: 55px;
+    font-size: 12px;
+  }
+
+  .filter-row select {
+    font-size: 12px;
+  }
+
+  .stats-bar {
+    padding: 8px;
+    gap: 6px;
+    font-size: 12px;
+  }
+
+  .roster-list {
+    padding: 8px;
+  }
+
+  .student-item {
+    grid-template-columns: auto 1fr;
+    gap: 4px 8px;
+    padding: 8px;
+  }
+
+  .student-class {
+    grid-column: 2;
+    grid-row: auto;
+    justify-self: start;
+  }
+
+  .student-meta {
+    grid-column: 1 / -1;
+  }
+
+  .work-header {
+    padding: 8px 10px;
+    gap: 6px;
+  }
+
+  .work-students {
+    padding-left: 6px;
+  }
+}
 </style>

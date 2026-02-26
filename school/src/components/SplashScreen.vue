@@ -1,4 +1,8 @@
 <script setup>
+import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { detectCardEdition, getEditionLabel, GAME_VERSION } from '../utils/editionDetector'
+import { isBlacklistedDomain } from '../utils/domainBlacklist'
+
 defineProps({
   loadResults: {
     type: Object,
@@ -7,6 +11,30 @@ defineProps({
 })
 
 const emit = defineEmits(['enter'])
+
+const cardEdition = computed(() => detectCardEdition())
+const editionLabel = computed(() => getEditionLabel(cardEdition.value))
+
+const isBlacklisted = ref(false)
+const countdown = ref(15)
+let countdownTimer = null
+
+onMounted(() => {
+  if (isBlacklistedDomain()) {
+    isBlacklisted.value = true
+    countdownTimer = setInterval(() => {
+      countdown.value--
+      if (countdown.value <= 0) {
+        clearInterval(countdownTimer)
+        countdownTimer = null
+      }
+    }, 1000)
+  }
+})
+
+onUnmounted(() => {
+  if (countdownTimer) clearInterval(countdownTimer)
+})
 
 const dataModules = [
   { key: 'classData', icon: '🏫', label: '班级数据' },
@@ -30,15 +58,15 @@ function getStatusIcon(val) {
 const announcements = [
   {
     icon: '🤖',
-    html: 'RAG 记忆系统的 API 请填写<b>嵌入/重排序模型</b>，不要填聊天模型。<a href="https://docs.sillytavern.app/usage/core-concepts/worldinfo/" target="_blank" rel="noopener">向量教程</a>'
+    html: 'RAG 记忆系统的 API 请填写<b>嵌入/重排序模型</b>，不要填聊天模型。<a href="https://docs.google.com/document/d/1P-NINc-hnFGgDH8W2yCqB7-w_rpmOEFhkyQE-J7Bj8M/edit?usp=sharing" target="_blank" rel="noopener">向量教程</a>'
   },
   {
     icon: '⚙️',
-    text: '请关闭 SillyTavern 的「预设文风」和「小总结/概要」系统，避免与游戏系统冲突。'
+    text: '请关闭预设中的「文风」和「小总结/概要」避免与游戏系统冲突。'
   },
   {
     icon: '💎',
-    text: 'Gemini 用户：如使用 3.0 Preview，请在设置中开启「Gemini 模式」以获得最佳体验。'
+    text: 'Gemini 用户：如使用 Gemini 3.0 Pro Preview，请在主菜单中开启「Gemini 3.0 Preview 模式」以获得最佳体验。'
   },
   {
     icon: '🖼️',
@@ -46,15 +74,11 @@ const announcements = [
   },
   {
     icon: '📖',
-    text: '两张卡（学生卡/教师卡）的世界书存在差异，请勿混用存档。'
-  },
-  {
-    icon: '⚔️',
-    text: 'PVP 助力系统已上线，可在社交面板中发起。'
+    text: '两张卡（雪乃卡/唯卡）的世界书存在差异，请勿混用存档。'
   },
   {
     icon: '🆓',
-    text: '本项目免费发布于 DC 类脑社区，请勿为此付费。'
+    text: '本项目免费发布于 DC 类脑社区，请不要为此角色卡付费。'
   },
 ]
 </script>
@@ -62,8 +86,14 @@ const announcements = [
 <template>
   <div class="splash-overlay">
     <div class="splash-panel">
-      <h1 class="splash-title">📜 校园模拟器</h1>
+      <div v-if="isBlacklisted" class="blacklist-warning">
+        ⚠️ 本项目免费发布于 DC 类脑社区，请不要为此角色卡和昂贵的API付费，大型集群和官方渠道以外第三方API可能会出现大大小小的奇怪问题。如果你为此付了费，你很有可能上当了。
+      </div>
+      <h1 class="splash-title">📜 天华校园RE</h1>
       <p class="splash-subtitle">世界书数据加载状态</p>
+      <p class="splash-version" :class="{ 'version-unknown': cardEdition === 'unknown' }">
+        {{ editionLabel }} · {{ GAME_VERSION }}
+      </p>
 
       <div class="status-grid">
         <div
@@ -89,8 +119,17 @@ const announcements = [
         </ul>
       </div>
 
-      <button class="enter-btn" @click="emit('enter')">
-        🎮 进入游戏
+      <button
+        class="enter-btn"
+        :disabled="isBlacklisted && countdown > 0"
+        @click="emit('enter')"
+      >
+        <template v-if="isBlacklisted && countdown > 0">
+          ⏳ 请阅读上方警告（{{ countdown }}秒）
+        </template>
+        <template v-else>
+          🎮 进入游戏
+        </template>
       </button>
     </div>
   </div>
@@ -133,7 +172,19 @@ const announcements = [
   text-align: center;
   font-size: 14px;
   color: #8a7050;
+  margin: 0 0 4px;
+}
+
+.splash-version {
+  text-align: center;
+  font-size: 13px;
+  color: #8b4513;
   margin: 0 0 20px;
+  font-weight: 500;
+}
+
+.splash-version.version-unknown {
+  color: #999;
 }
 
 .status-grid {
@@ -244,6 +295,36 @@ const announcements = [
   transform: translateY(0);
 }
 
+.enter-btn:disabled {
+  background: #999;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.enter-btn:disabled:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.blacklist-warning {
+  background: #dc3545;
+  color: #fff;
+  padding: 14px 18px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.6;
+  text-align: center;
+  margin-bottom: 16px;
+  animation: warning-pulse 2s ease-in-out infinite;
+}
+
+@keyframes warning-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.4); }
+  50% { box-shadow: 0 0 16px 4px rgba(220, 53, 69, 0.6); }
+}
+
 /* 暗色模式 */
 body.dark-mode .splash-overlay {
   background: rgba(10, 14, 22, 0.9);
@@ -263,6 +344,14 @@ body.dark-mode .announcements-title {
 
 body.dark-mode .splash-subtitle {
   color: #8a9bb0;
+}
+
+body.dark-mode .splash-version {
+  color: #7ab8f5;
+}
+
+body.dark-mode .splash-version.version-unknown {
+  color: #6a7585;
 }
 
 body.dark-mode .status-item {
@@ -292,6 +381,15 @@ body.dark-mode .enter-btn {
 
 body.dark-mode .enter-btn:hover {
   box-shadow: 0 6px 16px rgba(93, 164, 232, 0.4);
+}
+
+body.dark-mode .enter-btn:disabled {
+  background: #555;
+  box-shadow: none;
+}
+
+body.dark-mode .enter-btn:disabled:hover {
+  box-shadow: none;
 }
 
 /* 滚动条美化 */
