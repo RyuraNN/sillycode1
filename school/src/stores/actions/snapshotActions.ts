@@ -12,6 +12,7 @@ import {
   isDeltaSnapshot,
   shouldCreateBaseSnapshot,
   createLightSnapshot,
+  fastClone,
   type DeltaSnapshot
 } from '../../utils/snapshotUtils'
 import { detectCardEdition, GAME_VERSION } from '../../utils/editionDetector'
@@ -32,7 +33,7 @@ function createLightChatLogCopy(chatLog: ChatLogEntry[]): ChatLogEntry[] {
     // 深拷贝 snapshot，移除 Proxy 和不可克隆对象
     if (log.snapshot) {
       try {
-        lightLog.snapshot = JSON.parse(JSON.stringify(log.snapshot))
+        lightLog.snapshot = fastClone(log.snapshot)
       } catch (e) {
         console.warn('[createLightChatLogCopy] Failed to serialize snapshot:', e)
         // 如果序列化失败，跳过该 snapshot
@@ -49,14 +50,14 @@ export const snapshotActions = {
    */
   async createSnapshot(this: any, chatLog: ChatLogEntry[], messageIndex: number, label?: string) {
     // 深拷贝 player 并剥离 embedding 向量，避免快照体积膨胀
-    const playerCopy = JSON.parse(JSON.stringify(this.player))
+    const playerCopy = fastClone(this.player)
     if (Array.isArray(playerCopy.summaries)) {
       for (const s of playerCopy.summaries) {
         delete s.embedding
       }
     }
 
-    const gameState: GameStateData = JSON.parse(JSON.stringify({
+    const gameState: GameStateData = fastClone({
       player: playerCopy,
       npcs: this.npcs,
       npcRelationships: this.npcRelationships,
@@ -78,11 +79,11 @@ export const snapshotActions = {
       clubRejection: this.clubRejection || null,
       clubInvitation: this.clubInvitation || null,
       npcElectiveSelections: this.npcElectiveSelections || {}
-      // 注意：characterNotes, customCoursePool, eventLibrary, eventTriggers 为全局或外部数据，不回溯
-    }))
+    })
+    // 注意：characterNotes, customCoursePool, eventLibrary, eventTriggers 为全局或外部数据，不回溯
 
     const id = Date.now().toString()
-    const logCopy = JSON.parse(JSON.stringify(chatLog))
+    const logCopy = fastClone(chatLog)
 
     // 保存重数据到分离的 Store
     await saveSnapshotData(id, {
@@ -118,7 +119,7 @@ export const snapshotActions = {
    */
   async createAutoSave(this: any, chatLog: ChatLogEntry[], messageIndex: number) {
     try {
-      const gameState: GameStateData = JSON.parse(JSON.stringify({
+      const gameState: GameStateData = fastClone({
         player: this.player,
         npcs: this.npcs,
         npcRelationships: this.npcRelationships,
@@ -140,8 +141,8 @@ export const snapshotActions = {
         clubRejection: this.clubRejection || null,
         clubInvitation: this.clubInvitation || null,
         npcElectiveSelections: this.npcElectiveSelections || {}
-        // 注意：characterNotes, customCoursePool, eventLibrary, eventTriggers 为全局或外部数据，不回溯
-      }))
+      })
+      // 注意：characterNotes, customCoursePool, eventLibrary, eventTriggers 为全局或外部数据，不回溯
 
       const autoSaveId = `autosave_${this.currentRunId}`
 
@@ -258,8 +259,8 @@ export const snapshotActions = {
       }
     }
 
-    const state = JSON.parse(JSON.stringify(fullSnapshot.gameState))
-    
+    const state = fastClone(fullSnapshot.gameState)
+
     // 【修复】状态合并：确保旧存档缺失的字段被默认值填充
     const defaultPlayer = createInitialState().player
     
@@ -341,7 +342,7 @@ export const snapshotActions = {
       if (this.currentRunId && this.npcRelationships) {
         await saveNpcRelationships(
           this.currentRunId,
-          JSON.parse(JSON.stringify(this.npcRelationships))
+          fastClone(this.npcRelationships)
         )
       }
     } catch (e) {
@@ -390,7 +391,7 @@ export const snapshotActions = {
    * 获取当前游戏状态的深拷贝
    */
   getGameState(this: any): GameStateData {
-    return JSON.parse(JSON.stringify({
+    return fastClone({
       player: this.player,
       npcs: this.npcs,
       npcRelationships: this.npcRelationships,
@@ -412,7 +413,7 @@ export const snapshotActions = {
       clubRejection: this.clubRejection || null,
       clubInvitation: this.clubInvitation || null,
       npcElectiveSelections: this.npcElectiveSelections || {}
-    }))
+    })
   },
 
   /**
@@ -519,16 +520,33 @@ export const snapshotActions = {
       }
 
       if (!baseSnapshot) {
-        console.warn('[snapshotActions] Base snapshot not found for delta, trying fallback...')
+        console.warn(`[snapshotActions] Base snapshot not found for floor ${baseFloor}, trying fallback...`)
 
-        // 尝试在日志中寻找最近的完整快照或基准快照
-        for (let i = chatLog.length - 1; i >= 0; i--) {
+        // 改进：从目标 baseFloor 向前查找最近的基准快照
+        let fallbackFloor = -1
+        for (let i = 0; i < chatLog.length; i++) {
           const log = chatLog[i]
-          // 找到任何一个基准快照或者非增量的完整快照
-          if (log.snapshot && ((log.snapshot as any)._isBase || !isDeltaSnapshot(log.snapshot))) {
-            console.log(`[snapshotActions] Found fallback snapshot at floor ${(log.snapshot as any)._floor || i}`)
-            baseSnapshot = log.snapshot as GameStateData
-            break
+          if (log.snapshot && (log.snapshot as any)._isBase) {
+            const snapshotFloor = (log.snapshot as any)._floor
+            // 找到小于等于 baseFloor 的最近基准快照
+            if (snapshotFloor <= baseFloor && snapshotFloor > fallbackFloor) {
+              fallbackFloor = snapshotFloor
+              baseSnapshot = log.snapshot as GameStateData
+            }
+          }
+        }
+
+        if (baseSnapshot) {
+          console.log(`[snapshotActions] Found fallback base snapshot at floor ${fallbackFloor} (target was ${baseFloor})`)
+        } else {
+          // 最后的fallback：使用任何完整快照
+          for (let i = chatLog.length - 1; i >= 0; i--) {
+            const log = chatLog[i]
+            if (log.snapshot && !isDeltaSnapshot(log.snapshot)) {
+              console.log(`[snapshotActions] Using complete snapshot at floor ${i} as fallback`)
+              baseSnapshot = log.snapshot as GameStateData
+              break
+            }
           }
         }
 
@@ -550,7 +568,7 @@ export const snapshotActions = {
       if (this.currentRunId && this.npcRelationships) {
         await saveNpcRelationships(
           this.currentRunId,
-          JSON.parse(JSON.stringify(this.npcRelationships))
+          fastClone(this.npcRelationships)
         )
       }
     } catch (e) {
@@ -603,7 +621,15 @@ export const snapshotActions = {
             continue
           }
 
+          // 新增：检查是否是最近的基准快照（保留最后一个基准快照作为安全fallback）
+          const isLatestBase = !Array.from(activeBaseFloors).some(f => f > baseFloor)
+          if (isLatestBase && activeBaseFloors.size > 0) {
+            console.log(`[Snapshot] Keeping base snapshot at floor ${baseFloor} (latest base before cutoff)`)
+            continue
+          }
+
           // 否则可以安全删除
+          console.log(`[Snapshot] Deleting unused base snapshot at floor ${baseFloor}`)
           delete log.snapshot
         } else {
           // 非基准快照可以直接清理
@@ -669,8 +695,8 @@ export const snapshotActions = {
    * 恢复指定的游戏状态
    */
   async restoreGameState(this: any, state: GameStateData) {
-    const data = JSON.parse(JSON.stringify(state))
-    
+    const data = fastClone(state)
+
     // 【修复】状态合并
     const defaultPlayer = createInitialState().player
     this.player = { ...defaultPlayer, ...data.player }

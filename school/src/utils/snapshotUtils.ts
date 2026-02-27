@@ -11,6 +11,13 @@
 
 import type { GameStateData } from '../stores/gameStoreTypes'
 
+/**
+ * 快速深拷贝函数（优先使用 structuredClone）
+ */
+export const fastClone = typeof structuredClone !== 'undefined'
+  ? structuredClone
+  : <T>(obj: T): T => JSON.parse(JSON.stringify(obj))
+
 /** 增量快照数据 */
 export interface DeltaSnapshot {
   _isDelta: true
@@ -300,6 +307,11 @@ export function computeDelta(
 }
 
 /**
+ * NPC Map 缓存（用于优化 applyNpcChange 性能）
+ */
+let _npcMapCache: Map<string, number> | null = null
+
+/**
  * 将增量应用到基准状态上，还原完整状态
  * @param baseState 基准状态
  * @param delta 增量快照
@@ -309,8 +321,10 @@ export function applyDelta(
   baseState: GameStateData,
   delta: DeltaSnapshot
 ): GameStateData {
+  // 清除缓存
+  _npcMapCache = null
   // 深拷贝基准状态
-  const result = JSON.parse(JSON.stringify(baseState)) as GameStateData
+  const result = fastClone(baseState) as GameStateData
 
   // 应用所有变更
   for (const [path, change] of Object.entries(delta.changes)) {
@@ -344,27 +358,35 @@ function applyNpcChange(state: any, path: string, value: any): void {
     state.npcs = []
   }
 
-  // 查找 NPC
-  const npcIndex = state.npcs.findIndex((npc: any) => npc.id === npcId)
+  // 构建或使用缓存的 NPC ID -> index 映射
+  if (!_npcMapCache) {
+    _npcMapCache = new Map(
+      state.npcs.map((npc: any, idx: number) => [npc.id, idx])
+    )
+  }
+
+  const npcIndex = _npcMapCache.get(npcId)
 
   if (propertyPath) {
     // 修改 NPC 的属性（如 npcs[id=123].hp）
-    if (npcIndex !== -1) {
+    if (npcIndex !== undefined) {
       setNestedValue(state.npcs[npcIndex], propertyPath, value)
     }
   } else {
     // 添加或删除整个 NPC（如 npcs[id=123]）
     if (value === null) {
       // 删除 NPC
-      if (npcIndex !== -1) {
+      if (npcIndex !== undefined) {
         state.npcs.splice(npcIndex, 1)
+        _npcMapCache = null  // 清除缓存，下次重建
       }
     } else {
       // 添加或替换 NPC
-      if (npcIndex !== -1) {
+      if (npcIndex !== undefined) {
         state.npcs[npcIndex] = value
       } else {
         state.npcs.push(value)
+        _npcMapCache.set(npcId, state.npcs.length - 1)
       }
     }
   }
@@ -380,7 +402,7 @@ export function applyDeltas(
   baseState: GameStateData,
   deltas: DeltaSnapshot[]
 ): GameStateData {
-  let result = JSON.parse(JSON.stringify(baseState)) as GameStateData
+  let result = fastClone(baseState) as GameStateData
 
   for (const delta of deltas) {
     for (const [path, change] of Object.entries(delta.changes)) {

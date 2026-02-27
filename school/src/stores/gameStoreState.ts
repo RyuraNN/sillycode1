@@ -12,6 +12,7 @@ export function createInitialState(): GameState {
   return {
     currentRunId: Date.now().toString(36),
     currentFloor: 0,
+    _lastBaseFloor: 0,
     mapSelectionMode: false,
     mapSelectionCallback: null,
     allClassData: {},

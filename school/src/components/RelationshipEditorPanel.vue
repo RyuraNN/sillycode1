@@ -10,11 +10,37 @@
           <option value="hasRelations">有关系</option>
           <option value="noRelations">无关系</option>
           <option value="ghostOnly">仅幽灵角色</option>
+          <option value="inRoster">在名录中</option>
+          <option value="notInRoster">不在名录中</option>
         </select>
+        <button
+          class="btn-batch-toggle"
+          :class="{ active: charBatchMode }"
+          @click="toggleCharBatchMode"
+          title="批量选择角色"
+        >
+          ☑️
+        </button>
       </div>
 
-      <!-- 批量操作工具栏 -->
-      <div class="batch-toolbar-left">
+      <!-- 角色批量模式工具栏 -->
+      <div v-if="charBatchMode" class="batch-toolbar-left char-batch">
+        <div class="batch-info">已选 {{ charBatchSelected.size }} 个角色</div>
+        <button
+          class="btn-batch-danger"
+          @click="handleBatchDeleteCharacters"
+          :disabled="charBatchSelected.size === 0"
+          title="删除选中角色的所有关系"
+        >
+          🗑️ 删除 ({{ charBatchSelected.size }})
+        </button>
+        <button class="btn-batch-cancel" @click="cancelCharBatchMode">
+          取消
+        </button>
+      </div>
+
+      <!-- 原有的幽灵角色清理按钮 -->
+      <div v-else class="batch-toolbar-left">
         <button class="btn-batch-small" @click="emit('clear-all-ghosts')" title="清除所有幽灵角色">
           👻 清除所有幽灵角色
         </button>
@@ -24,12 +50,30 @@
           v-for="char in filteredCharacters"
           :key="char.name"
           class="char-card"
-          :class="{ selected: selectedChar === char.name, ghost: char.ghost }"
-          @click="selectedChar = char.name"
+          :class="{
+            selected: selectedChar === char.name,
+            ghost: char.ghost,
+            'not-in-roster': !char.ghost && !char.inRoster,
+            'batch-selected': charBatchMode && charBatchSelected.has(char.name)
+          }"
+          @click="handleCharCardClick(char)"
         >
+          <!-- 批量模式复选框 -->
+          <label v-if="charBatchMode" class="batch-checkbox" @click.stop>
+            <input
+              type="checkbox"
+              :checked="charBatchSelected.has(char.name)"
+              @change="toggleCharSelection(char.name)"
+            />
+          </label>
+
           <span class="gender-icon">{{ char.ghost ? '👻' : (char.gender === 'male' ? '♂' : char.gender === 'female' ? '♀' : '?') }}</span>
           <span class="char-name">{{ char.name }}</span>
           <span class="char-origin-tag" v-if="char.origin">{{ cleanOrigin(char.origin) }}</span>
+
+          <!-- 未在名录中的标记 -->
+          <span v-if="!char.ghost && !char.inRoster" class="not-in-roster-badge" title="不在名录中">📋</span>
+
           <span class="ref-badge" v-if="char.ghost">被引用 ×{{ char.refCount }}</span>
           <span class="rel-badge" v-else-if="char.relCount > 0">{{ char.relCount }}</span>
         </div>
@@ -229,17 +273,19 @@ import { RELATIONSHIP_GROUPS } from '../data/relationshipData'
 const props = defineProps({
   npcRelationships: { type: Object, default: () => ({}) },
   allClassData: { type: Object, default: () => ({}) },
-  characterPool: { type: Array, default: () => [] }
+  characterPool: { type: Array, default: () => [] },
+  currentRosterState: { type: Object, default: () => ({}) }
 })
 
 const emit = defineEmits([
   'edit-relationship', 'delete-relationship', 'add-relationship',
   'clear-char-relations', 'clear-char-impressions', 'remove-character',
-  'clear-ghost-references', 'clear-all-ghosts', 'batch-delete-relationships'
+  'clear-ghost-references', 'clear-all-ghosts', 'batch-delete-relationships',
+  'batch-delete-characters'
 ])
 
 const searchQuery = ref('')
-const filterMode = ref('all')
+const filterMode = ref('inRoster')
 const selectedChar = ref('')
 const relSearchQuery = ref('')
 const relSortBy = ref('name')
@@ -247,7 +293,37 @@ const showReverse = ref(false)
 const batchMode = ref(false)
 const batchSelected = ref(new Set())
 
+// 角色级别批量模式
+const charBatchMode = ref(false)
+const charBatchSelected = ref(new Set())
+
 const axisNames = { intimacy: '亲密', trust: '信赖', passion: '激情', hostility: '敌意' }
+
+/**
+ * 检查角色是否在名录中（已勾选）
+ */
+function isCharInRoster(charName) {
+  if (!props.currentRosterState || Object.keys(props.currentRosterState).length === 0) {
+    return true  // 无名录状态时，默认所有角色都在名录中
+  }
+
+  // 检查是否在任何班级中被勾选
+  for (const [classId, students] of Object.entries(props.currentRosterState)) {
+    if (students[charName] === true) {
+      return true
+    }
+  }
+
+  // 检查是否是教师（教师始终视为在名录中）
+  if (props.allClassData) {
+    for (const classData of Object.values(props.allClassData)) {
+      if (classData.headTeacher?.name === charName) return true
+      if (classData.teachers?.some(t => t.name === charName)) return true
+    }
+  }
+
+  return false
+}
 
 // 角色列表（含幽灵角色）
 const allCharacters = computed(() => {
@@ -292,7 +368,8 @@ const allCharacters = computed(() => {
     origin: originMap[name] || '',
     relCount: Object.keys(rels[name]?.relations || {}).length,
     ghost: false,
-    refCount: 0
+    refCount: 0,
+    inRoster: isCharInRoster(name)
   }))
 
   const ghosts = Object.entries(ghostRefCount).map(([name, count]) => ({
@@ -301,7 +378,8 @@ const allCharacters = computed(() => {
     origin: originMap[name] || '',
     relCount: 0,
     ghost: true,
-    refCount: count
+    refCount: count,
+    inRoster: false
   }))
 
   return [...normal, ...ghosts].sort((a, b) => a.name.localeCompare(b.name, 'zh'))
@@ -316,6 +394,8 @@ const filteredCharacters = computed(() => {
   if (filterMode.value === 'hasRelations') list = list.filter(c => c.relCount > 0)
   else if (filterMode.value === 'noRelations') list = list.filter(c => c.relCount === 0 && !c.ghost)
   else if (filterMode.value === 'ghostOnly') list = list.filter(c => c.ghost)
+  else if (filterMode.value === 'inRoster') list = list.filter(c => !c.ghost && c.inRoster)
+  else if (filterMode.value === 'notInRoster') list = list.filter(c => !c.ghost && !c.inRoster)
   return list
 })
 
@@ -433,6 +513,53 @@ function handleBatchDelete() {
   emit('batch-delete-relationships', pairs)
   batchSelected.value = new Set()
   batchMode.value = false
+}
+
+// 角色批量操作函数
+function toggleCharBatchMode() {
+  charBatchMode.value = !charBatchMode.value
+  if (!charBatchMode.value) {
+    charBatchSelected.value = new Set()
+  }
+}
+
+function cancelCharBatchMode() {
+  charBatchMode.value = false
+  charBatchSelected.value = new Set()
+}
+
+function toggleCharSelection(charName) {
+  const s = new Set(charBatchSelected.value)
+  if (s.has(charName)) {
+    s.delete(charName)
+  } else {
+    s.add(charName)
+  }
+  charBatchSelected.value = s
+}
+
+function handleCharCardClick(char) {
+  if (charBatchMode.value) {
+    toggleCharSelection(char.name)
+  } else {
+    selectedChar.value = char.name
+  }
+}
+
+function handleBatchDeleteCharacters() {
+  const count = charBatchSelected.value.size
+  if (count === 0) return
+
+  const charList = Array.from(charBatchSelected.value).slice(0, 10).join('、')
+  const displayList = count > 10 ? charList + '...' : charList
+
+  if (!confirm(`⚠️ 确定批量删除 ${count} 个角色的所有关系？\n\n${displayList}\n\n这将删除这些角色的所有关系数据（包括作为源和目标的关系）。`)) {
+    return
+  }
+
+  emit('batch-delete-characters', Array.from(charBatchSelected.value))
+  charBatchSelected.value = new Set()
+  charBatchMode.value = false
 }
 </script>
 
@@ -659,6 +786,109 @@ function handleBatchDelete() {
 
   /* 反向关系 */
   .reverse-section { padding: 6px 10px; }
+}
+
+/* 角色批量模式样式 */
+.char-batch {
+  background: rgba(244, 67, 54, 0.08);
+  border-bottom: 2px solid #F44336;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+}
+
+.batch-info {
+  flex: 1;
+  color: #F44336;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.btn-batch-danger {
+  padding: 5px 10px;
+  background: #F44336;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.15s;
+}
+
+.btn-batch-danger:hover:not(:disabled) {
+  background: #D32F2F;
+}
+
+.btn-batch-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-batch-cancel {
+  padding: 5px 10px;
+  background: #666;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.15s;
+}
+
+.btn-batch-cancel:hover {
+  background: #888;
+}
+
+.btn-batch-toggle {
+  padding: 6px 10px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  color: #ccc;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.15s;
+  min-width: 32px;
+}
+
+.btn-batch-toggle:hover {
+  background: #333;
+}
+
+.btn-batch-toggle.active {
+  background: #F44336;
+  border-color: #F44336;
+  color: white;
+}
+
+.char-card.batch-selected {
+  border-color: #F44336;
+  background: rgba(244, 67, 54, 0.1);
+}
+
+.char-card.not-in-roster {
+  opacity: 0.6;
+  border-left: 3px solid #666;
+}
+
+.not-in-roster-badge {
+  font-size: 10px;
+  opacity: 0.7;
+  margin-left: auto;
+}
+
+.batch-checkbox {
+  display: flex;
+  align-items: center;
+  margin-right: 6px;
+  cursor: pointer;
+}
+
+.batch-checkbox input[type="checkbox"] {
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
 }
 
 /* 暗色滚动条 */

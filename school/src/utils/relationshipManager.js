@@ -476,9 +476,15 @@ export function setRelationship(sourceName, targetName, relationData) {
     trust: relationData.trust ?? 0,
     passion: relationData.passion ?? 0,
     hostility: relationData.hostility ?? 0,
-    groups: relationData.groups || [],
-    tags: tags,
-    events: relationData.events || []
+    groups: Array.isArray(relationData.groups)
+      ? JSON.parse(JSON.stringify(relationData.groups))
+      : [],
+    tags: Array.isArray(tags)
+      ? JSON.parse(JSON.stringify(tags))
+      : [],
+    events: Array.isArray(relationData.events)
+      ? JSON.parse(JSON.stringify(relationData.events))
+      : []
   }
 
   // 设置关系

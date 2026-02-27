@@ -1864,11 +1864,22 @@ const handleSaveRelationship = async (formData) => {
   const source = editingRelSource.value
   const target = formData.targetName || editingRelTarget.value
   if (!source || !target) return
-  setRelationship(source, target, {
-    intimacy: formData.intimacy, trust: formData.trust,
-    passion: formData.passion, hostility: formData.hostility,
-    groups: formData.groups, tags: formData.tags
-  })
+
+  // 深拷贝formData，移除Vue响应式
+  const cleanData = {
+    intimacy: formData.intimacy,
+    trust: formData.trust,
+    passion: formData.passion,
+    hostility: formData.hostility,
+    groups: Array.isArray(formData.groups)
+      ? JSON.parse(JSON.stringify(formData.groups))
+      : [],
+    tags: Array.isArray(formData.tags)
+      ? JSON.parse(JSON.stringify(formData.tags))
+      : []
+  }
+
+  setRelationship(source, target, cleanData)
   await flushPendingSocialData()
   await syncRelationshipsToWorldbook()
   showRelationshipEditor.value = false
@@ -1928,6 +1939,23 @@ const handleRemoveCharacter = async (charName) => {
   await flushPendingSocialData()
   await syncRelationshipsToWorldbook()
   showMessage(`已移除角色「${charName}」`)
+}
+
+const handleBatchDeleteCharacters = async (charNames) => {
+  if (!charNames || charNames.length === 0) return
+
+  const count = charNames.length
+  showMessage(`正在批量删除 ${count} 个角色的关系数据...`)
+
+  for (const charName of charNames) {
+    removeCharacterFromRelations(charName, false)
+  }
+
+  await flushPendingSocialData()
+  await syncRelationshipsToWorldbook()
+  await saveImpressionDataImmediate()
+
+  showMessage(`已批量删除 ${count} 个角色的所有关系数据`)
 }
 
 const handleClearGhostReferences = async (charName) => {
@@ -2239,6 +2267,7 @@ const handleSaveComposer = async () => {
               :npc-relationships="gameStore.npcRelationships"
               :all-class-data="gameStore.allClassData"
               :character-pool="characterPool"
+              :current-roster-state="currentRosterState"
               @edit-relationship="handleEditRelationship"
               @delete-relationship="handleDeleteRelationship"
               @add-relationship="handleAddRelationship"
@@ -2248,6 +2277,7 @@ const handleSaveComposer = async () => {
               @clear-ghost-references="handleClearGhostReferences"
               @clear-all-ghosts="handleClearAllGhosts"
               @batch-delete-relationships="handleBatchDeleteRelationships"
+              @batch-delete-characters="handleBatchDeleteCharacters"
             />
           </div>
 

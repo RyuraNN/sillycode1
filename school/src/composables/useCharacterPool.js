@@ -236,11 +236,21 @@ export function useCharacterPool() {
         classInfo.students.forEach(s => {
           const poolChar = characterPool.value.find(c => c.name === s.name)
           if (poolChar) {
-            if (poolChar.personality) s.personality = poolChar.personality
-            if (poolChar.academicProfile) s.academicProfile = poolChar.academicProfile
-            if (poolChar.electivePreference) s.electivePreference = poolChar.electivePreference
-            if (poolChar.scheduleTag) s.scheduleTag = poolChar.scheduleTag
-            if (poolChar.notes) s.notes = poolChar.notes
+            if (poolChar.personality) {
+              s.personality = JSON.parse(JSON.stringify(poolChar.personality))
+            }
+            if (poolChar.academicProfile) {
+              s.academicProfile = JSON.parse(JSON.stringify(poolChar.academicProfile))
+            }
+            if (poolChar.electivePreference) {
+              s.electivePreference = JSON.parse(JSON.stringify(poolChar.electivePreference))
+            }
+            if (poolChar.scheduleTag) {
+              s.scheduleTag = poolChar.scheduleTag
+            }
+            if (poolChar.notes) {
+              s.notes = poolChar.notes
+            }
           }
         })
       }

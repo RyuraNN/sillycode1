@@ -487,7 +487,7 @@ const sendMessage = async () => {
     // 使用新的快照创建方法（支持增量模式）
     const previousLog = gameLog.value[gameLog.value.length - 1]
     const previousSnapshot = previousLog?.snapshot
-    const playerSnapshot = gameStore.createMessageSnapshot(previousSnapshot, gameLog.value.length + 1, gameLog.value)
+    const playerSnapshot = gameStore.createMessageSnapshot(previousSnapshot, gameLog.value.length, gameLog.value)
     
     gameLog.value.push({ 
       type: 'player', 
@@ -1255,7 +1255,13 @@ const processAIResponse = async (response) => {
   const hasRawResponse = !!cleanResponse?.trim()
   
   if (hasCleanedContent || hasDisplayContent || hasRawResponse || gameStore.settings.debugMode) {
-    const aiSnapshot = gameStore.getGameState()
+    const previousLog = gameLog.value[gameLog.value.length - 1]
+    const previousSnapshot = previousLog?.snapshot
+    const aiSnapshot = gameStore.createMessageSnapshot(
+      previousSnapshot,
+      gameLog.value.length,
+      gameLog.value
+    )
     const lastLog = gameLog.value[gameLog.value.length - 1]
     const trueRawContent = cleanResponse
 

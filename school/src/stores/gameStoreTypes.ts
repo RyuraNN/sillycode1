@@ -32,7 +32,7 @@ export interface SaveSnapshot {
   }
   location?: string
   cardEdition?: string    // 'elyrene' | 'original' | 'unknown'
-  gameVersion?: string    // e.g. 'V2.4EX'
+  gameVersion?: string    // e.g. 'V2.5'
 }
 
 /** 纯游戏状态数据（不含快照，用于存档） */
@@ -50,7 +50,7 @@ export interface GameStateData {
     hour: number
     minute: number
   }
-  settings: {
+  settings?: {
     difficulty: 'easy' | 'normal' | 'hard'
     bgmVolume: number
     titleFont: string
@@ -699,6 +699,7 @@ export interface GameState {
   } | null
   currentRunId: string
   currentFloor: number
+  _lastBaseFloor?: number
   mapSelectionMode: boolean
   mapSelectionCallback: ((location: string) => void) | null
   eventLibrary: Map<string, any>
