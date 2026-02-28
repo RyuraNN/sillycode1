@@ -6,7 +6,7 @@ import { getCurrentBookName } from './worldbookHelper'
 export type CardEdition = 'elyrene' | 'original' | 'unknown'
 
 /** 唯一版本号来源，更新只改这里 */
-export const GAME_VERSION = 'V2.5EX'
+export const GAME_VERSION = 'V2.5EXfix'
 
 /**
  * 通过世界书名称关键词检测当前绑定的卡版本

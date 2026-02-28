@@ -338,7 +338,7 @@ const saveRelationshipsToSnapshot = async () => {
   const sid = snapshotRelSource.value
   if (!sid || !snapshotRelData.value) return
   try {
-    const updatedData = snapshotRelData.value
+    const updatedData = JSON.parse(JSON.stringify(snapshotRelData.value))
     updatedData.gameState.npcRelationships = JSON.parse(JSON.stringify(gameStore.npcRelationships))
     await saveSnapshotData(sid, updatedData)
     showMessage('关系数据已保存到存档')
