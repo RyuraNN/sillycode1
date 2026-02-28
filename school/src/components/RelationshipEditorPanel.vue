@@ -634,11 +634,6 @@ function handleClearAllRelationships() {
 
   emit('clear-all-relationships')
 }
-
-  emit('batch-delete-characters', Array.from(charBatchSelected.value))
-  charBatchSelected.value = new Set()
-  charBatchMode.value = false
-}
 </script>
 
 <style scoped>
