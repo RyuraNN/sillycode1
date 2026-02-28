@@ -161,6 +161,14 @@ export async function saveSocialData(data) {
       
       // 增量合并：将传入的 data 合并到现有数据上
       const mergedData = deepMergeSocialData(existingData, data)
+
+      // 删除已被移除的角色（存在于世界书但不在当前数据中的角色）
+      for (const key of Object.keys(existingData)) {
+        if (!(key in data)) {
+          delete mergedData[key]
+        }
+      }
+
       const content = JSON.stringify(mergedData, null, 2)
       
       const newEntry = {

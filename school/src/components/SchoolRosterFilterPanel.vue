@@ -1229,7 +1229,25 @@ const handleConfirmAIImport = async () => {
     addedCount++
   }
 
+  // 将新导入的角色初始化到 npcRelationships，使其在关系编辑器中可见
+  if (addedCount > 0 && gameStore.npcRelationships) {
+    for (const char of selected) {
+      if (!gameStore.npcRelationships[char.name]) {
+        gameStore.npcRelationships[char.name] = {
+          gender: char.gender || 'unknown',
+          personality: char.personality || { order: 0, altruism: 0, tradition: 0, peace: 50 },
+          goals: { immediate: '', shortTerm: '', longTerm: '' },
+          priorities: { academics: 50, social: 50, hobbies: 50, survival: 50, club: 50 },
+          relations: {}
+        }
+      }
+    }
+  }
+
   await saveFullCharacterPool(deepClone(characterPool.value))
+  if (addedCount > 0) {
+    await flushPendingSocialData()
+  }
   showAIImportResult.value = false
   resetAIImport()
   const msg = `已导入 ${addedCount} 个角色` + (skippedCount > 0 ? `，跳过 ${skippedCount} 个已存在角色` : '')

@@ -450,7 +450,7 @@ export async function fetchClubDataFromWorldbook(currentRunId) {
             // 保存原始条目信息以便后续更新
             clubData._entryName = entry.name
             clubData._bookName = name
-            clubData._strategy = entry.strategy
+            clubData._strategy = (() => { try { return JSON.parse(JSON.stringify(entry.strategy)) } catch { return null } })()
             
             // 优先保留带有当前 runId 的条目，或者如果没有现有数据则保留
             // 如果 allClubs[clubData.id] 已存在，检查它是否是特定 runId 的

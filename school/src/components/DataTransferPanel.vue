@@ -81,20 +81,53 @@ const handleExport = async () => {
 
     // 收集选中的模块数据
     if (exportSelection.value.map) {
-      exportData.modules.map = deepClone(mapData)
+      // 如果内存中的 mapData 为空，尝试从世界书加载
+      let mapToExport = mapData
+      if (mapData.length === 0) {
+        const { fetchMapDataFromWorldbook } = await import('../utils/worldbookParser')
+        const worldbookMap = await fetchMapDataFromWorldbook()
+        if (worldbookMap && worldbookMap.length > 0) {
+          mapToExport = worldbookMap
+        }
+      }
+      if (mapToExport.length > 0) {
+        exportData.modules.map = deepClone(mapToExport)
+      }
     }
 
     if (exportSelection.value.schedule) {
-      exportData.modules.schedule = deepClone(getScheduleConfig())
+      let scheduleToExport = getScheduleConfig()
+      // 如果内存中的 schedule 为空或没有模板，尝试从世界书加载
+      if (!scheduleToExport || !scheduleToExport.templates || Object.keys(scheduleToExport.templates).length === 0) {
+        const { loadScheduleDataFromWorldbook } = await import('../utils/npcScheduleSystem')
+        await loadScheduleDataFromWorldbook()
+        scheduleToExport = getScheduleConfig()
+      }
+      if (scheduleToExport && Object.keys(scheduleToExport).length > 0) {
+        exportData.modules.schedule = deepClone(scheduleToExport)
+      }
     }
 
     if (exportSelection.value.roster) {
-      exportData.modules.roster = deepClone(gameStore.allClassData)
+      let roster = deepClone(gameStore.allClassData)
+      // 如果内存中的 roster 为空，尝试从世界书加载
+      if (!roster || Object.keys(roster).length === 0) {
+        const { fetchClassDataFromWorldbook } = await import('../utils/worldbookParser')
+        const worldbookRoster = await fetchClassDataFromWorldbook()
+        if (worldbookRoster && Object.keys(worldbookRoster).length > 0) {
+          roster = worldbookRoster
+        }
+      }
+      if (roster && Object.keys(roster).length > 0) {
+        exportData.modules.roster = roster
+      }
     }
 
     if (exportSelection.value.characterPool) {
       const pool = await getFullCharacterPool()
-      exportData.modules.characterPool = pool || []
+      if (pool && pool.length > 0) {
+        exportData.modules.characterPool = pool
+      }
     }
 
     if (exportSelection.value.course) {
@@ -115,11 +148,17 @@ const handleExport = async () => {
     }
 
     if (exportSelection.value.clubs) {
-      exportData.modules.clubs = deepClone(gameStore.allClubs || {})
+      const clubs = deepClone(gameStore.allClubs || {})
+      if (Object.keys(clubs).length > 0) {
+        exportData.modules.clubs = clubs
+      }
     }
 
     if (exportSelection.value.relationships) {
-      exportData.modules.relationships = deepClone(gameStore.npcRelationships || {})
+      const relationships = deepClone(gameStore.npcRelationships || {})
+      if (Object.keys(relationships).length > 0) {
+        exportData.modules.relationships = relationships
+      }
     }
 
     const jsonString = JSON.stringify(exportData, null, 2)
@@ -268,7 +307,7 @@ const handleImport = async () => {
     const results = []
 
     // 导入地图
-    if (importSelection.value.map && data.map) {
+    if (importSelection.value.map && data.map && Array.isArray(data.map) && data.map.length > 0) {
       setMapData(data.map)
       if (syncToWorldbook.value) {
         await saveMapDataToWorldbook(data.map)
@@ -286,7 +325,7 @@ const handleImport = async () => {
     }
 
     // 导入班级名册
-    if (importSelection.value.roster && data.roster) {
+    if (importSelection.value.roster && data.roster && Object.keys(data.roster).length > 0) {
       // 更新 gameStore
       const rosterClone = deepClone(data.roster)
       for (const [classId, classInfo] of Object.entries(rosterClone)) {
@@ -302,7 +341,7 @@ const handleImport = async () => {
     }
 
     // 导入角色池
-    if (importSelection.value.characterPool && data.characterPool) {
+    if (importSelection.value.characterPool && data.characterPool && Array.isArray(data.characterPool) && data.characterPool.length > 0) {
       await saveFullCharacterPool(deepClone(data.characterPool))
       results.push('角色池')
     }
@@ -344,14 +383,14 @@ const handleImport = async () => {
     }
 
     // 导入社团数据
-    if (importSelection.value.clubs && data.clubs) {
+    if (importSelection.value.clubs && data.clubs && Object.keys(data.clubs).length > 0) {
       gameStore.allClubs = deepClone(data.clubs)
       console.log('[DataTransfer] Imported clubs:', Object.keys(data.clubs).length)
       results.push('社团数据')
     }
 
     // 导入关系数据
-    if (importSelection.value.relationships && data.relationships) {
+    if (importSelection.value.relationships && data.relationships && Object.keys(data.relationships).length > 0) {
       gameStore.npcRelationships = deepClone(data.relationships)
 
       // 保存到 IndexedDB

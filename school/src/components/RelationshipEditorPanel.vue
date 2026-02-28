@@ -325,12 +325,9 @@ function isCharInRoster(charName) {
   if (props.characterPool && Array.isArray(props.characterPool)) {
     const char = props.characterPool.find(c => c.name === charName)
     if (char && char.role) {
-      // 学生和教师算在名录中，校外人员不算
-      if (char.role === 'student' || char.role === 'teacher') {
+      // 学生、教师、校外人员都算在名录中（用户主动设定的角色都应在名录内）
+      if (char.role === 'student' || char.role === 'teacher' || char.role === 'external') {
         return true
-      }
-      if (char.role === 'external') {
-        return false
       }
       // 其他 role（如 'staff'）继续后续检查
     }
@@ -341,19 +338,14 @@ function isCharInRoster(charName) {
     for (const classData of Object.values(props.allClassData)) {
       // 检查是否是教师
       if (classData.headTeacher?.name === charName) {
-        if (classData.headTeacher.role === 'external') return false
         return true
       }
       if (classData.teachers?.some(t => t.name === charName)) {
-        const teacher = classData.teachers.find(t => t.name === charName)
-        if (teacher?.role === 'external') return false
         return true
       }
 
       // 检查是否是学生
       if (classData.students?.some(s => s.name === charName)) {
-        const student = classData.students.find(s => s.name === charName)
-        if (student?.role === 'external') return false
         return true
       }
     }
