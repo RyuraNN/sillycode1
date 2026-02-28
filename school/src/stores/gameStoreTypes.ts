@@ -32,7 +32,7 @@ export interface SaveSnapshot {
   }
   location?: string
   cardEdition?: string    // 'elyrene' | 'original' | 'unknown'
-  gameVersion?: string    // e.g. 'V2.5'
+  gameVersion?: string    
 }
 
 /** 纯游戏状态数据（不含快照，用于存档） */
@@ -675,8 +675,18 @@ export interface GameState {
     debugUnlocked: boolean
     snapshotLimit: number
     snapshotMode: 'full' | 'delta'
+    useGeminiMode: boolean
+    maxManualSaves: number
+    autoCleanupEnabled: boolean
+    storageWarningThreshold: number
+    retrySystem: {
+      enabled: boolean
+      maxRetries: number
+      retryDelay: number
+    }
   }
   saveSnapshots: SaveSnapshot[]
+  saveError: string | null
   currentChatLog: ChatLogEntry[]
   pendingRestoreLog: ChatLogEntry[] | null
   allClassData: any

@@ -373,3 +373,65 @@ export async function removeChunkedChatLog(snapshotId) {
   // 删除元数据
   await removeItem(`${snapshotId}_meta`, SNAPSHOT_STORE_NAME)
 }
+
+// ==================== 存储监控工具 ====================
+
+/**
+ * 获取存储使用量和配额
+ * @returns {Promise<{usageMB: number, quotaMB: number, usagePercent: number}>}
+ */
+export async function getStorageEstimate() {
+  try {
+    if (navigator.storage && navigator.storage.estimate) {
+      const estimate = await navigator.storage.estimate()
+      const usageMB = (estimate.usage || 0) / (1024 * 1024)
+      const quotaMB = (estimate.quota || 0) / (1024 * 1024)
+      const usagePercent = quotaMB > 0 ? (usageMB / quotaMB) * 100 : 0
+
+      return {
+        usageMB: Math.round(usageMB * 100) / 100,
+        quotaMB: Math.round(quotaMB * 100) / 100,
+        usagePercent: Math.round(usagePercent * 100) / 100
+      }
+    }
+    return { usageMB: 0, quotaMB: 0, usagePercent: 0 }
+  } catch (e) {
+    console.error('[IndexedDB] Failed to get storage estimate:', e)
+    return { usageMB: 0, quotaMB: 0, usagePercent: 0 }
+  }
+}
+
+/**
+ * 获取所有快照ID（用于检测孤立数据）
+ * @returns {Promise<string[]>}
+ */
+export async function getAllSnapshotIds() {
+  try {
+    const db = await openDB()
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([SNAPSHOT_STORE_NAME], 'readonly')
+      const store = transaction.objectStore(SNAPSHOT_STORE_NAME)
+      const request = store.getAllKeys()
+
+      request.onsuccess = (event) => {
+        const keys = event.target.result || []
+        // 提取快照ID（排除分片和元数据键）
+        const snapshotIds = new Set()
+        for (const key of keys) {
+          if (typeof key === 'string') {
+            // 提取基础快照ID（移除 _chunk_N 和 _meta 后缀）
+            const baseId = key.replace(/_chunk_\d+$/, '').replace(/_meta$/, '')
+            if (baseId !== key || !key.includes('_chunk_') && !key.endsWith('_meta')) {
+              snapshotIds.add(baseId)
+            }
+          }
+        }
+        resolve(Array.from(snapshotIds))
+      }
+      request.onerror = (event) => reject(event.target.error)
+    })
+  } catch (e) {
+    console.error('[IndexedDB] Failed to get all snapshot IDs:', e)
+    return []
+  }
+}

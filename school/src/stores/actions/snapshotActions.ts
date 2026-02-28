@@ -30,7 +30,7 @@ function createLightChatLogCopy(chatLog: ChatLogEntry[]): ChatLogEntry[] {
       // 不保存: rawContent, preVariableSnapshot（可从 snapshot 恢复）
     }
 
-    // 深拷贝 snapshot，移除 Proxy 和不可克隆对象
+    // 深拷贝 snapshot，使用 fastClone 移除 Proxy 和不可克隆对象
     if (log.snapshot) {
       try {
         lightLog.snapshot = fastClone(log.snapshot)
@@ -111,6 +111,14 @@ export const snapshotActions = {
 
     this.saveSnapshots.push(snapshot)
     this.saveToStorage(true)
+
+    // 后台触发自动清理
+    if (this.autoCleanupSnapshots) {
+      this.autoCleanupSnapshots().catch((e: any) =>
+        console.warn('[GameStore] Auto cleanup failed:', e)
+      )
+    }
+
     return id
   },
 
@@ -263,10 +271,10 @@ export const snapshotActions = {
 
     // 【修复】状态合并：确保旧存档缺失的字段被默认值填充
     const defaultPlayer = createInitialState().player
-    
+
     // 基础合并
     this.player = { ...defaultPlayer, ...state.player }
-    
+
     // 深度合并关键对象
     if (state.player.partTimeJob) {
       this.player.partTimeJob = { ...defaultPlayer.partTimeJob, ...state.player.partTimeJob }
@@ -281,7 +289,7 @@ export const snapshotActions = {
       // 这里的 settings 应该是 gameStore.settings，player 下通常没有 settings
       // 但为了保险起见，如果 player 下有自定义设置...
     }
-    
+
     // 确保 role 存在
     if (!this.player.role) {
       this.player.role = defaultPlayer.role
@@ -292,7 +300,7 @@ export const snapshotActions = {
     }
     this.npcs = state.npcs
     this.gameTime = state.gameTime
-    
+
     if (state.npcRelationships) {
       this.npcRelationships = state.npcRelationships
     } else {
@@ -372,7 +380,74 @@ export const snapshotActions = {
     if (index !== -1) {
       this.saveSnapshots.splice(index, 1)
       this.saveToStorage(true)
-      removeSnapshotData(snapshotId).catch((e: any) => console.warn('[GameStore] Failed to delete snapshot data:', e))
+
+      // 删除快照数据和分片数据
+      try {
+        await removeSnapshotData(snapshotId)
+        const { removeChunkedChatLog } = await import('../../utils/indexedDB')
+        await removeChunkedChatLog(snapshotId)
+        console.log(`[GameStore] Deleted snapshot ${snapshotId} and chunks`)
+      } catch (e) {
+        console.warn('[GameStore] Failed to delete snapshot data:', e)
+      }
+    }
+  },
+
+  /**
+   * 自动清理旧快照
+   * 保留最近的手动存档和每个run的自动存档
+   */
+  async autoCleanupSnapshots(this: any) {
+    if (!this.settings.autoCleanupEnabled) {
+      return
+    }
+
+    const maxManualSaves = this.settings.maxManualSaves || 50
+    const maxAutoSavesPerRun = 5
+
+    // 分类快照：手动存档 vs 自动存档
+    const manualSnapshots: SaveSnapshot[] = []
+    const autoSavesByRun: Record<string, SaveSnapshot[]> = {}
+
+    for (const snapshot of this.saveSnapshots) {
+      if (snapshot.id.startsWith('autosave_')) {
+        const runId = snapshot.id.replace('autosave_', '')
+        if (!autoSavesByRun[runId]) {
+          autoSavesByRun[runId] = []
+        }
+        autoSavesByRun[runId].push(snapshot)
+      } else {
+        manualSnapshots.push(snapshot)
+      }
+    }
+
+    const toDelete: string[] = []
+
+    // 清理超出限制的手动存档（保留最新的）
+    if (manualSnapshots.length > maxManualSaves) {
+      const sorted = manualSnapshots.sort((a, b) => b.timestamp - a.timestamp)
+      const excess = sorted.slice(maxManualSaves)
+      toDelete.push(...excess.map(s => s.id))
+      console.log(`[AutoCleanup] Marking ${excess.length} old manual saves for deletion`)
+    }
+
+    // 清理每个run的旧自动存档（保留最新的N个）
+    for (const [runId, snapshots] of Object.entries(autoSavesByRun)) {
+      if (snapshots.length > maxAutoSavesPerRun) {
+        const sorted = snapshots.sort((a, b) => b.timestamp - a.timestamp)
+        const excess = sorted.slice(maxAutoSavesPerRun)
+        toDelete.push(...excess.map(s => s.id))
+        console.log(`[AutoCleanup] Marking ${excess.length} old auto saves for run ${runId}`)
+      }
+    }
+
+    // 执行删除
+    if (toDelete.length > 0) {
+      console.log(`[AutoCleanup] Deleting ${toDelete.length} old snapshots...`)
+      for (const id of toDelete) {
+        await this.deleteSnapshot(id)
+      }
+      console.log(`[AutoCleanup] Cleanup complete`)
     }
   },
 
@@ -700,7 +775,7 @@ export const snapshotActions = {
     // 【修复】状态合并
     const defaultPlayer = createInitialState().player
     this.player = { ...defaultPlayer, ...data.player }
-    
+
     // 深度合并关键对象
     if (data.player && data.player.partTimeJob) {
       this.player.partTimeJob = { ...defaultPlayer.partTimeJob, ...data.player.partTimeJob }
@@ -717,7 +792,7 @@ export const snapshotActions = {
 
     this.npcs = data.npcs
     this.gameTime = data.gameTime
-    
+
     if (data.npcRelationships) {
       this.npcRelationships = data.npcRelationships
     } else {
@@ -727,14 +802,14 @@ export const snapshotActions = {
     if (data.worldState) this.worldState = data.worldState
     if (data.allClassData) this.allClassData = data.allClassData
     if (data.allClubs) this.allClubs = data.allClubs
-    
+
     // 恢复学年进级相关数据
     this.graduatedNpcs = data.graduatedNpcs || []
     this.lastAcademicYear = data.lastAcademicYear || 0
-    
+
     // 恢复考试历史
     this.examHistory = data.examHistory || []
-    
+
     // 恢复其他动态数据
     // @ts-ignore
     this.lastExamDate = data.lastExamDate || null

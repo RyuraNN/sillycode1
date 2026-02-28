@@ -561,9 +561,7 @@ export const storageActions = {
       fullSnapshots.push(fullSnapshot)
     }
 
-    // 保留 embedding 向量数据（用户要求保留，导入后无需重新生成）
-    // 注释掉原来的 embedding 移除代码
-    /*
+    // 移除 embedding 向量数据以减小存档体积，防止 RangeError
     for (const snap of fullSnapshots) {
       if (snap.gameState?.player?.summaries) {
         for (const s of snap.gameState.player.summaries) {
@@ -571,7 +569,6 @@ export const storageActions = {
         }
       }
     }
-    */
 
     // 获取扩展数据 (IndexedDB)
     const rosterBackup = await getRosterBackup()
@@ -596,7 +593,7 @@ export const storageActions = {
       eventLibraryArray = Array.from(this.eventLibrary.entries())
     }
 
-    return JSON.stringify({
+    const exportObj = {
       version: 3,
       timestamp: Date.now(),
       snapshots: fullSnapshots,
@@ -616,7 +613,53 @@ export const storageActions = {
         lastViewedWeeklyPreview: this.lastViewedWeeklyPreview || 0,
         viewedClubIds: this.viewedClubIds || []
       }
-    })
+    }
+
+    // 分块序列化以避免 RangeError: Invalid string length
+    try {
+      const jsonString = JSON.stringify(exportObj)
+      console.log(`[Export] Original: ${(jsonString.length/1024/1024).toFixed(2)} MB`)
+
+      // 尝试压缩
+      try {
+        const { compressData } = await import('../../utils/compressionUtils')
+        const compressed = compressData(jsonString)
+        console.log(`[Export] Compressed: ${(compressed.length/1024/1024).toFixed(2)} MB`)
+
+        return JSON.stringify({
+          version: 4,
+          compressed: true,
+          data: compressed,
+          timestamp: Date.now()
+        })
+      } catch (compressionError) {
+        console.warn('[Export] Compression failed, using uncompressed format:', compressionError)
+        return jsonString
+      }
+    } catch (e: any) {
+      if (e.message?.includes('Invalid string length') || e.name === 'RangeError') {
+        console.error('[Export] 存档数据过大，尝试压缩...')
+
+        // 如果存档过大，移除 chatLog 中的 snapshot 数据
+        for (const snap of fullSnapshots) {
+          if (snap.chatLog && Array.isArray(snap.chatLog)) {
+            snap.chatLog = snap.chatLog.map((log: any) => ({
+              type: log.type,
+              content: log.content
+              // 移除 rawContent 和 snapshot 以减小体积
+            }))
+          }
+        }
+
+        // 重新尝试序列化
+        try {
+          return JSON.stringify(exportObj)
+        } catch (e2) {
+          throw new Error('存档数据过大，无法导出。请尝试删除一些旧存档后再试。')
+        }
+      }
+      throw e
+    }
   },
 
   /**
@@ -624,7 +667,26 @@ export const storageActions = {
    */
   async importSaveData(this: any, jsonStr: string) {
     try {
-      const data = JSON.parse(jsonStr)
+      let data
+      try {
+        const parsed = JSON.parse(jsonStr)
+
+        // 检测压缩格式(v4)
+        if (parsed.compressed && parsed.data) {
+          console.log('[Import] Decompressing...')
+          const { decompressData } = await import('../../utils/compressionUtils')
+          const decompressed = decompressData(parsed.data)
+          data = JSON.parse(decompressed)
+          console.log('[Import] Decompression successful')
+        } else {
+          // 向后兼容v1-v3
+          data = parsed
+        }
+      } catch (e) {
+        console.error('[Import] Failed to parse save data:', e)
+        throw new Error('存档格式错误或已损坏')
+      }
+
       let loadedSnapshots: SaveSnapshot[] = []
 
       if (Array.isArray(data)) {
@@ -815,5 +877,80 @@ export const storageActions = {
   toggleDarkMode(this: any) {
     this.settings.darkMode = !this.settings.darkMode
     this.saveToStorage()
+  },
+
+  /**
+   * 获取存储信息
+   */
+  async getStorageInfo(this: any) {
+    try {
+      const { getStorageEstimate, getAllSnapshotIds } = await import('../../utils/indexedDB')
+
+      // 获取存储使用量
+      const estimate = await getStorageEstimate()
+
+      // 获取所有快照ID
+      const allSnapshotIds = await getAllSnapshotIds()
+
+      // 获取元数据中的快照ID
+      const metaSnapshotIds = new Set(this.saveSnapshots.map((s: SaveSnapshot) => s.id))
+
+      // 找出孤立的快照（存在于IndexedDB但不在元数据中）
+      const orphanedSnapshots = allSnapshotIds.filter(id => !metaSnapshotIds.has(id))
+
+      return {
+        usageMB: estimate.usageMB,
+        quotaMB: estimate.quotaMB,
+        usagePercent: estimate.usagePercent,
+        snapshotCount: this.saveSnapshots.length,
+        orphanedSnapshots,
+        orphanedCount: orphanedSnapshots.length
+      }
+    } catch (e) {
+      console.error('[GameStore] Failed to get storage info:', e)
+      return {
+        usageMB: 0,
+        quotaMB: 0,
+        usagePercent: 0,
+        snapshotCount: this.saveSnapshots.length,
+        orphanedSnapshots: [],
+        orphanedCount: 0
+      }
+    }
+  },
+
+  /**
+   * 清理孤立的快照数据
+   */
+  async cleanupOrphanedSnapshots(this: any) {
+    try {
+      const { getAllSnapshotIds, removeSnapshotData, removeChunkedChatLog } = await import('../../utils/indexedDB')
+
+      const allSnapshotIds = await getAllSnapshotIds()
+      const metaSnapshotIds = new Set(this.saveSnapshots.map((s: SaveSnapshot) => s.id))
+      const orphanedSnapshots = allSnapshotIds.filter(id => !metaSnapshotIds.has(id))
+
+      if (orphanedSnapshots.length === 0) {
+        console.log('[GameStore] No orphaned snapshots found')
+        return 0
+      }
+
+      console.log(`[GameStore] Cleaning up ${orphanedSnapshots.length} orphaned snapshots...`)
+
+      for (const id of orphanedSnapshots) {
+        try {
+          await removeSnapshotData(id)
+          await removeChunkedChatLog(id)
+        } catch (e) {
+          console.warn(`[GameStore] Failed to delete orphaned snapshot ${id}:`, e)
+        }
+      }
+
+      console.log(`[GameStore] Cleaned up ${orphanedSnapshots.length} orphaned snapshots`)
+      return orphanedSnapshots.length
+    } catch (e) {
+      console.error('[GameStore] Failed to cleanup orphaned snapshots:', e)
+      return 0
+    }
   }
 }

@@ -224,6 +224,9 @@ export function createInitialState(): GameState {
       snapshotLimit: 500,
       snapshotMode: 'delta',
       useGeminiMode: false,
+      maxManualSaves: 50,
+      autoCleanupEnabled: true,
+      storageWarningThreshold: 80,
       retrySystem: {
         enabled: true,
         maxRetries: 3,

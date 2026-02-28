@@ -12,11 +12,40 @@
 import type { GameStateData } from '../stores/gameStoreTypes'
 
 /**
- * 快速深拷贝函数（优先使用 structuredClone）
+ * 快速深拷贝函数（性能优化版）
+ *
+ * 性能优化：
+ * - 优先使用原生 structuredClone（比 JSON 快 2-3 倍）
+ * - Fallback 到 JSON 方法（兼容性更好，自动剥离 Proxy）
+ *
+ * @param obj 要克隆的对象
+ * @returns 克隆后的对象
  */
-export const fastClone = typeof structuredClone !== 'undefined'
-  ? structuredClone
-  : <T>(obj: T): T => JSON.parse(JSON.stringify(obj))
+export const fastClone = <T>(obj: T): T => {
+  try {
+    // 优先使用原生 structuredClone（Chrome 98+, Firefox 94+, Safari 15.4+）
+    if (typeof globalThis.structuredClone === 'function') {
+      return globalThis.structuredClone(obj)
+    }
+
+    // Fallback: JSON 方法（自动剥离 Proxy、函数、Symbol 等不可序列化对象）
+    return JSON.parse(JSON.stringify(obj))
+  } catch (e) {
+    console.error('[fastClone] Failed to clone object:', e)
+
+    // 如果 structuredClone 失败，尝试 JSON 方法作为最后的 fallback
+    if (typeof globalThis.structuredClone === 'function') {
+      try {
+        return JSON.parse(JSON.stringify(obj))
+      } catch (e2) {
+        console.error('[fastClone] JSON fallback also failed:', e2)
+        throw new Error('无法克隆对象：包含不可序列化的数据')
+      }
+    }
+
+    throw new Error('无法克隆对象：包含不可序列化的数据')
+  }
+}
 
 /** 增量快照数据 */
 export interface DeltaSnapshot {
