@@ -32,7 +32,7 @@ function debounceSaveSocialData(_partialData) {
     try {
       const gameStore = useGameStore()
       const runId = gameStore.currentRunId
-      if (runId && gameStore.npcRelationships) {
+      if (runId && runId !== 'temp_editing' && gameStore.npcRelationships) {
         const snapshot = JSON.parse(JSON.stringify(gameStore.npcRelationships))
         saveNpcRelationships(runId, snapshot).catch(e =>
           console.error('[RelationshipManager] IndexedDB save failed:', e)
@@ -57,7 +57,7 @@ export async function flushPendingSocialData() {
   try {
     const gameStore = useGameStore()
     const runId = gameStore.currentRunId
-    if (runId && gameStore.npcRelationships) {
+    if (runId && runId !== 'temp_editing' && gameStore.npcRelationships) {
       const snapshot = JSON.parse(JSON.stringify(gameStore.npcRelationships))
       await saveNpcRelationships(runId, snapshot)
     }
@@ -858,15 +858,15 @@ export function exportRelationshipsForWorldbook() {
  */
 export function importRelationshipsFromWorldbook(content) {
   const gameStore = useGameStore()
-  const lines = content.split('\n').filter(line => 
+  const lines = content.split('\n').filter(line =>
     line.trim() && !line.startsWith('#')
   )
-  
+
   for (const line of lines) {
     const parts = line.split('|')
     if (parts.length >= 6) {
       const [sourceName, targetName, intimacy, trust, passion, hostility, groups, tags] = parts
-      
+
       setRelationship(sourceName.trim(), targetName.trim(), {
         intimacy: parseInt(intimacy) || 0,
         trust: parseInt(trust) || 0,
@@ -877,6 +877,43 @@ export function importRelationshipsFromWorldbook(content) {
       })
     }
   }
-  
+
   console.log(`[RelationshipManager] Imported ${lines.length} relationships`)
+}
+
+/**
+ * 清空所有角色的关系数据
+ */
+export async function clearAllRelationships() {
+  const gameStore = useGameStore()
+
+  if (!gameStore.npcRelationships) return
+
+  // 清空所有关系，但保留角色基本信息
+  for (const charName in gameStore.npcRelationships) {
+    if (gameStore.npcRelationships[charName].relations) {
+      gameStore.npcRelationships[charName].relations = {}
+    }
+  }
+
+  // 立即保存
+  await flushPendingSocialData()
+
+  // 同步到世界书
+  await syncRelationshipsToWorldbook()
+
+  console.log('[RelationshipManager] Cleared all relationships')
+}
+
+/**
+ * 同步关系数据到世界书
+ */
+export async function syncRelationshipsToWorldbook() {
+  try {
+    const gameStore = useGameStore()
+    await saveSocialData(gameStore.npcRelationships)
+    console.log('[RelationshipManager] Synced relationships to worldbook')
+  } catch (e) {
+    console.error('[RelationshipManager] Failed to sync to worldbook:', e)
+  }
 }

@@ -32,7 +32,9 @@ const exportSelection = ref({
   roster: true,
   characterPool: true,
   course: true,
-  events: true
+  events: true,
+  clubs: true,           // 新增
+  relationships: true    // 新增
 })
 
 // 导入选择（根据文件内容动态生成）
@@ -42,7 +44,9 @@ const importSelection = ref({
   roster: false,
   characterPool: false,
   course: false,
-  events: false
+  events: false,
+  clubs: false,           // 新增
+  relationships: false    // 新增
 })
 
 const syncToWorldbook = ref(false)
@@ -54,7 +58,9 @@ const moduleLabels = {
   roster: { name: '班级名册', icon: '📋', desc: '班级、教师和学生分配' },
   characterPool: { name: '角色池', icon: '👥', desc: '所有角色（含未分配）' },
   course: { name: '课程表', icon: '📚', desc: '课程池和选修课配置' },
-  events: { name: '事件数据', icon: '🎭', desc: '自定义事件和触发器' }
+  events: { name: '事件数据', icon: '🎭', desc: '自定义事件和触发器' },
+  clubs: { name: '社团数据', icon: '🏫', desc: '所有社团和成员配置' },        // 新增
+  relationships: { name: '关系数据', icon: '💞', desc: 'NPC关系和印象标签' }  // 新增
 }
 
 // 深拷贝辅助
@@ -106,6 +112,14 @@ const handleExport = async () => {
         triggers: deepClone(gameStore.eventTriggers),
         calendar: deepClone(gameStore.player.customCalendarEvents || [])
       }
+    }
+
+    if (exportSelection.value.clubs) {
+      exportData.modules.clubs = deepClone(gameStore.allClubs || {})
+    }
+
+    if (exportSelection.value.relationships) {
+      exportData.modules.relationships = deepClone(gameStore.npcRelationships || {})
     }
 
     const jsonString = JSON.stringify(exportData, null, 2)
@@ -185,7 +199,9 @@ const parseDebugImportText = () => {
       roster: !!data.modules.roster,
       characterPool: !!data.modules.characterPool,
       course: !!data.modules.course,
-      events: !!data.modules.events
+      events: !!data.modules.events,
+      clubs: !!data.modules.clubs,
+      relationships: !!data.modules.relationships
     }
 
   } catch (err) {
@@ -222,7 +238,9 @@ const handleFileSelect = (event) => {
         roster: !!data.modules.roster,
         characterPool: !!data.modules.characterPool,
         course: !!data.modules.course,
-        events: !!data.modules.events
+        events: !!data.modules.events,
+        clubs: !!data.modules.clubs,
+        relationships: !!data.modules.relationships
       }
 
     } catch (err) {
@@ -311,18 +329,45 @@ const handleImport = async () => {
           gameStore.eventLibrary.set(id, eventData)
         }
       }
-      
+
       // 恢复触发器
       if (data.events.triggers) {
         gameStore.eventTriggers = [...data.events.triggers]
       }
-      
+
       // 恢复日历事件
       if (data.events.calendar) {
         gameStore.player.customCalendarEvents = [...data.events.calendar]
       }
-      
+
       results.push('事件数据')
+    }
+
+    // 导入社团数据
+    if (importSelection.value.clubs && data.clubs) {
+      gameStore.allClubs = deepClone(data.clubs)
+      console.log('[DataTransfer] Imported clubs:', Object.keys(data.clubs).length)
+      results.push('社团数据')
+    }
+
+    // 导入关系数据
+    if (importSelection.value.relationships && data.relationships) {
+      gameStore.npcRelationships = deepClone(data.relationships)
+
+      // 保存到 IndexedDB
+      if (gameStore.currentRunId && gameStore.currentRunId !== 'temp_editing') {
+        const { saveNpcRelationships } = await import('../utils/indexedDB')
+        await saveNpcRelationships(gameStore.currentRunId, deepClone(data.relationships))
+      }
+
+      // 同步到世界书
+      if (syncToWorldbook.value) {
+        const { syncRelationshipsToWorldbook } = await import('../utils/relationshipManager')
+        await syncRelationshipsToWorldbook()
+      }
+
+      console.log('[DataTransfer] Imported relationships:', Object.keys(data.relationships).length)
+      results.push('关系数据')
     }
 
     if (results.length > 0) {

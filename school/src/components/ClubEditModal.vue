@@ -100,12 +100,29 @@
 
           <!-- 成员管理（仅编辑模式） -->
           <div v-if="isEditing" class="form-section">
-            <h4>成员管理 <span class="member-count">{{ (localForm.members || []).length }}人</span></h4>
-            <div class="members-list">
+            <div class="section-header">
+              <h4>成员管理 <span class="member-count">{{ (localForm.members || []).length }}人</span></h4>
+              <div class="member-tools">
+                <label class="checkbox-label">
+                  <input type="checkbox" v-model="allowTextSelect" />
+                  <span>允许选择文字</span>
+                </label>
+                <button
+                  class="btn-remove-ghosts"
+                  @click="removeGhostMembers"
+                  :disabled="ghostMembers.size === 0"
+                  title="移除所有幽灵成员"
+                >
+                  👻 清除幽灵 ({{ ghostMembers.size }})
+                </button>
+              </div>
+            </div>
+            <div class="members-list" :class="{ 'allow-select': allowTextSelect }">
               <span
                 v-for="(member, idx) in (localForm.members || [])"
                 :key="idx"
                 class="member-tag"
+                :class="{ 'ghost': ghostMembers.has(member) }"
               >
                 {{ member }}
                 <button class="member-remove" @click="removeMember(idx)">✕</button>
@@ -143,7 +160,8 @@ const props = defineProps({
   show: Boolean,
   form: Object,
   isEditing: Boolean,
-  locationName: { type: String, default: '' }
+  locationName: { type: String, default: '' },
+  characterPool: { type: Array, default: () => [] }
 })
 
 const emit = defineEmits(['close', 'save', 'update:form', 'select-location'])
@@ -154,6 +172,14 @@ const localForm = computed({
 })
 
 const newMemberName = ref('')
+const allowTextSelect = ref(false)
+
+// 计算哪些成员是幽灵角色
+const ghostMembers = computed(() => {
+  if (!props.characterPool || !localForm.value.members) return new Set()
+  const validNames = new Set(props.characterPool.map(c => c.name))
+  return new Set(localForm.value.members.filter(name => !validNames.has(name)))
+})
 
 const addMember = () => {
   const name = newMemberName.value.trim()
@@ -171,6 +197,20 @@ const removeMember = (index) => {
   if (localForm.value.members) {
     localForm.value.members.splice(index, 1)
   }
+}
+
+const removeGhostMembers = () => {
+  const ghosts = Array.from(ghostMembers.value)
+  if (ghosts.length === 0) {
+    alert('当前没有幽灵成员')
+    return
+  }
+
+  if (!confirm(`确定要移除 ${ghosts.length} 个幽灵成员吗？\n\n${ghosts.join('、')}`)) {
+    return
+  }
+
+  localForm.value.members = localForm.value.members.filter(name => !ghostMembers.value.has(name))
 }
 
 const handleSave = () => {
@@ -271,16 +311,74 @@ const handleSave = () => {
 .mode-desc { color: #999; font-size: 12px; margin-left: auto; }
 .form-hint { color: #888; font-size: 12px; margin-top: 4px; display: block; }
 
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.member-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #aaa;
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.btn-remove-ghosts {
+  padding: 4px 8px;
+  background: #FF9800;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.15s;
+}
+
+.btn-remove-ghosts:hover {
+  background: #F57C00;
+}
+
+.btn-remove-ghosts:disabled {
+  background: #555;
+  color: #888;
+  cursor: not-allowed;
+}
+
 .member-count { color: #888; font-size: 13px; font-weight: 400; margin-left: 6px; }
 .members-list {
   display: flex; flex-wrap: wrap; gap: 6px;
   padding: 10px; background: #2a2a2a; border: 1px solid #444;
   border-radius: 6px; min-height: 40px; margin-bottom: 10px;
+  user-select: none;
+}
+.members-list.allow-select {
+  user-select: text;
 }
 .member-tag {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 4px 10px; background: #3a3a3a; border: 1px solid #555;
   border-radius: 14px; color: #ddd; font-size: 13px;
+}
+.member-tag.ghost {
+  border-color: #FF9800;
+  background: rgba(255, 152, 0, 0.1);
+}
+.member-tag.ghost::before {
+  content: '👻 ';
 }
 .member-remove {
   background: none; border: none; color: #999; cursor: pointer;

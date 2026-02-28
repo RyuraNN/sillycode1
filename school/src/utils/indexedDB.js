@@ -240,7 +240,18 @@ export async function saveNpcRelationships(runId, data) {
 }
 
 export async function getNpcRelationships(runId) {
-  return getItem(`npc_rel_${runId}`)
+  try {
+    const data = await getItem(`npc_rel_${runId}`)
+    if (data) {
+      // 导入反序列化函数
+      const { deserializeFromStorage } = await import('./snapshotUtils')
+      return deserializeFromStorage(data)
+    }
+    return null
+  } catch (e) {
+    console.error('[IndexedDB] Error getting npcRelationships:', e)
+    return null
+  }
 }
 
 // Storage Persistence Helper

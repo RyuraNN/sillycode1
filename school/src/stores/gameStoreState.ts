@@ -10,7 +10,7 @@ import type { GameState } from './gameStoreTypes'
  */
 export function createInitialState(): GameState {
   return {
-    currentRunId: Date.now().toString(36),
+    currentRunId: 'temp_editing',
     currentFloor: 0,
     _lastBaseFloor: 0,
     mapSelectionMode: false,

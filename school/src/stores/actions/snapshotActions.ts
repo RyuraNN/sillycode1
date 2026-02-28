@@ -49,6 +49,12 @@ export const snapshotActions = {
    * 创建存档快照
    */
   async createSnapshot(this: any, chatLog: ChatLogEntry[], messageIndex: number, label?: string) {
+    // 如果是临时编辑状态，生成真实的 runId
+    if (this.currentRunId === 'temp_editing') {
+      this.currentRunId = Date.now().toString(36)
+      console.log('[GameStore] Generated real runId:', this.currentRunId)
+    }
+
     // 深拷贝 player 并剥离 embedding 向量，避免快照体积膨胀
     const playerCopy = fastClone(this.player)
     if (Array.isArray(playerCopy.summaries)) {
@@ -347,11 +353,15 @@ export const snapshotActions = {
       const { saveNpcRelationships } = await import('../../utils/indexedDB')
       const { clearPendingSocialData } = await import('../../utils/relationshipManager')
       clearPendingSocialData()  // 清空旧存档的 pending 写入
-      if (this.currentRunId && this.npcRelationships) {
-        await saveNpcRelationships(
-          this.currentRunId,
-          fastClone(this.npcRelationships)
-        )
+      if (this.currentRunId && this.currentRunId !== 'temp_editing' && this.npcRelationships) {
+        try {
+          const cloned = fastClone(this.npcRelationships)
+          await saveNpcRelationships(this.currentRunId, cloned)
+        } catch (cloneError) {
+          console.error('[snapshotActions] Failed to clone npcRelationships:', cloneError)
+          console.error('[snapshotActions] Problematic data:', this.npcRelationships)
+          throw cloneError
+        }
       }
     } catch (e) {
       console.warn('[snapshotActions] Failed to save relationships to IndexedDB:', e)
@@ -640,7 +650,7 @@ export const snapshotActions = {
       const { saveNpcRelationships } = await import('../../utils/indexedDB')
       const { clearPendingSocialData } = await import('../../utils/relationshipManager')
       clearPendingSocialData()
-      if (this.currentRunId && this.npcRelationships) {
+      if (this.currentRunId && this.currentRunId !== 'temp_editing' && this.npcRelationships) {
         await saveNpcRelationships(
           this.currentRunId,
           fastClone(this.npcRelationships)

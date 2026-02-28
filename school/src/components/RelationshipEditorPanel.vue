@@ -21,11 +21,25 @@
         >
           ☑️
         </button>
+        <button
+          class="btn-clear-all"
+          @click="handleClearAllRelationships"
+          title="清空所有角色的关系数据"
+        >
+          🗑️
+        </button>
       </div>
 
       <!-- 角色批量模式工具栏 -->
       <div v-if="charBatchMode" class="batch-toolbar-left char-batch">
         <div class="batch-info">已选 {{ charBatchSelected.size }} 个角色</div>
+        <button
+          class="btn-batch-select-all"
+          @click="selectAllFilteredChars"
+          title="全选当前筛选结果"
+        >
+          ☑️ 全选
+        </button>
         <button
           class="btn-batch-danger"
           @click="handleBatchDeleteCharacters"
@@ -281,7 +295,7 @@ const emit = defineEmits([
   'edit-relationship', 'delete-relationship', 'add-relationship',
   'clear-char-relations', 'clear-char-impressions', 'remove-character',
   'clear-ghost-references', 'clear-all-ghosts', 'batch-delete-relationships',
-  'batch-delete-characters'
+  'batch-delete-characters', 'clear-all-relationships'  // 新增
 ])
 
 const searchQuery = ref('')
@@ -301,28 +315,62 @@ const axisNames = { intimacy: '亲密', trust: '信赖', passion: '激情', host
 
 /**
  * 检查角色是否在名录中（已勾选）
+ * 优先级：
+ * 1. 检查 role 字段（如果存在）
+ * 2. 检查是否在班级中被勾选
+ * 3. 检查是否是教师（通过 allClassData）
  */
 function isCharInRoster(charName) {
-  if (!props.currentRosterState || Object.keys(props.currentRosterState).length === 0) {
-    return true  // 无名录状态时，默认所有角色都在名录中
-  }
-
-  // 检查是否在任何班级中被勾选
-  for (const [classId, students] of Object.entries(props.currentRosterState)) {
-    if (students[charName] === true) {
-      return true
+  // 优先检查 characterPool 中的 role 字段
+  if (props.characterPool && Array.isArray(props.characterPool)) {
+    const char = props.characterPool.find(c => c.name === charName)
+    if (char && char.role) {
+      // 学生和教师算在名录中，校外人员不算
+      if (char.role === 'student' || char.role === 'teacher') {
+        return true
+      }
+      if (char.role === 'external') {
+        return false
+      }
+      // 其他 role（如 'staff'）继续后续检查
     }
   }
 
-  // 检查是否是教师（教师始终视为在名录中）
+  // 如果没有 characterPool 或找不到角色，检查 allClassData
   if (props.allClassData) {
     for (const classData of Object.values(props.allClassData)) {
-      if (classData.headTeacher?.name === charName) return true
-      if (classData.teachers?.some(t => t.name === charName)) return true
+      // 检查是否是教师
+      if (classData.headTeacher?.name === charName) {
+        if (classData.headTeacher.role === 'external') return false
+        return true
+      }
+      if (classData.teachers?.some(t => t.name === charName)) {
+        const teacher = classData.teachers.find(t => t.name === charName)
+        if (teacher?.role === 'external') return false
+        return true
+      }
+
+      // 检查是否是学生
+      if (classData.students?.some(s => s.name === charName)) {
+        const student = classData.students.find(s => s.name === charName)
+        if (student?.role === 'external') return false
+        return true
+      }
     }
   }
 
-  return false
+  // 检查是否在名录状态中被勾选
+  if (props.currentRosterState && Object.keys(props.currentRosterState).length > 0) {
+    for (const [classId, students] of Object.entries(props.currentRosterState)) {
+      if (students[charName] === true) {
+        return true
+      }
+    }
+    return false
+  }
+
+  // 无名录状态时，默认所有角色都在名录中
+  return true
 }
 
 // 角色列表（含幽灵角色）
@@ -561,6 +609,36 @@ function handleBatchDeleteCharacters() {
   charBatchSelected.value = new Set()
   charBatchMode.value = false
 }
+
+function selectAllFilteredChars() {
+  const s = new Set(charBatchSelected.value)
+  for (const char of filteredCharacters.value) {
+    if (!char.ghost) {  // 排除幽灵角色
+      s.add(char.name)
+    }
+  }
+  charBatchSelected.value = s
+}
+
+function handleClearAllRelationships() {
+  const count = allCharacters.value.filter(c => !c.ghost && c.relCount > 0).length
+
+  if (count === 0) {
+    alert('当前没有任何关系数据')
+    return
+  }
+
+  if (!confirm(`⚠️ 确定清空所有角色的关系数据？\n\n这将删除 ${count} 个角色的所有关系，此操作不可撤销！`)) {
+    return
+  }
+
+  emit('clear-all-relationships')
+}
+
+  emit('batch-delete-characters', Array.from(charBatchSelected.value))
+  charBatchSelected.value = new Set()
+  charBatchMode.value = false
+}
 </script>
 
 <style scoped>
@@ -735,6 +813,37 @@ function handleBatchDeleteCharacters() {
   border-bottom: 1px solid #333; flex-shrink: 0;
 }
 .ghost-notice p { margin: 0; }
+
+.btn-clear-all {
+  padding: 6px 10px;
+  background: #d32f2f;
+  border: 1px solid #d32f2f;
+  color: white;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.15s;
+  min-width: 32px;
+}
+
+.btn-clear-all:hover {
+  background: #b71c1c;
+}
+
+.btn-batch-select-all {
+  padding: 5px 10px;
+  background: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.15s;
+}
+
+.btn-batch-select-all:hover {
+  background: #45a049;
+}
 
 /* 宽屏隐藏返回按钮 */
 .btn-back-mobile { display: none; }

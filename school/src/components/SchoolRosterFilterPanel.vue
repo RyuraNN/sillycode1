@@ -1958,6 +1958,17 @@ const handleBatchDeleteCharacters = async (charNames) => {
   showMessage(`已批量删除 ${count} 个角色的所有关系数据`)
 }
 
+const handleClearAllRelationships = async () => {
+  try {
+    const { clearAllRelationships } = await import('../utils/relationshipManager')
+    await clearAllRelationships()
+    showMessage('已清空所有关系数据')
+  } catch (e) {
+    console.error('[RosterFilter] Failed to clear all relationships:', e)
+    showMessage('清空失败：' + e.message)
+  }
+}
+
 const handleClearGhostReferences = async (charName) => {
   if (!confirm(`确定清除所有角色对幽灵角色「${charName}」的引用？`)) return
   const rels = gameStore.npcRelationships
@@ -2278,6 +2289,7 @@ const handleSaveComposer = async () => {
               @clear-all-ghosts="handleClearAllGhosts"
               @batch-delete-relationships="handleBatchDeleteRelationships"
               @batch-delete-characters="handleBatchDeleteCharacters"
+              @clear-all-relationships="handleClearAllRelationships"
             />
           </div>
 
@@ -2362,6 +2374,7 @@ const handleSaveComposer = async () => {
       v-model:form="clubEditForm"
       :is-editing="!!editingClub"
       :location-name="clubLocationName"
+      :character-pool="characterPool"
       @close="showClubEditor = false"
       @save="handleSaveClub"
       @select-location="handleClubSelectLocation"

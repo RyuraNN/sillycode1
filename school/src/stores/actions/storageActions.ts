@@ -262,7 +262,7 @@ export const storageActions = {
     // 0. 优先从 IndexedDB 加载（按 currentRunId 隔离）
     try {
       const { getNpcRelationships } = await import('../../utils/indexedDB')
-      if (this.currentRunId) {
+      if (this.currentRunId && this.currentRunId !== 'temp_editing') {
         const saved = await getNpcRelationships(this.currentRunId)
         if (saved && typeof saved === 'object' && Object.keys(saved).length > 0) {
           console.log('[GameStore] Loaded NPC relationships from IndexedDB for run:', this.currentRunId)

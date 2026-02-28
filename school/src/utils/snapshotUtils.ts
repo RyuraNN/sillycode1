@@ -12,40 +12,107 @@
 import type { GameStateData } from '../stores/gameStoreTypes'
 
 /**
+ * 序列化不可克隆的数据
+ * 只处理关键字段，保持轻量级
+ */
+function serializeForStorage(obj: any): any {
+  if (obj === null || obj === undefined) return obj
+
+  // 处理 Date 对象
+  if (obj instanceof Date) {
+    return { __type: 'Date', value: obj.toISOString() }
+  }
+
+  // 处理 RegExp
+  if (obj instanceof RegExp) {
+    return { __type: 'RegExp', source: obj.source, flags: obj.flags }
+  }
+
+  if (typeof obj !== 'object') return obj
+
+  if (Array.isArray(obj)) {
+    return obj.map(item => serializeForStorage(item))
+  }
+
+  const serialized: any = {}
+  for (const key in obj) {
+    if (!obj.hasOwnProperty(key)) continue
+    const value = obj[key]
+
+    // 跳过函数、Symbol、undefined
+    if (typeof value === 'function' || typeof value === 'symbol' || value === undefined) {
+      continue
+    }
+
+    serialized[key] = serializeForStorage(value)
+  }
+
+  return serialized
+}
+
+/**
+ * 反序列化数据
+ */
+function deserializeFromStorage(obj: any): any {
+  if (obj === null || obj === undefined) return obj
+
+  // 处理特殊类型标记
+  if (obj && typeof obj === 'object' && obj.__type) {
+    if (obj.__type === 'Date') {
+      return new Date(obj.value)
+    }
+    if (obj.__type === 'RegExp') {
+      return new RegExp(obj.source, obj.flags)
+    }
+  }
+
+  if (typeof obj !== 'object') return obj
+
+  if (Array.isArray(obj)) {
+    return obj.map(item => deserializeFromStorage(item))
+  }
+
+  const deserialized: any = {}
+  for (const key in obj) {
+    if (!obj.hasOwnProperty(key)) continue
+    deserialized[key] = deserializeFromStorage(obj[key])
+  }
+
+  return deserialized
+}
+
+/**
  * 快速深拷贝函数（性能优化版）
  *
  * 性能优化：
- * - 优先使用原生 structuredClone（比 JSON 快 2-3 倍）
- * - Fallback 到 JSON 方法（兼容性更好，自动剥离 Proxy）
+ * - 使用序列化/反序列化方案，保留关键数据类型（Date、特殊对象标记）
+ * - 移除不可序列化的数据（函数、Symbol、undefined）
+ * - 只在保存到 IndexedDB 时序列化，内存中保持原始对象
  *
  * @param obj 要克隆的对象
  * @returns 克隆后的对象
  */
 export const fastClone = <T>(obj: T): T => {
   try {
-    // 优先使用原生 structuredClone（Chrome 98+, Firefox 94+, Safari 15.4+）
-    if (typeof globalThis.structuredClone === 'function') {
-      return globalThis.structuredClone(obj)
-    }
+    // 序列化处理
+    const serialized = serializeForStorage(obj)
 
-    // Fallback: JSON 方法（自动剥离 Proxy、函数、Symbol 等不可序列化对象）
-    return JSON.parse(JSON.stringify(obj))
+    // 使用 JSON 方法克隆
+    const cloned = JSON.parse(JSON.stringify(serialized))
+
+    // 反序列化恢复特殊类型
+    return deserializeFromStorage(cloned)
   } catch (e) {
     console.error('[fastClone] Failed to clone object:', e)
-
-    // 如果 structuredClone 失败，尝试 JSON 方法作为最后的 fallback
-    if (typeof globalThis.structuredClone === 'function') {
-      try {
-        return JSON.parse(JSON.stringify(obj))
-      } catch (e2) {
-        console.error('[fastClone] JSON fallback also failed:', e2)
-        throw new Error('无法克隆对象：包含不可序列化的数据')
-      }
-    }
-
+    console.error('[fastClone] Problematic object:', obj)
     throw new Error('无法克隆对象：包含不可序列化的数据')
   }
 }
+
+/**
+ * 导出反序列化函数供外部使用
+ */
+export { deserializeFromStorage }
 
 /** 增量快照数据 */
 export interface DeltaSnapshot {
