@@ -851,9 +851,11 @@ function handleClearAllRelationships() {
   .left-panel {
     width: 100%; min-width: unset;
     border-right: none; border-bottom: 1px solid #444;
+    flex: 1;
+    min-height: 0;
   }
 
-  .right-panel { min-height: 0; }
+  .right-panel { min-height: 0; flex: 1; }
 
   /* 选中角色后：隐藏列表，详情全屏 */
   .rel-editor-panel.has-selection .left-panel { display: none; }

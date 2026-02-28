@@ -2455,6 +2455,7 @@ const handleSaveComposer = async () => {
   flex-direction: column;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
   overflow: hidden;
+  touch-action: pan-y;
 }
 
 .panel-header {
@@ -2577,6 +2578,7 @@ const handleSaveComposer = async () => {
   flex: 1;
   overflow: hidden;
   background: #1a1a1a;
+  touch-action: pan-y;
 }
 
 .tab-content {
@@ -2584,6 +2586,7 @@ const handleSaveComposer = async () => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  touch-action: pan-y;
 }
 
 .filter-tab-layout {
