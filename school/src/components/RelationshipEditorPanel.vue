@@ -637,11 +637,12 @@ function handleClearAllRelationships() {
 </script>
 
 <style scoped>
-.rel-editor-panel { display: flex; height: 100%; overflow: hidden; flex: 1; min-height: 0; }
+.rel-editor-panel { display: flex; height: 100%; overflow: hidden; flex: 1; min-height: 0; touch-action: pan-y; }
 /* 左侧面板 */
 .left-panel {
   width: 260px; min-width: 220px; border-right: 1px solid #444;
   display: flex; flex-direction: column; background: #1e1e1e;
+  touch-action: pan-y;
 }
 .panel-toolbar {
   display: flex; gap: 6px; padding: 10px; border-bottom: 1px solid #333; flex-shrink: 0;
@@ -655,11 +656,11 @@ function handleClearAllRelationships() {
   background: #2a2a2a; border: 1px solid #444; color: #ccc;
   padding: 6px; border-radius: 6px; font-size: 12px;
 }
-.char-list { flex: 1; overflow-y: auto; padding: 6px; }
+.char-list { flex: 1; overflow-y: auto; padding: 6px; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
 .char-card {
   display: flex; align-items: center; gap: 8px; padding: 8px 10px;
   border-radius: 6px; cursor: pointer; transition: background 0.15s;
-  margin-bottom: 2px;
+  margin-bottom: 2px; touch-action: manipulation;
 }
 .char-card:hover { background: #2a2a2a; }
 .char-card.selected { background: #2a3a2a; border: 1px solid #4CAF50; }
@@ -676,7 +677,7 @@ function handleClearAllRelationships() {
   flex-shrink: 0;
 }
 /* 右侧面板 */
-.right-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.right-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; touch-action: pan-y; }
 .char-header {
   display: flex; justify-content: space-between; align-items: center;
   padding: 12px 16px; border-bottom: 1px solid #333; flex-shrink: 0;
@@ -733,10 +734,11 @@ function handleClearAllRelationships() {
   display: flex; gap: 6px; padding: 8px 16px; border-bottom: 1px solid #333; flex-shrink: 0;
 }
 /* 关系列表 */
-.rel-list { flex: 1; overflow-y: auto; padding: 8px 16px; }
+.rel-list { flex: 1; overflow-y: auto; padding: 8px 16px; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
 .rel-card {
   background: #2a2a2a; border: 1px solid #333; border-radius: 8px;
   padding: 10px 12px; margin-bottom: 8px; transition: border-color 0.15s;
+  touch-action: manipulation;
 }
 .rel-card:hover { border-color: #555; }
 .rel-card.readonly { opacity: 0.7; }
@@ -987,6 +989,7 @@ function handleClearAllRelationships() {
   align-items: center;
   margin-right: 6px;
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 .batch-checkbox input[type="checkbox"] {
