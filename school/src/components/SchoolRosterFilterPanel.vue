@@ -1899,7 +1899,10 @@ const handleSaveRelationship = async (formData) => {
 
   setRelationship(source, target, cleanData)
   await flushPendingSocialData()
-  await syncRelationshipsToWorldbook()
+  // 只有在编辑当前运行时数据时才同步到世界书，编辑存档数据时不同步
+  if (!snapshotRelSource.value) {
+    await syncRelationshipsToWorldbook()
+  }
   showRelationshipEditor.value = false
   showMessage(`关系 ${source} → ${target} 已保存`)
 }
@@ -1908,7 +1911,10 @@ const handleDeleteRelationship = async (source, target) => {
   if (!confirm(`确定删除 ${source} ↔ ${target} 的双向关系？`)) return
   removeRelationship(source, target)
   await flushPendingSocialData()
-  await syncRelationshipsToWorldbook()
+  // 只有在编辑当前运行时数据时才同步到世界书
+  if (!snapshotRelSource.value) {
+    await syncRelationshipsToWorldbook()
+  }
   showMessage(`已删除 ${source} ↔ ${target} 的关系`)
 }
 
@@ -1919,7 +1925,10 @@ const handleBatchDeleteRelationships = async (pairs) => {
     removeRelationship(source, target)
   }
   await flushPendingSocialData()
-  await syncRelationshipsToWorldbook()
+  // 只有在编辑当前运行时数据时才同步到世界书
+  if (!snapshotRelSource.value) {
+    await syncRelationshipsToWorldbook()
+  }
   showMessage(`已批量删除 ${pairs.length} 条关系`)
 }
 
@@ -1934,7 +1943,10 @@ const handleClearCharRelations = async (charName) => {
     if (otherRels?.[charName]) delete otherRels[charName]
   }
   await flushPendingSocialData()
-  await syncRelationshipsToWorldbook()
+  // 只有在编辑当前运行时数据时才同步到世界书
+  if (!snapshotRelSource.value) {
+    await syncRelationshipsToWorldbook()
+  }
   await saveImpressionDataImmediate()
   showMessage(`已清空「${charName}」的所有关系`)
 }
@@ -1946,7 +1958,10 @@ const handleClearCharImpressions = async (charName) => {
     if (rel && rel.tags) rel.tags = []
   }
   await flushPendingSocialData()
-  await syncRelationshipsToWorldbook()
+  // 只有在编辑当前运行时数据时才同步到世界书
+  if (!snapshotRelSource.value) {
+    await syncRelationshipsToWorldbook()
+  }
   await saveImpressionDataImmediate()
   showMessage(`已清除所有角色对「${charName}」的印象标签`)
 }
@@ -1955,7 +1970,10 @@ const handleRemoveCharacter = async (charName) => {
   if (!confirm(`⚠️ 确定完全移除「${charName}」？\n将从关系数据中彻底删除该角色及所有相关关系。`)) return
   removeCharacterFromRelations(charName, true)
   await flushPendingSocialData()
-  await syncRelationshipsToWorldbook()
+  // 只有在编辑当前运行时数据时才同步到世界书
+  if (!snapshotRelSource.value) {
+    await syncRelationshipsToWorldbook()
+  }
   showMessage(`已移除角色「${charName}」`)
 }
 
@@ -1970,7 +1988,10 @@ const handleBatchDeleteCharacters = async (charNames) => {
   }
 
   await flushPendingSocialData()
-  await syncRelationshipsToWorldbook()
+  // 只有在编辑当前运行时数据时才同步到世界书
+  if (!snapshotRelSource.value) {
+    await syncRelationshipsToWorldbook()
+  }
   await saveImpressionDataImmediate()
 
   showMessage(`已批量删除 ${count} 个角色的所有关系数据`)
@@ -1996,7 +2017,10 @@ const handleClearGhostReferences = async (charName) => {
     if (otherRels?.[charName]) delete otherRels[charName]
   }
   await flushPendingSocialData()
-  await syncRelationshipsToWorldbook()
+  // 只有在编辑当前运行时数据时才同步到世界书
+  if (!snapshotRelSource.value) {
+    await syncRelationshipsToWorldbook()
+  }
   await saveImpressionDataImmediate()
   showMessage(`已清除所有对幽灵角色「${charName}」的引用`)
 }
@@ -2035,7 +2059,10 @@ const handleClearAllGhosts = async () => {
   }
 
   await flushPendingSocialData()
-  await syncRelationshipsToWorldbook()
+  // 只有在编辑当前运行时数据时才同步到世界书
+  if (!snapshotRelSource.value) {
+    await syncRelationshipsToWorldbook()
+  }
   await saveImpressionDataImmediate()
   showMessage(`已清除 ${ghosts.size} 个幽灵角色的 ${totalCleared} 条引用关系`)
 }

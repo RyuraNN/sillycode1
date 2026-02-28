@@ -617,7 +617,10 @@ export function addRelationshipEvent(sourceName, targetName, event) {
   
   if (!current.events) current.events = []
   current.events.push(eventData)
-  
+
+  // 触发持久化，确保事件数据保存到当前存档
+  debounceSaveSocialData()
+
   // 应用事件影响
   if (event.impact) {
     updateRelationshipDelta(sourceName, targetName, event.impact)
