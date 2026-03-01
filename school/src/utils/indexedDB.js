@@ -254,6 +254,11 @@ export async function getNpcRelationships(runId) {
   }
 }
 
+export async function removeNpcRelationships(runId) {
+  console.log(`[IndexedDB] Removing npc relationships for run: ${runId}`)
+  return removeItem(`npc_rel_${runId}`)
+}
+
 // Storage Persistence Helper
 export async function requestPersistence() {
   if (navigator.storage && navigator.storage.persist) {

@@ -1783,10 +1783,20 @@ const handleEditSubmit = (content) => {
     // 清理系统标签
     let cleanedContent = cleanSystemTags(contentToShow)
     cleanedContent = cleanedContent.replace(/<suggested_replies>[\s\S]*?<\/suggested_replies>/gi, '')
-    
+
     log.content = cleanedContent
+
+    // 【修复】如果编辑的是 AI 消息且开启了建议回复功能，重新提取建议回复
+    if (log.type === 'ai' && gameStore.settings.suggestedReplies) {
+      const replies = extractSuggestedReplies(content)
+      if (replies?.length > 0) {
+        suggestedReplies.value = replies
+      } else {
+        suggestedReplies.value = []
+      }
+    }
   }
-  
+
   showEditModal.value = false
   editingMessageContent.value = ''
   editingMessageIndex.value = -1
@@ -1863,6 +1873,9 @@ const openSavePanel = (mode) => {
 }
 
 const handleRestore = async (snapshot) => {
+  // 【修复】清空建议回复，避免显示上一个存档的过期建议
+  suggestedReplies.value = []
+
   gameLog.value = [...snapshot.chatLog]
   await loadImagesFromLog(gameLog.value)
   scrollToBottom(contentAreaRef.value)
@@ -2003,6 +2016,8 @@ onUnmounted(() => {
   contentRenderCache.clear()
   imageGenerationCache.clear()
   completedImages.clear()
+  // 【修复】清空建议回复状态
+  suggestedReplies.value = []
   if (scrollDebounceTimer) {
     clearTimeout(scrollDebounceTimer)
   }
@@ -2035,6 +2050,13 @@ watch(() => gameStore.settings.assistantAI?.enabled, (newVal) => {
     setVariableParsingWorldbookStatus(false)
   } else {
     setVariableParsingWorldbookStatus(true)
+  }
+})
+
+// 【修复】监听建议回复设置变化，关闭时清空建议
+watch(() => gameStore.settings.suggestedReplies, (newValue) => {
+  if (!newValue) {
+    suggestedReplies.value = []
   }
 })
 </script>

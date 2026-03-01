@@ -508,6 +508,24 @@ const loadRerankModels = async () => {
                     </label>
                   </div>
                 </div>
+
+                <div class="setting-row">
+                  <div class="setting-info">
+                    <span class="setting-label">增强召回模式 (实验性)</span>
+                    <span class="setting-hint">使用AI分析召回结果，过滤无关内容并补充缺失信息（需要启用变量解析助手）</span>
+                  </div>
+                  <div class="setting-control">
+                    <label class="toggle-switch">
+                      <input
+                        type="checkbox"
+                        v-model="gameStore.settings.ragSystem.enhancedRecall"
+                        :disabled="!gameStore.settings.assistantAI.enabled"
+                        @change="gameStore.saveToStorage()"
+                      >
+                      <span class="toggle-slider"></span>
+                    </label>
+                  </div>
+                </div>
               </div>
             </transition>
           </div>

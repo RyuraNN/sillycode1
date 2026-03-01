@@ -1,5 +1,6 @@
 import { useGameStore } from '../stores/gameStore'
 import { cleanImageTags, removeThinking } from './summaryManager'
+import { getNpcsAtLocation } from './npcScheduleSystem.js'
 
 /**
  * RAG 记忆检索服务
@@ -317,6 +318,224 @@ export async function rerankSummaries(query, candidates, topN) {
   }
 }
 
+// ==================== 增强召回模式 ====================
+
+/**
+ * 使用 assistantAI 分析召回的总结，识别不相关/已完成的总结并生成补充查询
+ * @param {string} userInput 用户当前输入
+ * @param {Array<{summary: object, score: number}>} ragSummaries 召回的总结列表
+ * @param {object} gameTime 当前游戏时间
+ * @returns {Promise<{pruneFloors: number[], additionalQuery: string}>}
+ */
+export async function analyzeRecalledSummaries(userInput, ragSummaries, gameTime) {
+  const gameStore = useGameStore()
+  const { apiUrl, apiKey, model } = gameStore.settings.assistantAI
+  if (!apiUrl || !apiKey) {
+    return { pruneFloors: [], additionalQuery: '' }
+  }
+
+  // 收集场景NPC上下文
+  const contextNpcs = []
+
+  // 1. 获取当前场景的NPC（最多5个）
+  try {
+    const locationNpcs = getNpcsAtLocation(gameStore.player.location, gameStore)
+      .filter(npc => npc.isAlive)
+      .slice(0, 5)
+    contextNpcs.push(...locationNpcs.map(npc => npc.name))
+  } catch (e) {
+    console.warn('[Enhanced Recall] Failed to get location NPCs:', e.message)
+  }
+
+  // 2. 如果场景NPC不足5个，补充关系亲密的NPC
+  if (contextNpcs.length < 5) {
+    try {
+      const closeNpcs = gameStore.npcs
+        .filter(npc => npc.isAlive && !contextNpcs.includes(npc.name))
+        .filter(npc => {
+          const rel = gameStore.npcRelationships?.[npc.name]?.relations?.[gameStore.player.name]
+          return rel && (rel.intimacy > 60 || rel.trust > 60)
+        })
+        .sort((a, b) => {
+          const relA = gameStore.npcRelationships?.[a.name]?.relations?.[gameStore.player.name]
+          const relB = gameStore.npcRelationships?.[b.name]?.relations?.[gameStore.player.name]
+          const scoreA = (relA?.intimacy || 0) + (relA?.trust || 0)
+          const scoreB = (relB?.intimacy || 0) + (relB?.trust || 0)
+          return scoreB - scoreA
+        })
+        .slice(0, 5 - contextNpcs.length)
+      contextNpcs.push(...closeNpcs.map(npc => npc.name))
+    } catch (e) {
+      console.warn('[Enhanced Recall] Failed to get close NPCs:', e.message)
+    }
+  }
+
+  // 3. 从召回的总结中提取提到的人物（补充到8个）
+  if (contextNpcs.length < 8) {
+    try {
+      const mentionedNpcs = new Set()
+      for (const item of ragSummaries) {
+        const keywords = extractKeywordsFromSummary(item.summary.content)
+        for (const keyword of keywords) {
+          const npc = gameStore.npcs.find(n => n.name === keyword && n.isAlive)
+          if (npc && !contextNpcs.includes(npc.name)) {
+            mentionedNpcs.add(npc.name)
+          }
+        }
+      }
+      contextNpcs.push(...Array.from(mentionedNpcs).slice(0, 8 - contextNpcs.length))
+    } catch (e) {
+      console.warn('[Enhanced Recall] Failed to extract mentioned NPCs:', e.message)
+    }
+  }
+
+  // 构建NPC上下文文本
+  const npcContext = contextNpcs.length > 0
+    ? `\n\n**当前场景最可能出现的人物**: ${contextNpcs.join('、')}\n（如果用户输入或召回结果提到这些人物，但缺少相关历史信息，可以考虑在补充查询中包含）`
+    : ''
+
+  // 计算相对日期的绝对值（用于提示AI）
+  const yesterday = new Date(gameTime.year, gameTime.month - 1, gameTime.day)
+  yesterday.setDate(yesterday.getDate() - 1)
+  const dayBeforeYesterday = new Date(gameTime.year, gameTime.month - 1, gameTime.day)
+  dayBeforeYesterday.setDate(dayBeforeYesterday.getDate() - 2)
+
+  const systemPrompt = `你是一个智能记忆过滤助手。你的任务是分析RAG系统召回的历史总结，判断哪些总结与当前剧情生成无关，以及是否需要补充查询。
+
+**当前游戏时间**: ${gameTime.year}年${gameTime.month}月${gameTime.day}日 ${gameTime.hour}:${String(gameTime.minute).padStart(2, '0')}
+**昨天日期**: ${yesterday.getFullYear()}年${yesterday.getMonth() + 1}月${yesterday.getDate()}日
+**前天日期**: ${dayBeforeYesterday.getFullYear()}年${dayBeforeYesterday.getMonth() + 1}月${dayBeforeYesterday.getDate()}日${npcContext}
+
+**分析原则**:
+1. **剪枝判断** (保守策略，宁可保留有疑问的总结):
+   - 明确已完成的事件 (如"昨天的考试已结束"，但用户问"明天的计划")
+   - 完全无关的话题 (如召回了"社团活动"，但用户问"数学作业")
+   - 时间上明显过时的内容 (如召回了"上个月的约定"，但已确认取消)
+
+2. **补充查询判断**:
+   - 用户输入提到具体人物/事件/日期，但召回结果中未包含相关信息
+   - 召回结果提到某个关键信息的前置事件，但该前置事件未被召回
+   - 当前场景的重要人物在召回结果中缺少历史信息（特别是预设可能会推进与他们相关的剧情时）
+   - **重要**：生成一个综合的补充查询文本，包含所有需要补充的信息点
+   - **时间表达规范**：必须使用绝对日期（如"2024年4月15日"），不要使用相对时间（如"前天"、"大前天"、"上周"）
+
+**输出格式** (XML):
+<analysis>
+<prune>
+<floor>楼层号1</floor>
+<floor>楼层号2</floor>
+</prune>
+<additional_query>
+综合补充查询文本（如果需要补充多个信息点，用空格或顿号连接，例如"小明的约定 2024年4月13日的事件 图书馆的活动"）
+</additional_query>
+</analysis>
+
+如果无需剪枝或补充，对应标签留空即可。`
+
+  const summariesText = ragSummaries
+    .map((item, idx) => `[${idx + 1}] 楼层${item.summary.floor} | 相关度${(item.score * 100).toFixed(0)}%\n${item.summary.content}`)
+    .join('\n\n')
+
+  const userPrompt = `**用户当前输入**: ${userInput}
+
+**召回的历史总结**:
+${summariesText}
+
+请分析上述召回结果，输出剪枝建议和补充查询：`
+
+  let endpoint = apiUrl.replace(/\/+$/, '')
+  if (!endpoint.endsWith('/chat/completions')) {
+    endpoint += '/chat/completions'
+  }
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.3,
+        max_tokens: 800
+      })
+    })
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => res.statusText)
+      throw new Error(`Enhanced recall API 错误 (${res.status}): ${errText}`)
+    }
+
+    const data = await res.json()
+    let result = (data.choices?.[0]?.message?.content || '').trim()
+    result = removeThinking(result).trim()
+
+    // 解析 XML 输出
+    const pruneFloors = []
+    let additionalQuery = ''
+
+    // 提取 <floor> 标签
+    const floorMatches = result.matchAll(/<floor>(\d+)<\/floor>/g)
+    for (const match of floorMatches) {
+      const floor = parseInt(match[1], 10)
+      if (!isNaN(floor)) pruneFloors.push(floor)
+    }
+
+    // 提取 <additional_query> 标签（单个）
+    const queryMatch = result.match(/<additional_query>(.+?)<\/additional_query>/s)
+    if (queryMatch) {
+      additionalQuery = queryMatch[1].trim()
+    }
+
+    return { pruneFloors, additionalQuery }
+  } catch (e) {
+    console.warn('[Enhanced Recall] Analysis failed:', e.message)
+    return { pruneFloors: [], additionalQuery: '' }
+  }
+}
+
+/**
+ * 对补充查询执行二次检索
+ * @param {string} query 补充查询文本
+ * @param {Set<number>} excludeFloors 需要排除的楼层集合
+ * @param {number} topN 返回的结果数量
+ * @returns {Promise<Array<{summary: object, score: number}>>}
+ */
+export async function executeAdditionalQuery(query, excludeFloors, topN) {
+  const gameStore = useGameStore()
+  const results = []
+
+  try {
+    // 向量检索
+    const queryEmbedding = await callEmbeddingAPI(query)
+    if (!queryEmbedding || queryEmbedding.length === 0) return results
+
+    const candidates = gameStore.player.summaries
+      .filter(s => s.type === 'minor' && s.embedding && s.embedding.length > 0 && !excludeFloors.has(s.floor))
+      .map(s => ({
+        summary: s,
+        score: cosineSimilarity(queryEmbedding, s.embedding)
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, Math.min(50, topN * 2)) // 取 topN*2 个候选
+
+    if (candidates.length === 0) return results
+
+    // Rerank
+    const reranked = await rerankSummaries(query, candidates, topN)
+    results.push(...reranked)
+  } catch (e) {
+    console.warn(`[Enhanced Recall] Additional query failed: "${query}"`, e.message)
+  }
+
+  return results
+}
+
 // ==================== RAG 历史构建 ====================
 
 /**
@@ -433,6 +652,50 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
     } catch (e) {
       console.warn('[RAG] retrieval failed:', e.message)
       errors.push({ stage: 'ragRetrieval', message: e.message })
+    }
+  }
+
+  // 4.5. 增强召回模式：分析召回结果并补充查询
+  if (ragSettings.enhancedRecall && gameStore.settings.assistantAI?.enabled && ragSummaries.length > 0) {
+    try {
+      // 1. 分析召回结果
+      const { pruneFloors, additionalQuery } = await analyzeRecalledSummaries(
+        userInput, ragSummaries, gameStore.gameTime
+      )
+
+      // 2. 剪枝：移除标记的总结
+      if (pruneFloors.length > 0) {
+        console.log('[Enhanced Recall] Pruning floors:', pruneFloors)
+        ragSummaries = ragSummaries.filter(item => !pruneFloors.includes(item.summary.floor))
+      }
+
+      // 3. 补充查询：二次检索（单次调用）
+      if (additionalQuery) {
+        console.log('[Enhanced Recall] Additional query:', additionalQuery)
+        const enhancedExcludeSet = new Set([
+          ...excludeSet,
+          ...ragSummaries.map(item => item.summary.floor)
+        ])
+
+        const additionalResults = await executeAdditionalQuery(
+          additionalQuery,
+          enhancedExcludeSet,
+          Math.ceil(topN / 2)
+        )
+
+        // 4. 合并结果并去重
+        if (additionalResults.length > 0) {
+          const floorSet = new Set(ragSummaries.map(item => item.summary.floor))
+          const uniqueAdditional = additionalResults.filter(
+            item => !floorSet.has(item.summary.floor)
+          )
+          console.log('[Enhanced Recall] Added summaries:', uniqueAdditional.length)
+          ragSummaries.push(...uniqueAdditional)
+        }
+      }
+    } catch (e) {
+      console.warn('[Enhanced Recall] Enhancement failed, using original results:', e.message)
+      errors.push({ stage: 'enhancedRecall', message: e.message })
     }
   }
 

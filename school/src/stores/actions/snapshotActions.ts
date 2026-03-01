@@ -350,11 +350,15 @@ export const snapshotActions = {
 
     // 恢复后将关系数据保存到 IndexedDB，确保存档隔离
     try {
-      const { saveNpcRelationships } = await import('../../utils/indexedDB')
+      const { saveNpcRelationships, removeNpcRelationships } = await import('../../utils/indexedDB')
       const { clearPendingSocialData } = await import('../../utils/relationshipManager')
       clearPendingSocialData()  // 清空旧存档的 pending 写入
       if (this.currentRunId && this.currentRunId !== 'temp_editing' && this.npcRelationships) {
         try {
+          // 【修复】先删除旧的 IndexedDB 数据，确保存档编辑的关系数据生效
+          await removeNpcRelationships(this.currentRunId)
+          console.log('[snapshotActions] Cleared stale relationship data for runId:', this.currentRunId)
+
           const cloned = fastClone(this.npcRelationships)
           await saveNpcRelationships(this.currentRunId, cloned)
         } catch (cloneError) {
@@ -647,10 +651,12 @@ export const snapshotActions = {
 
     // Post-restore: 保存关系数据到 IndexedDB，确保存档隔离
     try {
-      const { saveNpcRelationships } = await import('../../utils/indexedDB')
+      const { saveNpcRelationships, removeNpcRelationships } = await import('../../utils/indexedDB')
       const { clearPendingSocialData } = await import('../../utils/relationshipManager')
       clearPendingSocialData()
       if (this.currentRunId && this.currentRunId !== 'temp_editing' && this.npcRelationships) {
+        // 【修复】先删除旧的 IndexedDB 数据，确保回溯时关系数据正确
+        await removeNpcRelationships(this.currentRunId)
         await saveNpcRelationships(
           this.currentRunId,
           fastClone(this.npcRelationships)

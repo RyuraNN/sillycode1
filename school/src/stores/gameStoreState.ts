@@ -202,7 +202,8 @@ export function createInitialState(): GameState {
         topK: 50,
         rerankTopN: 15,
         useContextQuery: true,
-        autoAdjust: true
+        autoAdjust: true,
+        enhancedRecall: false
       },
       suggestedReplies: false,
       enterToSend: true,

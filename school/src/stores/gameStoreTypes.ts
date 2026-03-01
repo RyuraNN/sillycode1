@@ -185,6 +185,7 @@ export interface RAGSettings {
   rerankTopN: number         // Rerank 后保留数量，默认 15（范围 5-30）
   useContextQuery: boolean   // 使用最近一轮对话作为检索 query，默认 true
   autoAdjust: boolean        // 根据总结数量自动调整 topK 和 rerankTopN
+  enhancedRecall: boolean    // 是否启用增强召回模式，默认 false
 }
 
 /** 总结系统设置 */

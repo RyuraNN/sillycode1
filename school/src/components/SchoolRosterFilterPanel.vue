@@ -341,7 +341,7 @@ const saveRelationshipsToSnapshot = async () => {
     const updatedData = JSON.parse(JSON.stringify(snapshotRelData.value))
     updatedData.gameState.npcRelationships = JSON.parse(JSON.stringify(gameStore.npcRelationships))
     await saveSnapshotData(sid, updatedData)
-    showMessage('关系数据已保存到存档')
+    showMessage('✅ 关系数据已保存到存档。恢复该存档后，编辑将生效。')
   } catch (e) {
     console.error('[RelEditor] Save to snapshot failed:', e)
     alert('保存到存档失败: ' + e.message)
