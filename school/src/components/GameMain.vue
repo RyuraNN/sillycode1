@@ -72,6 +72,7 @@ const isGenerating = ref(false)
 const isAssistantProcessing = ref(false)
 const processingStage = ref('') // 'rag' | 'generating' | ''
 const ragErrors = ref([]) // RAG 管线错误列表
+const summaryErrors = ref([]) // 小总结生成错误列表
 const showMapPanel = ref(false)
 const showEquipmentPanel = ref(false)
 const showSavePanel = ref(false)
@@ -1335,6 +1336,15 @@ const processAIResponse = async (response) => {
     const summarySource = cleanedContent.replace(/<minor_summary>[\s\S]*?<\/minor_summary>/g, '').trim()
     const result = await processPostReply(summarySource, gameStore.currentFloor, preGeneratedSummary)
 
+    // 处理小总结生成错误
+    if (!result.success && result.error) {
+      summaryErrors.value.push({
+        floor: gameStore.currentFloor,
+        error: result.error,
+        timestamp: Date.now()
+      })
+    }
+
     // 新增：处理待办完成指令（仅在辅助AI开启时）
     if (gameStore.settings.assistantAI?.enabled) {
       try {
@@ -2302,6 +2312,21 @@ watch(() => gameStore.settings.suggestedReplies, (newValue) => {
             <span class="rag-error-msg">{{ err.message }}</span>
           </div>
         </div>
+
+        <!-- 小总结生成错误提示 -->
+        <div v-if="summaryErrors.length > 0" class="summary-error-bar">
+          <div class="summary-error-header">
+            <span>⚠️ 小总结生成失败</span>
+            <button class="summary-dismiss-btn" @click="summaryErrors = []">×</button>
+          </div>
+          <div v-for="(err, i) in summaryErrors" :key="i" class="summary-error-item">
+            <span class="summary-error-floor">第{{ err.floor }}轮</span>
+            <span class="summary-error-msg">{{ err.error }}</span>
+          </div>
+          <div class="summary-error-hint">
+            💡 提示：请检查设置中的辅助AI配置（API地址、Key、模型）
+          </div>
+        </div>
       </div>
     </main>
 
@@ -2691,6 +2716,72 @@ watch(() => gameStore.settings.suggestedReplies, (newValue) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 小总结错误提示 */
+.summary-error-bar {
+  background: rgba(220, 38, 38, 0.15);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 6px 0 0;
+  font-size: 12px;
+  animation: slideDown 0.3s ease;
+}
+
+.summary-error-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #dc2626;
+  font-weight: 500;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.summary-dismiss-btn {
+  background: none;
+  border: none;
+  color: #dc2626;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.summary-dismiss-btn:hover {
+  opacity: 0.7;
+}
+
+.summary-error-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  color: #991b1b;
+}
+
+.summary-error-floor {
+  background: rgba(220, 38, 38, 0.2);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.summary-error-msg {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary-error-hint {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(220, 38, 38, 0.2);
+  color: #991b1b;
+  font-size: 11px;
 }
 
 .new-message-tip {

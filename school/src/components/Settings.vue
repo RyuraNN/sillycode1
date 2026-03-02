@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
-import { fetchModels, IMAGE_ANALYSIS_PROMPT } from '../utils/assistantAI'
+import { fetchModels, IMAGE_ANALYSIS_PROMPT, validateAssistantAIConfig, callAssistantAI } from '../utils/assistantAI'
 import { DEFAULT_INSTRUCTIONS_PROMPT, DEFAULT_STYLE_PROMPT, DEFAULT_CORE_RULES_PROMPT, DEFAULT_BANNED_WORDS_PROMPT } from '../utils/prompts'
 import { GAME_VERSION } from '../utils/editionDetector'
 import { getMatchingStats } from '../utils/todoManager'
@@ -151,6 +151,40 @@ const removeContentTag = (tag) => {
     }
     gameStore.settings.customContentTags.splice(index, 1)
     gameStore.saveToStorage()
+  }
+}
+
+// 辅助AI配置验证
+const assistantAIConfigValid = computed(() => {
+  const validation = validateAssistantAIConfig(gameStore.settings.assistantAI, true)
+  return validation.valid
+})
+
+const assistantAIConfigError = computed(() => {
+  const validation = validateAssistantAIConfig(gameStore.settings.assistantAI, true)
+  return validation.error || ''
+})
+
+// 测试辅助AI配置
+const isTestingConfig = ref(false)
+const testAssistantAIConfig = async () => {
+  const validation = validateAssistantAIConfig(gameStore.settings.assistantAI, true)
+  if (!validation.valid) {
+    alert(`配置错误: ${validation.error}`)
+    return
+  }
+
+  isTestingConfig.value = true
+  try {
+    const testResponse = await callAssistantAI('测试', {
+      systemPrompt: '请回复"配置正常"',
+      maxTokens: 10
+    })
+    alert('配置测试成功！辅助AI响应正常。')
+  } catch (e) {
+    alert(`配置测试失败: ${e.message}`)
+  } finally {
+    isTestingConfig.value = false
   }
 }
 
@@ -677,6 +711,21 @@ const loadRerankModels = async () => {
                     >
                     <span class="range-value">{{ gameStore.settings.assistantAI.model?.toLowerCase().includes('gpt') ? '1 (GPT固定)' : gameStore.settings.assistantAI.temperature.toFixed(2) }}</span>
                   </div>
+                </div>
+
+                <!-- 配置状态指示器 -->
+                <div class="config-status-row">
+                  <div class="config-status" :class="{ 'status-ok': assistantAIConfigValid, 'status-error': !assistantAIConfigValid }">
+                    <span v-if="assistantAIConfigValid">✓ 配置完整</span>
+                    <span v-else>⚠ {{ assistantAIConfigError }}</span>
+                  </div>
+                  <button
+                    class="test-config-btn"
+                    @click="testAssistantAIConfig"
+                    :disabled="isTestingConfig || !assistantAIConfigValid"
+                  >
+                    {{ isTestingConfig ? '测试中...' : '测试配置' }}
+                  </button>
                 </div>
               </div>
             </transition>
@@ -1241,6 +1290,57 @@ const loadRerankModels = async () => {
   font-size: 0.9rem;
   color: rgba(255, 255, 255, 0.8);
   font-weight: 500;
+}
+
+.config-status-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.config-status {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.config-status.status-ok {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.config-status.status-error {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.test-config-btn {
+  padding: 8px 16px;
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.test-config-btn:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.3);
+  border-color: rgba(59, 130, 246, 0.5);
+}
+
+.test-config-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* 子设置区域 */

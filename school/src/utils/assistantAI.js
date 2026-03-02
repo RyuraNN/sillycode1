@@ -2,6 +2,32 @@ import { useGameStore } from '../stores/gameStore'
 import { buildSystemPromptContent } from './prompts'
 import { getAllBookNames } from './worldbookHelper'
 
+/**
+ * 验证辅助AI配置是否完整
+ * @param {Object} config - 辅助AI配置对象
+ * @param {boolean} requireModel - 是否要求model字段（默认true）
+ * @returns {Object} { valid: boolean, error: string }
+ */
+export function validateAssistantAIConfig(config, requireModel = true) {
+  if (!config) {
+    return { valid: false, error: '辅助AI配置不存在' }
+  }
+
+  if (!config.apiUrl || config.apiUrl.trim() === '') {
+    return { valid: false, error: 'API地址未配置' }
+  }
+
+  if (!config.apiKey || config.apiKey.trim() === '') {
+    return { valid: false, error: 'API Key未配置' }
+  }
+
+  if (requireModel && (!config.model || config.model.trim() === '')) {
+    return { valid: false, error: '模型未选择' }
+  }
+
+  return { valid: true, error: null }
+}
+
 // 独立的生图分析提示词
 export const IMAGE_ANALYSIS_PROMPT = `你是一位专业的AI画师助手。你的唯一任务是阅读剧情正文，识别适合生成插画的关键时刻，并输出精确的文生图指令。
 
@@ -319,8 +345,9 @@ export async function callAssistantAI(mainAIResponse, options = {}) {
   // GPT 系列模型（如 gpt-5-mini）只接受温度为 1
   const temperature = model && model.toLowerCase().includes('gpt') ? 1 : rawTemperature
 
-  if (!apiUrl || !apiKey) {
-    throw new Error('辅助AI配置不完整')
+  const validation = validateAssistantAIConfig(gameStore.settings.assistantAI, true)
+  if (!validation.valid) {
+    throw new Error(`辅助AI配置错误: ${validation.error}`)
   }
 
   let userContent
@@ -444,8 +471,9 @@ export async function callImageAnalysisAI(storyContent, characterAnchors = {}) {
   const temperature = model && model.toLowerCase().includes('gpt') ? 1 : rawTemperature
   const { imageGenerationPrompt, customImageAnalysisPrompt } = gameStore.settings
 
-  if (!apiUrl || !apiKey) {
-    console.warn('[ImageAnalysisAI] API not configured')
+  const validation = validateAssistantAIConfig(gameStore.settings.assistantAI, true)
+  if (!validation.valid) {
+    console.warn(`[ImageAnalysisAI] ${validation.error}`)
     return ''
   }
 

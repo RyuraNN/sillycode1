@@ -247,7 +247,7 @@ export function extractSummary(response, type) {
  */
 export async function generateMinorSummary(content, floor, useAssistant = true, preGeneratedSummary = null) {
   const gameStore = useGameStore()
-  
+
   if (!gameStore.settings.summarySystem?.enabled) {
     return { success: false, error: 'Summary system is disabled' }
   }
@@ -272,7 +272,7 @@ export async function generateMinorSummary(content, floor, useAssistant = true, 
   // 如果没有预生成总结，且辅助AI未开启，则不再单独调用主AI（根据新需求）
   if (!useAssistant && !gameStore.settings.summarySystem.useAssistantForSummary) {
      console.warn('[SummaryManager] Minor summary missed by main AI and assistant AI is disabled. Skipping.')
-     return { success: false, error: 'Minor summary missed' }
+     return { success: false, error: '辅助AI未启用，无法生成小总结' }
   }
 
   // 如果没有预生成总结，但开启了辅助AI（可能是解析失败或其他原因），尝试补救
@@ -280,7 +280,7 @@ export async function generateMinorSummary(content, floor, useAssistant = true, 
 
   try {
     let response
-    
+
     if (useAssistant && gameStore.settings.summarySystem.useAssistantForSummary) {
       // 使用辅助AI生成 (使用纯总结模式)
       response = await callAssistantAI(prompt, { systemPrompt: SUMMARY_AI_SYSTEM_PROMPT })
@@ -297,10 +297,10 @@ export async function generateMinorSummary(content, floor, useAssistant = true, 
     }
 
     const summaryContent = extractSummary(response, 'minor')
-    
+
     if (!summaryContent) {
       console.warn('[SummaryManager] Failed to extract minor summary from response')
-      return { success: false, error: 'Failed to extract summary' }
+      return { success: false, error: '无法从AI响应中提取小总结' }
     }
 
     const { year, month, day } = gameStore.gameTime
@@ -321,7 +321,7 @@ export async function generateMinorSummary(content, floor, useAssistant = true, 
     return { success: true, summary }
   } catch (e) {
     console.error('[SummaryManager] Error generating minor summary:', e)
-    return { success: false, error: e.message }
+    return { success: false, error: e.message || '生成小总结时发生错误' }
   }
 }
 

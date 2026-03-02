@@ -1,6 +1,7 @@
 import { useGameStore } from '../stores/gameStore'
 import { cleanImageTags, removeThinking } from './summaryManager'
 import { getNpcsAtLocation } from './npcScheduleSystem.js'
+import { validateAssistantAIConfig } from './assistantAI'
 
 /**
  * RAG 记忆检索服务
@@ -140,7 +141,12 @@ export function extractKeywordsFromSummary(summaryContent) {
 export async function rewriteQueryWithAI(userInput, gameTime, lastRound, options = {}) {
   const gameStore = useGameStore()
   const { apiUrl, apiKey, model } = gameStore.settings.assistantAI
-  if (!apiUrl || !apiKey) return userInput
+
+  const validation = validateAssistantAIConfig(gameStore.settings.assistantAI, true)
+  if (!validation.valid) {
+    console.warn(`[RAG] Query rewrite skipped: ${validation.error}`)
+    return userInput
+  }
 
   const { enableProactiveQuery = false, npcContext = [] } = options
 
@@ -383,8 +389,11 @@ export async function rerankSummaries(query, candidates, topN) {
 export async function analyzeRecalledSummaries(userInput, ragSummaries, gameTime) {
   const gameStore = useGameStore()
   const { apiUrl, apiKey, model } = gameStore.settings.assistantAI
-  if (!apiUrl || !apiKey) {
-    return { pruneFloors: [], additionalQuery: '' }
+
+  const validation = validateAssistantAIConfig(gameStore.settings.assistantAI, true)
+  if (!validation.valid) {
+    console.warn(`[Enhanced Recall] Skipped: ${validation.error}`)
+    return { pruneFloors: [], additionalQueries: [] }
   }
 
   // 收集场景NPC上下文
