@@ -1334,7 +1334,38 @@ const processAIResponse = async (response) => {
 
     const summarySource = cleanedContent.replace(/<minor_summary>[\s\S]*?<\/minor_summary>/g, '').trim()
     const result = await processPostReply(summarySource, gameStore.currentFloor, preGeneratedSummary)
-    
+
+    // 新增：处理待办完成指令（仅在辅助AI开启时）
+    if (gameStore.settings.assistantAI?.enabled) {
+      try {
+        const { extractTodoCompletionCommands, markTodoAsCompletedByKeyword, markTodoAsCompletedByIndex } = await import('../utils/todoManager')
+
+        const todoCommands = extractTodoCompletionCommands(fullResponse)
+        if (todoCommands.length > 0) {
+          const currentFloor = gameLog.value.length
+          const mode = gameStore.todoMatchingMode || 'keyword'
+
+          for (const cmd of todoCommands) {
+            let success = false
+            if (cmd.mode === 'keyword' && mode === 'keyword') {
+              success = markTodoAsCompletedByKeyword(gameStore, cmd.floor, cmd.keyword, currentFloor)
+            } else if (cmd.mode === 'index' && mode === 'index') {
+              success = markTodoAsCompletedByIndex(gameStore, cmd.floor, cmd.index, currentFloor)
+            }
+
+            if (success) {
+              console.log(`[GameMain] Todo marked as completed: floor=${cmd.floor}, ${cmd.mode}=${cmd.keyword || cmd.index}`)
+            }
+          }
+
+          // 触发存储更新
+          await gameStore.saveToStorage(true)
+        }
+      } catch (e) {
+        console.warn('[GameMain] Failed to process todo commands:', e)
+      }
+    }
+
     if (result.success) {
       const lastLogItem = gameLog.value[gameLog.value.length - 1]
       if (lastLogItem?.type === 'ai') {

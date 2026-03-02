@@ -7,6 +7,7 @@ import { batchEmbedSummaries } from '../utils/ragService'
 import { setVariableParsingWorldbookStatus } from '../utils/worldbookParser'
 import { setItem, getItem, removeItem } from '../utils/indexedDB'
 import { GAME_VERSION } from '../utils/editionDetector'
+import { getMatchingStats } from '../utils/todoManager'
 import SocialApp from './SocialApp.vue'
 import SummaryViewer from './SummaryViewer.vue'
 import MemoryGraph from './MemoryGraph.vue'
@@ -42,6 +43,9 @@ const batchProgress = ref({ current: 0, total: 0 })
 const batchType = ref('') // 'summary' | 'diary'
 const autoEmbedAfterBatch = ref(true)
 const newContentTag = ref('')
+
+// 待办事项统计
+const todoStats = computed(() => getMatchingStats(gameStore))
 
 // 批量补齐小总结
 const startBatchSummaryGeneration = async () => {
@@ -605,17 +609,33 @@ const handleHomeClick = () => {
                         <span class="setting-value">{{ gameStore.settings.forumWorldbookLimit }}</span>
                       </div>
                       <div class="slider-container">
-                        <input 
-                          type="range" 
-                          v-model.number="gameStore.settings.forumWorldbookLimit" 
-                          min="5" 
-                          max="50" 
+                        <input
+                          type="range"
+                          v-model.number="gameStore.settings.forumWorldbookLimit"
+                          min="5"
+                          max="50"
                           step="5"
                           @change="gameStore.saveToStorage()"
                           class="setting-slider"
                         />
                       </div>
                       <p class="hint">控制存入世界书的论坛帖子数量（节省 AI Token）</p>
+                    </div>
+
+                    <div class="settings-section">
+                      <h3 class="section-title">待办事项管理</h3>
+                      <div class="setting-item">
+                        <span class="setting-label">匹配模式</span>
+                        <select v-model="gameStore.todoMatchingMode" @change="gameStore.saveToStorage()" class="mode-select">
+                          <option value="keyword">关键词</option>
+                          <option value="index">索引</option>
+                        </select>
+                      </div>
+                      <div class="stats-row">
+                        <span class="stat-label">关键词成功率：{{ todoStats.keyword.rate }}%</span>
+                        <span class="stat-label">索引成功率：{{ todoStats.index.rate }}%</span>
+                      </div>
+                      <p class="hint">AI自动标记已完成的待办事项，避免重复召回</p>
                     </div>
 
                     <div class="settings-section">
@@ -900,6 +920,34 @@ const handleHomeClick = () => {
                             </label>
                           </div>
                           <p class="hint">拼接最近总结到检索query，提升语义丰富度</p>
+
+                          <div class="setting-item" style="margin-top: 8px;">
+                            <span class="setting-label">增强召回模式 (实验性)</span>
+                            <label class="switch">
+                              <input
+                                type="checkbox"
+                                v-model="gameStore.settings.ragSystem.enhancedRecall"
+                                :disabled="!gameStore.settings.assistantAI.enabled"
+                                @change="gameStore.saveToStorage()"
+                              >
+                              <span class="slider"></span>
+                            </label>
+                          </div>
+                          <p class="hint">使用AI分析召回结果，过滤无关内容并补充缺失信息（需要启用变量解析助手）</p>
+
+                          <div class="setting-item" style="margin-top: 8px;">
+                            <span class="setting-label">主动查询生成 (实验性)</span>
+                            <label class="switch">
+                              <input
+                                type="checkbox"
+                                v-model="gameStore.settings.ragSystem.proactiveQueryGeneration"
+                                :disabled="!gameStore.settings.assistantAI.enabled"
+                                @change="gameStore.saveToStorage()"
+                              >
+                              <span class="slider"></span>
+                            </label>
+                          </div>
+                          <p class="hint">在Query改写阶段就生成补充查询，提前识别隐含需求（需要启用变量解析助手）</p>
 
                           <button class="action-btn primary" style="width: 100%; margin-top: 10px;" @click="startBatchEmbed" :disabled="isEmbedding">
                             {{ isEmbedding ? `生成中 ${embedProgress.current}/${embedProgress.total}` : '🔢 批量生成向量' }}

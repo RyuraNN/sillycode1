@@ -2,16 +2,18 @@
 import { ref, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { generateDiary } from '../utils/summaryManager'
+import { parseTodoItems, isTodoCompleted } from '../utils/todoManager'
 
 const emit = defineEmits(['close'])
 const gameStore = useGameStore()
 
-const currentTab = ref('all') // all, minor, major, super
+const currentTab = ref('all') // all, minor, major, super, todos
 const editingSummary = ref(null)
 const editContent = ref('')
 const isGenerating = ref(false)
 const selectedFloors = ref([]) // 用于批量选择
 const selectionMode = ref(false) // 是否处于选择模式
+const todoFilter = ref('all') // all, pending, completed
 
 const summaries = computed(() => {
   // 获取现有的总结
@@ -266,6 +268,87 @@ const useNewDiary = async () => {
 const keepOldDiary = () => {
   showDiaryCompare.value = false
 }
+
+// 待办事项管理
+const allTodos = computed(() => {
+  const todos = []
+  for (const summary of gameStore.player.summaries) {
+    if (summary.type === 'minor' || summary.type === 'diary') {
+      const todoItems = parseTodoItems(summary.content)
+      todoItems.forEach((content, index) => {
+        const isCompleted = isTodoCompleted(gameStore, summary.floor, index)
+        const marker = gameStore.completedTodoMarkers?.find(
+          m => m.floor === summary.floor && m.todoIndex === index
+        )
+
+        todos.push({
+          floor: summary.floor,
+          index,
+          content,
+          gameDate: summary.gameDate || '未知日期',
+          isCompleted,
+          completedAt: marker?.completedAt,
+          completedTimestamp: marker?.completedTimestamp,
+          matchedBy: marker?.matchedBy
+        })
+      })
+    }
+  }
+  return todos.sort((a, b) => b.floor - a.floor)
+})
+
+const pendingTodos = computed(() => allTodos.value.filter(t => !t.isCompleted))
+const completedTodos = computed(() => allTodos.value.filter(t => t.isCompleted))
+
+const filteredTodos = computed(() => {
+  if (todoFilter.value === 'pending') return pendingTodos.value
+  if (todoFilter.value === 'completed') return completedTodos.value
+  return allTodos.value
+})
+
+const toggleTodoCompletion = (todo) => {
+  const summary = gameStore.player.summaries.find(s => s.floor === todo.floor)
+  if (!summary) return
+
+  if (todo.isCompleted) {
+    // 取消完成标记
+    gameStore.completedTodoMarkers = gameStore.completedTodoMarkers?.filter(
+      m => !(m.floor === todo.floor && m.todoIndex === todo.index)
+    ) || []
+
+    if (summary.completedTodos) {
+      summary.completedTodos = summary.completedTodos.filter(i => i !== todo.index)
+    }
+  } else {
+    // 标记为完成
+    if (!gameStore.completedTodoMarkers) {
+      gameStore.completedTodoMarkers = []
+    }
+    gameStore.completedTodoMarkers.push({
+      floor: todo.floor,
+      todoIndex: todo.index,
+      completedAt: gameStore.currentFloor,
+      completedTimestamp: Date.now(),
+      matchedBy: 'manual'
+    })
+
+    if (!summary.completedTodos) {
+      summary.completedTodos = []
+    }
+    if (!summary.completedTodos.includes(todo.index)) {
+      summary.completedTodos.push(todo.index)
+    }
+  }
+
+  gameStore.saveToStorage(true)
+}
+
+const formatTimestamp = (ts) => {
+  if (!ts) return ''
+  const date = new Date(ts)
+  return date.toLocaleString('zh-CN')
+}
+
 </script>
 
 <template>
@@ -315,6 +398,63 @@ const keepOldDiary = () => {
         <button :class="{ active: currentTab === 'minor' }" @click="currentTab = 'minor'">小总结</button>
         <button :class="{ active: currentTab === 'diary' }" @click="currentTab = 'diary'">日记</button>
         <button :class="{ active: currentTab === 'major' }" @click="currentTab = 'major'">大总结</button>
+        <button :class="{ active: currentTab === 'todos' }" @click="currentTab = 'todos'">待办事项</button>
+      </div>
+
+      <!-- 待办事项标签页 -->
+      <div v-if="currentTab === 'todos'" class="todos-panel">
+        <div class="todos-header">
+          <h3 class="todos-title">待办事项管理</h3>
+          <div class="filter-buttons">
+            <button
+              :class="{ active: todoFilter === 'all' }"
+              @click="todoFilter = 'all'"
+              class="filter-btn"
+            >
+              全部 ({{ allTodos.length }})
+            </button>
+            <button
+              :class="{ active: todoFilter === 'pending' }"
+              @click="todoFilter = 'pending'"
+              class="filter-btn"
+            >
+              未完成 ({{ pendingTodos.length }})
+            </button>
+            <button
+              :class="{ active: todoFilter === 'completed' }"
+              @click="todoFilter = 'completed'"
+              class="filter-btn"
+            >
+              已完成 ({{ completedTodos.length }})
+            </button>
+          </div>
+        </div>
+
+        <div class="todos-list">
+          <div
+            v-for="todo in filteredTodos"
+            :key="`${todo.floor}-${todo.index}`"
+            class="todo-item"
+            :class="{ completed: todo.isCompleted }"
+          >
+            <div class="todo-header">
+              <span class="todo-floor">楼层 {{ todo.floor }}</span>
+              <span class="todo-date">{{ todo.gameDate }}</span>
+              <button @click="toggleTodoCompletion(todo)" class="toggle-btn">
+                {{ todo.isCompleted ? '标记未完成' : '标记完成' }}
+              </button>
+            </div>
+            <div class="todo-content">{{ todo.content }}</div>
+            <div v-if="todo.isCompleted" class="todo-completion-info">
+              完成于楼层 {{ todo.completedAt }}
+              ({{ formatTimestamp(todo.completedTimestamp) }})
+              <span class="match-badge">{{ todo.matchedBy === 'keyword' ? '关键词' : todo.matchedBy === 'index' ? '索引' : '手动' }}</span>
+            </div>
+          </div>
+          <div v-if="filteredTodos.length === 0" class="empty-state">
+            <p>{{ todoFilter === 'pending' ? '暂无未完成的待办事项' : todoFilter === 'completed' ? '暂无已完成的待办事项' : '暂无待办事项' }}</p>
+          </div>
+        </div>
       </div>
 
       <!-- 批量操作栏 (仅在小总结标签页显示) -->
@@ -807,6 +947,158 @@ const keepOldDiary = () => {
   background: #007aff;
   color: #fff;
 }
+
+/* 待办事项面板样式 */
+.todos-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.todos-header {
+  padding: 12px 16px;
+  background: #fff;
+  border-bottom: 0.5px solid rgba(0,0,0,0.1);
+}
+
+.todos-title {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #000;
+}
+
+.filter-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.filter-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #d1d1d6;
+  border-radius: 8px;
+  background: #fff;
+  color: #333;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.filter-btn.active {
+  background: #007aff;
+  color: #fff;
+  border-color: #007aff;
+}
+
+.todos-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.todo-item {
+  background: #fff;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  transition: all 0.2s;
+}
+
+.todo-item.completed {
+  opacity: 0.6;
+  background: #f8f8f8;
+}
+
+.todo-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.todo-floor {
+  font-size: 12px;
+  color: #8e8e93;
+  font-weight: 500;
+}
+
+.todo-date {
+  font-size: 12px;
+  color: #8e8e93;
+}
+
+.toggle-btn {
+  margin-left: auto;
+  padding: 4px 12px;
+  border: 1px solid #007aff;
+  border-radius: 6px;
+  background: #fff;
+  color: #007aff;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.toggle-btn:hover {
+  background: #007aff;
+  color: #fff;
+}
+
+.todo-item.completed .toggle-btn {
+  border-color: #34c759;
+  color: #34c759;
+}
+
+.todo-item.completed .toggle-btn:hover {
+  background: #34c759;
+  color: #fff;
+}
+
+.todo-content {
+  font-size: 14px;
+  color: #000;
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+
+.todo-item.completed .todo-content {
+  text-decoration: line-through;
+  color: #8e8e93;
+}
+
+.todo-completion-info {
+  font-size: 12px;
+  color: #8e8e93;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.match-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #e5e5ea;
+  color: #333;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: #8e8e93;
+}
+
+.empty-state p {
+  margin: 0;
+  font-size: 14px;
+}
+
 
 @media (max-width: 768px) {
   .compare-content {

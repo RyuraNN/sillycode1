@@ -1,6 +1,7 @@
 import { useGameStore } from '../stores/gameStore'
 import { callAssistantAI } from './assistantAI'
 import { extractKeywordsFromSummary, embedSummary, buildRAGHistory, isRAGReady } from './ragService'
+import { filterCompletedTodos } from './todoManager'
 
 /**
  * 总结系统管理器
@@ -802,9 +803,15 @@ export async function buildSummarizedHistory(chatLog, currentFloor, userInput) {
       if (diary) {
         const summaryId = `diary_${diary.gameDate}`
         if (!addedSummaryIds.has(summaryId)) {
+          // 过滤已完成的待办事项
+          let filteredContent = diary.content
+          if (diary.completedTodos && diary.completedTodos.length > 0) {
+            filteredContent = filterCompletedTodos(diary.content, diary.completedTodos)
+          }
+
           result.push({
             type: 'summary',
-            content: `[${diary.gameDate} 日记]\n${diary.content}`,
+            content: `[${diary.gameDate} 日记]\n${filteredContent}`,
             isSummary: true,
             summaryType: 'diary'
           })
@@ -814,10 +821,17 @@ export async function buildSummarizedHistory(chatLog, currentFloor, userInput) {
       }
       const summary = getSummaryContent(logFloor, 'minor')
       if (summary) {
+        // 过滤已完成的待办事项
+        const summaryObj = gameStore.player.summaries.find(s => s.floor === logFloor && s.type === 'minor')
+        let filteredContent = summary
+        if (summaryObj && summaryObj.completedTodos && summaryObj.completedTodos.length > 0) {
+          filteredContent = filterCompletedTodos(summary, summaryObj.completedTodos)
+        }
+
         result.push({
           ...log,
           type: log.type,
-          content: `[楼层${logFloor}总结] ${summary}`,
+          content: `[楼层${logFloor}总结] ${filteredContent}`,
           isSummary: true,
           summaryType: 'minor'
         })
@@ -837,9 +851,15 @@ export async function buildSummarizedHistory(chatLog, currentFloor, userInput) {
       if (diary) {
         const summaryId = `diary_${diary.gameDate}`
         if (!addedSummaryIds.has(summaryId)) {
+          // 过滤已完成的待办事项
+          let filteredContent = diary.content
+          if (diary.completedTodos && diary.completedTodos.length > 0) {
+            filteredContent = filterCompletedTodos(diary.content, diary.completedTodos)
+          }
+
           result.push({
             type: 'summary',
-            content: `[${diary.gameDate} 日记]\n${diary.content}`,
+            content: `[${diary.gameDate} 日记]\n${filteredContent}`,
             isSummary: true,
             summaryType: 'diary'
           })

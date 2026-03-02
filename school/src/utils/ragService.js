@@ -132,20 +132,48 @@ export function extractKeywordsFromSummary(summaryContent) {
  * @param {string} userInput 原始用户输入
  * @param {object} gameTime 当前游戏时间
  * @param {object|null} lastRound 最近一轮上下文 { playerMsg, aiReply }
- * @returns {Promise<string>} 改写后的 query
+ * @param {object} options 可选参数
+ * @param {boolean} options.enableProactiveQuery 是否启用主动查询生成
+ * @param {string[]} options.npcContext 场景NPC上下文数组
+ * @returns {Promise<string|object>} 改写后的 query，或 { mainQuery, additionalQueries }
  */
-export async function rewriteQueryWithAI(userInput, gameTime, lastRound) {
+export async function rewriteQueryWithAI(userInput, gameTime, lastRound, options = {}) {
   const gameStore = useGameStore()
   const { apiUrl, apiKey, model } = gameStore.settings.assistantAI
   if (!apiUrl || !apiKey) return userInput
 
-  const systemPrompt = `你是一个查询改写助手。将用户的输入改写为适合语义检索的查询文本。
+  const { enableProactiveQuery = false, npcContext = [] } = options
+
+  // 基础Query改写的System Prompt
+  let systemPrompt = `你是一个查询改写助手。将用户的输入改写为适合语义检索的查询文本。
 规则：
 1. 将相对时间（前天、上周、那次）转换为具体日期或描述
 2. 将代词指代（他、她、那个人）尽量替换为具体名称（根据上下文推断）
-3. 保留原始语义，不要添加无关内容
+3. 保留原始语义，不要添加无关内容`
+
+  // 如果启用主动查询生成，扩展System Prompt
+  if (enableProactiveQuery) {
+    systemPrompt += `
+4. **主动查询生成**：分析用户输入，识别隐含需求并生成0-2个补充查询
+   - 地点隐含需求：如"去图书馆"可能需要"图书馆的历史记忆"
+   - 上轮对话补充：如上轮提到"美术教室"，本轮可补充"美术教室的相关事件"
+   - 场景NPC补充：如当前场景有重要人物，可补充其历史信息
+   - **重要**：只在确实需要时生成补充查询，不要过度生成
+   - **限制**：补充查询数量为0-2个
+
+**输出格式** (XML)：
+<queries>
+<main>主查询文本</main>
+<additional>补充查询1</additional>
+<additional>补充查询2</additional>
+</queries>
+
+如果无需补充查询，只输出<main>标签即可。`
+  } else {
+    systemPrompt += `
 4. 直接输出改写后的文本，不要解释
 5. 如果输入已经足够明确，原样返回即可`
+  }
 
   let contextBlock = ''
   if (lastRound) {
@@ -153,8 +181,14 @@ export async function rewriteQueryWithAI(userInput, gameTime, lastRound) {
     if (lastRound.aiReply) contextBlock += `[AI上一轮回复摘要] ${cleanImageTags(lastRound.aiReply).slice(0, 800)}\n`
   }
 
+  // 添加NPC上下文（如果启用主动查询）
+  let npcContextBlock = ''
+  if (enableProactiveQuery && npcContext.length > 0) {
+    npcContextBlock = `\n**当前场景人物**: ${npcContext.join('、')}\n（如果用户输入隐含需要这些人物的历史信息，可以考虑生成补充查询）`
+  }
+
   const userPrompt = `当前游戏时间：${gameTime.year}年${gameTime.month}月${gameTime.day}日 ${gameTime.hour}:${String(gameTime.minute).padStart(2, '0')}
-${contextBlock}
+${contextBlock}${npcContextBlock}
 [当前玩家输入] ${userInput}
 
 请将当前玩家输入改写为适合语义检索的查询文本：`
@@ -177,7 +211,7 @@ ${contextBlock}
         { role: 'user', content: userPrompt }
       ],
       temperature: model && model.toLowerCase().includes('gpt') ? 1 : 0.3,
-      max_tokens: 300
+      max_tokens: enableProactiveQuery ? 500 : 300
     })
   })
 
@@ -189,6 +223,25 @@ ${contextBlock}
   const data = await res.json()
   let result = (data.choices?.[0]?.message?.content || '').trim()
   result = removeThinking(result).trim()
+
+  // 如果启用主动查询生成，解析XML输出
+  if (enableProactiveQuery) {
+    const mainMatch = result.match(/<main>(.+?)<\/main>/s)
+    const mainQuery = mainMatch ? mainMatch[1].trim() : (result || userInput)
+
+    const additionalQueries = []
+    const additionalMatches = result.matchAll(/<additional>(.+?)<\/additional>/gs)
+    for (const match of additionalMatches) {
+      const query = match[1].trim()
+      if (query && additionalQueries.length < 2) {
+        additionalQueries.push(query)
+      }
+    }
+
+    return { mainQuery, additionalQueries }
+  }
+
+  // 未启用主动查询，返回字符串（向后兼容）
   return result || userInput
 }
 
@@ -416,7 +469,7 @@ export async function analyzeRecalledSummaries(userInput, ragSummaries, gameTime
    - 用户输入提到具体人物/事件/日期，但召回结果中未包含相关信息
    - 召回结果提到某个关键信息的前置事件，但该前置事件未被召回
    - 当前场景的重要人物在召回结果中缺少历史信息（特别是预设可能会推进与他们相关的剧情时）
-   - **重要**：生成一个综合的补充查询文本，包含所有需要补充的信息点
+   - **重要**：可以生成0-2个补充查询，每个查询针对一个具体的信息缺失点
    - **时间表达规范**：必须使用绝对日期（如"2024年4月15日"），不要使用相对时间（如"前天"、"大前天"、"上周"）
 
 **输出格式** (XML):
@@ -425,9 +478,8 @@ export async function analyzeRecalledSummaries(userInput, ragSummaries, gameTime
 <floor>楼层号1</floor>
 <floor>楼层号2</floor>
 </prune>
-<additional_query>
-综合补充查询文本（如果需要补充多个信息点，用空格或顿号连接，例如"小明的约定 2024年4月13日的事件 图书馆的活动"）
-</additional_query>
+<additional>补充查询1</additional>
+<additional>补充查询2</additional>
 </analysis>
 
 如果无需剪枝或补充，对应标签留空即可。`
@@ -477,7 +529,7 @@ ${summariesText}
 
     // 解析 XML 输出
     const pruneFloors = []
-    let additionalQuery = ''
+    const additionalQueries = []
 
     // 提取 <floor> 标签
     const floorMatches = result.matchAll(/<floor>(\d+)<\/floor>/g)
@@ -486,16 +538,19 @@ ${summariesText}
       if (!isNaN(floor)) pruneFloors.push(floor)
     }
 
-    // 提取 <additional_query> 标签（单个）
-    const queryMatch = result.match(/<additional_query>(.+?)<\/additional_query>/s)
-    if (queryMatch) {
-      additionalQuery = queryMatch[1].trim()
+    // 提取 <additional> 标签（多个）
+    const queryMatches = result.matchAll(/<additional>(.+?)<\/additional>/gs)
+    for (const match of queryMatches) {
+      const query = match[1].trim()
+      if (query && additionalQueries.length < 2) {
+        additionalQueries.push(query)
+      }
     }
 
-    return { pruneFloors, additionalQuery }
+    return { pruneFloors, additionalQueries }
   } catch (e) {
     console.warn('[Enhanced Recall] Analysis failed:', e.message)
-    return { pruneFloors: [], additionalQuery: '' }
+    return { pruneFloors: [], additionalQueries: [] }
   }
 }
 
@@ -574,7 +629,43 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
     }
   }
 
-  // Query 改写：使用 assistantAI 解析相对时间/代词指代
+  // 收集场景NPC上下文（用于主动查询生成）
+  const contextNpcs = []
+  if (ragSettings.proactiveQueryGeneration && gameStore.settings.assistantAI?.enabled) {
+    try {
+      // 1. 获取当前场景的NPC（最多5个）
+      const locationNpcs = getNpcsAtLocation(gameStore.player.location, gameStore)
+        .filter(npc => npc.isAlive)
+        .slice(0, 5)
+      contextNpcs.push(...locationNpcs.map(npc => npc.name))
+
+      // 2. 如果场景NPC不足5个，补充关系亲密的NPC
+      if (contextNpcs.length < 5) {
+        const closeNpcs = gameStore.npcs
+          .filter(npc => npc.isAlive && !contextNpcs.includes(npc.name))
+          .filter(npc => {
+            const rel = gameStore.npcRelationships?.[npc.name]?.relations?.[gameStore.player.name]
+            return rel && (rel.intimacy > 60 || rel.trust > 60)
+          })
+          .sort((a, b) => {
+            const relA = gameStore.npcRelationships?.[a.name]?.relations?.[gameStore.player.name]
+            const relB = gameStore.npcRelationships?.[b.name]?.relations?.[gameStore.player.name]
+            const scoreA = (relA?.intimacy || 0) + (relA?.trust || 0)
+            const scoreB = (relB?.intimacy || 0) + (relB?.trust || 0)
+            return scoreB - scoreA
+          })
+          .slice(0, 5 - contextNpcs.length)
+        contextNpcs.push(...closeNpcs.map(npc => npc.name))
+      }
+    } catch (e) {
+      console.warn('[RAG] Failed to collect NPC context:', e.message)
+    }
+  }
+
+  // Query 改写：使用 assistantAI 解析相对时间/代词指代 + 主动查询生成
+  let mainQuery = query
+  let additionalQueries = []
+
   if (gameStore.settings.assistantAI?.enabled && gameStore.settings.assistantAI?.apiUrl) {
     try {
       let lastRound = null
@@ -586,7 +677,27 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
           aiReply: lastAi?.type === 'ai' ? lastAi.content : ''
         }
       }
-      query = await rewriteQueryWithAI(query, gameStore.gameTime, lastRound)
+
+      // 构建rewriteOptions
+      const rewriteOptions = {
+        enableProactiveQuery: ragSettings.proactiveQueryGeneration || false,
+        npcContext: contextNpcs
+      }
+
+      const rewriteResult = await rewriteQueryWithAI(query, gameStore.gameTime, lastRound, rewriteOptions)
+
+      // 处理返回值：兼容字符串和对象两种格式
+      if (typeof rewriteResult === 'string') {
+        mainQuery = rewriteResult
+      } else if (rewriteResult && typeof rewriteResult === 'object') {
+        mainQuery = rewriteResult.mainQuery || query
+        additionalQueries = rewriteResult.additionalQueries || []
+
+        // 记录日志
+        if (additionalQueries.length > 0) {
+          console.log('[RAG] Proactive queries generated:', additionalQueries)
+        }
+      }
     } catch (e) {
       console.warn('[RAG] Query rewrite failed:', e.message)
       errors.push({ stage: 'queryRewrite', message: e.message })
@@ -621,9 +732,16 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
       s => s.type === 'minor' && s.floor === floor
     )
     if (summary) {
+      // 过滤已完成的待办事项
+      let filteredContent = summary.content
+      if (summary.completedTodos && summary.completedTodos.length > 0) {
+        const { filterCompletedTodos } = await import('./todoManager')
+        filteredContent = filterCompletedTodos(summary.content, summary.completedTodos)
+      }
+
       bridgeSummaries.push({
         type: 'summary',
-        content: `[桥接总结 楼层${floor}] ${summary.content}`,
+        content: `[桥接总结 楼层${floor}] ${filteredContent}`,
         isSummary: true,
         summaryType: 'bridge'
       })
@@ -643,10 +761,23 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
       if (embeddedSummaries.length <= topN) {
         ragSummaries = embeddedSummaries.map(s => ({ summary: s, score: 1 }))
       } else {
-        const candidates = await searchSimilarSummaries(query, topK)
+        // 合并主查询和所有补充查询为单次检索
+        let finalQuery = mainQuery
+        if (additionalQueries.length > 0) {
+          finalQuery = [mainQuery, ...additionalQueries].join(' ')
+          console.log('[RAG] Combined main + proactive queries:', finalQuery)
+          console.log('[RAG] Main query:', mainQuery)
+          console.log('[RAG] Additional queries:', additionalQueries)
+        } else {
+          console.log('[RAG] Using main query only:', mainQuery)
+        }
+
+        // 单次检索（合并主查询和补充查询）
+        const candidates = await searchSimilarSummaries(finalQuery, topK)
         const filtered = candidates.filter(c => !excludeSet.has(c.summary.floor))
         if (filtered.length > 0) {
-          ragSummaries = await rerankSummaries(query, filtered, topN)
+          ragSummaries = await rerankSummaries(finalQuery, filtered, topN)
+          console.log('[RAG] Retrieved summaries:', ragSummaries.length)
         }
       }
     } catch (e) {
@@ -659,7 +790,7 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
   if (ragSettings.enhancedRecall && gameStore.settings.assistantAI?.enabled && ragSummaries.length > 0) {
     try {
       // 1. 分析召回结果
-      const { pruneFloors, additionalQuery } = await analyzeRecalledSummaries(
+      const { pruneFloors, additionalQueries: enhancedQueries } = await analyzeRecalledSummaries(
         userInput, ragSummaries, gameStore.gameTime
       )
 
@@ -669,28 +800,40 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
         ragSummaries = ragSummaries.filter(item => !pruneFloors.includes(item.summary.floor))
       }
 
-      // 3. 补充查询：二次检索（单次调用）
-      if (additionalQuery) {
-        console.log('[Enhanced Recall] Additional query:', additionalQuery)
+      // 3. 补充查询：二次检索（支持多个查询）
+      if (enhancedQueries && enhancedQueries.length > 0) {
+        console.log('[Enhanced Recall] Additional queries:', enhancedQueries)
         const enhancedExcludeSet = new Set([
           ...excludeSet,
           ...ragSummaries.map(item => item.summary.floor)
         ])
 
-        const additionalResults = await executeAdditionalQuery(
-          additionalQuery,
-          enhancedExcludeSet,
-          Math.ceil(topN / 2)
-        )
+        const { topN } = getEffectiveRAGParams()
 
-        // 4. 合并结果并去重
-        if (additionalResults.length > 0) {
-          const floorSet = new Set(ragSummaries.map(item => item.summary.floor))
-          const uniqueAdditional = additionalResults.filter(
-            item => !floorSet.has(item.summary.floor)
+        // 合并所有补充查询为一个综合查询
+        const combinedEnhancedQuery = enhancedQueries.join(' ')
+        console.log('[Enhanced Recall] Combined query:', combinedEnhancedQuery)
+        console.log('[Enhanced Recall] Original queries:', enhancedQueries)
+
+        try {
+          const enhancedResults = await executeAdditionalQuery(
+            combinedEnhancedQuery,
+            enhancedExcludeSet,
+            Math.ceil(topN / 2)
           )
-          console.log('[Enhanced Recall] Added summaries:', uniqueAdditional.length)
-          ragSummaries.push(...uniqueAdditional)
+
+          if (enhancedResults.length > 0) {
+            const floorSet = new Set(ragSummaries.map(item => item.summary.floor))
+            const uniqueAdditional = enhancedResults.filter(
+              item => !floorSet.has(item.summary.floor)
+            )
+            if (uniqueAdditional.length > 0) {
+              console.log('[Enhanced Recall] Added summaries:', uniqueAdditional.length)
+              ragSummaries.push(...uniqueAdditional)
+            }
+          }
+        } catch (e) {
+          console.warn('[Enhanced Recall] Combined query failed:', e.message)
         }
       }
     } catch (e) {
@@ -705,9 +848,16 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
     const sorted = ragSummaries.sort((a, b) => a.summary.floor - b.summary.floor)
     for (const item of sorted) {
       const s = item.summary
+      // 过滤已完成的待办事项
+      let filteredContent = s.content
+      if (s.completedTodos && s.completedTodos.length > 0) {
+        const { filterCompletedTodos } = await import('./todoManager')
+        filteredContent = filterCompletedTodos(s.content, s.completedTodos)
+      }
+
       result.push({
         type: 'summary',
-        content: `[RAG召回 楼层${s.floor} | 相关度${(item.score * 100).toFixed(0)}%] ${s.content}`,
+        content: `[RAG召回 楼层${s.floor} | 相关度${(item.score * 100).toFixed(0)}%] ${filteredContent}`,
         isSummary: true,
         summaryType: 'rag'
       })

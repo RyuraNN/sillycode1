@@ -265,7 +265,7 @@ async function getActiveWorldbooksContent() {
         console.warn(`[AssistantAI] Failed to get content for worldbook "${name}", skipping:`, e.message || e)
         continue
       }
-      
+
       if (bookContent) {
         content += `\n[Worldbook: ${name}]\n${bookContent}\n`
       }
@@ -276,6 +276,35 @@ async function getActiveWorldbooksContent() {
     return ''
   }
 }
+
+/**
+ * 待办事项管理提示词
+ */
+const TODO_MANAGEMENT_PROMPT = `
+## 待办事项管理
+
+当玩家完成了之前约定的待办事项时，你可以使用以下指令标记为已完成：
+
+<complete_todo floor="楼层号" keyword="待办关键词" />
+
+参数说明：
+- floor: 待办事项所在的小总结楼层号（从RAG召回或桥接总结中可以看到）
+- keyword: 待办内容的关键词或部分内容
+
+示例：
+如果召回的总结显示"[RAG召回 楼层45 | 相关度85%] ... 待办事项|周五放学后在图书馆见面"，
+当玩家完成了这个约定后，你应该输出：
+<complete_todo floor="45" keyword="图书馆见面" />
+
+或者使用更完整的关键词：
+<complete_todo floor="45" keyword="周五放学后在图书馆见面" />
+
+注意：
+- 只有在玩家明确完成了某个待办时才标记
+- 不要标记尚未完成或部分完成的待办
+- 关键词应该能够唯一识别该待办（如果一个总结有多个待办，使用更具体的关键词）
+- 该指令会自动从后续的RAG召回中移除该待办
+`
 
 /**
  * 调用辅助AI进行变量解析
@@ -301,7 +330,7 @@ export async function callAssistantAI(mainAIResponse, options = {}) {
   if (options.systemPrompt) {
     // 纯总结模式：简化上下文，不使用 prefill
     userContent = mainAIResponse
-    finalSystemPrompt = options.systemPrompt
+    finalSystemPrompt = options.systemPrompt + TODO_MANAGEMENT_PROMPT
   } else {
     // 正常变量解析模式：构建完整上下文
     let systemPrompt = buildSystemPromptContent(gameStore.$state)
@@ -327,7 +356,7 @@ ${activeWorldbooks}
 [Story Content]
 ${mainAIResponse}
 `
-    finalSystemPrompt = ASSISTANT_SYSTEM_PROMPT
+    finalSystemPrompt = ASSISTANT_SYSTEM_PROMPT + TODO_MANAGEMENT_PROMPT
     if (variableParsingBook) {
       finalSystemPrompt += `\n${variableParsingBook}`
     }

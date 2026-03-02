@@ -1,9 +1,10 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { fetchModels, IMAGE_ANALYSIS_PROMPT } from '../utils/assistantAI'
 import { DEFAULT_INSTRUCTIONS_PROMPT, DEFAULT_STYLE_PROMPT, DEFAULT_CORE_RULES_PROMPT, DEFAULT_BANNED_WORDS_PROMPT } from '../utils/prompts'
 import { GAME_VERSION } from '../utils/editionDetector'
+import { getMatchingStats } from '../utils/todoManager'
 
 defineEmits(['back'])
 
@@ -17,6 +18,9 @@ const isLoadingRerankModels = ref(false)
 const newContentTag = ref('')
 const debugClicks = ref(0)
 let debugClickTimer = null
+
+// 待办事项统计
+const todoStats = computed(() => getMatchingStats(gameStore))
 
 // 重置生图系统提示词
 const resetImageSystemPrompt = () => {
@@ -419,6 +423,47 @@ const loadRerankModels = async () => {
           </div>
         </div>
 
+        <!-- 待办事项管理 -->
+        <div class="settings-card">
+          <div class="card-header">
+            <span class="card-icon">✅</span>
+            <h3 class="card-title">待办事项管理</h3>
+          </div>
+          <div class="card-body">
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-label">匹配模式</span>
+                <span class="setting-hint">关键词模式：AI输出待办内容关键词，系统自动匹配（推荐）<br>索引模式：AI输出数字索引（需要主AI支持，暂未实现）</span>
+              </div>
+              <div class="setting-control">
+                <select v-model="gameStore.todoMatchingMode" class="select-input" @change="gameStore.saveToStorage()">
+                  <option value="keyword">关键词匹配（推荐）</option>
+                  <option value="index">数字索引匹配</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="setting-row" style="margin-top: 12px;">
+              <div class="setting-info">
+                <span class="setting-label">匹配统计</span>
+                <span class="setting-hint">显示AI标记待办的成功率，帮助选择更适合的模式</span>
+              </div>
+              <div class="setting-control">
+                <div class="stats-display">
+                  <div class="stat-row">
+                    <span>关键词模式：</span>
+                    <span>{{ todoStats.keyword.success }}/{{ todoStats.keyword.total }} ({{ todoStats.keyword.rate }}%)</span>
+                  </div>
+                  <div class="stat-row">
+                    <span>索引模式：</span>
+                    <span>{{ todoStats.index.success }}/{{ todoStats.index.total }} ({{ todoStats.index.rate }}%)</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- RAG 记忆检索系统 -->
         <div class="settings-card">
           <div class="card-header">
@@ -519,6 +564,24 @@ const loadRerankModels = async () => {
                       <input
                         type="checkbox"
                         v-model="gameStore.settings.ragSystem.enhancedRecall"
+                        :disabled="!gameStore.settings.assistantAI.enabled"
+                        @change="gameStore.saveToStorage()"
+                      >
+                      <span class="toggle-slider"></span>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="setting-row">
+                  <div class="setting-info">
+                    <span class="setting-label">主动查询生成 (实验性)</span>
+                    <span class="setting-hint">在Query改写阶段就生成补充查询，提前识别隐含需求（需要启用变量解析助手）</span>
+                  </div>
+                  <div class="setting-control">
+                    <label class="toggle-switch">
+                      <input
+                        type="checkbox"
+                        v-model="gameStore.settings.ragSystem.proactiveQueryGeneration"
                         :disabled="!gameStore.settings.assistantAI.enabled"
                         @change="gameStore.saveToStorage()"
                       >

@@ -203,7 +203,8 @@ export function createInitialState(): GameState {
         rerankTopN: 15,
         useContextQuery: true,
         autoAdjust: true,
-        enhancedRecall: false
+        enhancedRecall: false,
+        proactiveQueryGeneration: false
       },
       suggestedReplies: false,
       enterToSend: true,
@@ -290,6 +291,13 @@ export function createInitialState(): GameState {
         previousHour: 8,
         lastChangeInfo: null
       }
+    },
+    // 待办事项管理
+    completedTodoMarkers: [],
+    todoMatchingMode: 'keyword',
+    todoMatchingStats: {
+      keyword: { success: 0, total: 0 },
+      index: { success: 0, total: 0 }
     }
   }
 }

@@ -1,9 +1,11 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useGameStore } from '../stores/gameStore'
-import { calculateRelationshipScore, getEmotionalState, RELATIONSHIP_AXES, DEFAULT_RELATIONSHIPS } from '../data/relationshipData'
+import { calculateRelationshipScore, getEmotionalState, RELATIONSHIP_AXES, DEFAULT_RELATIONSHIPS, RELATIONSHIP_GROUPS } from '../data/relationshipData'
 import { findNpcLocation } from '../utils/npcScheduleSystem'
 import { getItem } from '../data/mapData'
+import RelationshipEditModal from './RelationshipEditModal.vue'
+import { setRelationship, removeRelationship } from '../utils/relationshipManager'
 
 const emit = defineEmits(['close'])
 const gameStore = useGameStore()
@@ -771,6 +773,106 @@ watch(charList, () => {
 onUnmounted(() => {
     if (netAnimId) cancelAnimationFrame(netAnimId)
 })
+
+// === 关系编辑功能 ===
+const showEditModal = ref(false)
+const editingTargetName = ref('')
+const editForm = ref({
+  intimacy: 0,
+  trust: 0,
+  passion: 0,
+  hostility: 0,
+  groups: [],
+  tags: []
+})
+
+// 获取所有可选角色（排除当前角色自己）
+const availableCharacters = computed(() => {
+  if (!currentChar.value) return []
+  const names = new Set()
+  names.add(gameStore.player.name)
+  for (const classInfo of Object.values(gameStore.allClassData || {})) {
+    if (classInfo.headTeacher?.name) names.add(classInfo.headTeacher.name)
+    if (Array.isArray(classInfo.teachers)) {
+      classInfo.teachers.forEach(t => { if (t.name) names.add(t.name) })
+    }
+    if (Array.isArray(classInfo.students)) {
+      classInfo.students.forEach(s => { if (s.name) names.add(s.name) })
+    }
+  }
+  return [...names].filter(n => n !== currentChar.value.name)
+})
+
+// 打开编辑模态框（编辑现有关系）
+const openEditModal = (targetName) => {
+  const relations = getCharRelations(currentChar.value.name)
+  const relation = relations[targetName] || {
+    intimacy: 0,
+    trust: 0,
+    passion: 0,
+    hostility: 0,
+    groups: [],
+    tags: []
+  }
+
+  editingTargetName.value = targetName
+  editForm.value = {
+    intimacy: relation.intimacy ?? 0,
+    trust: relation.trust ?? 0,
+    passion: relation.passion ?? 0,
+    hostility: relation.hostility ?? 0,
+    groups: [...(relation.groups || [])],
+    tags: [...(relation.tags || [])]
+  }
+  showEditModal.value = true
+}
+
+// 打开添加关系模态框
+const openAddModal = () => {
+  editingTargetName.value = ''
+  editForm.value = {
+    intimacy: 0,
+    trust: 0,
+    passion: 0,
+    hostility: 0,
+    groups: [],
+    tags: []
+  }
+  showEditModal.value = true
+}
+
+// 保存关系
+const handleSaveRelation = (data) => {
+  if (!currentChar.value) return
+
+  const sourceName = currentChar.value.name
+  const targetName = data.targetName
+
+  const relationData = {
+    intimacy: data.intimacy,
+    trust: data.trust,
+    passion: data.passion,
+    hostility: data.hostility,
+    groups: data.groups,
+    tags: data.tags
+  }
+
+  // 调用 relationshipManager 保存关系
+  setRelationship(sourceName, targetName, relationData)
+
+  showEditModal.value = false
+
+  // 刷新网络图
+  nextTick(() => {
+    initNetworkData()
+  })
+}
+
+// 关闭模态框
+const closeEditModal = () => {
+  showEditModal.value = false
+}
+
 </script>
 
 <template>
@@ -880,6 +982,12 @@ onUnmounted(() => {
           <div class="section-title">
             <span class="title-icon">💫</span>
             我的印象
+            <button class="edit-relation-btn" @click="openEditModal(gameStore.player.name)">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+              </svg>
+              编辑
+            </button>
           </div>
           <div class="relation-bars">
               <div class="bar-group">
@@ -965,6 +1073,19 @@ onUnmounted(() => {
           </div>
       </div>
     </div>
+
+    <!-- 关系编辑模态框 -->
+    <RelationshipEditModal
+      :show="showEditModal"
+      :sourceName="currentChar?.name"
+      :targetName="editingTargetName"
+      :form="editForm"
+      :isEditing="!!editingTargetName"
+      :availableCharacters="availableCharacters"
+      :relationshipGroups="RELATIONSHIP_GROUPS"
+      @close="closeEditModal"
+      @save="handleSaveRelation"
+    />
   </div>
 </template>
 
@@ -1514,6 +1635,33 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.edit-relation-btn {
+  margin-left: auto;
+  background: linear-gradient(135deg, #4A90D9 0%, #357ABD 100%);
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(74, 144, 217, 0.3);
+}
+
+.edit-relation-btn:hover {
+  background: linear-gradient(135deg, #5B9FE6 0%, #4A90D9 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(74, 144, 217, 0.4);
+}
+
+.edit-relation-btn:active {
+  transform: translateY(0);
 }
 
 .title-icon {
