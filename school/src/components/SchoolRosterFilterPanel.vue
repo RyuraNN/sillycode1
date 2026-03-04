@@ -7,12 +7,13 @@ import { useCharacterPool } from '../composables/useCharacterPool'
 import { useBatchComplete } from '../composables/useBatchComplete'
 import { useAIImport } from '../composables/useAIImport'
 import { useAutoClubGenerate } from '../composables/useAutoClubGenerate'
-import { saveRosterBackup, saveFullCharacterPool, getSnapshotData, saveSnapshotData } from '../utils/indexedDB'
+import { saveRosterBackup, saveFullCharacterPool, getSnapshotData, saveSnapshotData, loadChunkedChatLog, saveChunkedChatLog } from '../utils/indexedDB'
 import { updateClassDataInWorldbook, updateAcademicDataInWorldbook, updateTagDataInWorldbook, updateStaffRosterInWorldbook, ensureClubExistsInWorldbook, syncClubWorldbookState, createClubInWorldbook, addNpcToClubInWorldbook, batchUpdateClubsInWorldbook, removeClubFromWorldbook } from '../utils/worldbookParser'
 import { saveSocialData } from '../utils/socialRelationshipsWorldbook'
 import { saveImpressionDataImmediate } from '../utils/impressionWorldbook'
-import { getRelationship, setRelationship, removeRelationship, removeCharacter as removeCharacterFromRelations, flushPendingSocialData } from '../utils/relationshipManager'
+import { getRelationship, setRelationship, removeRelationship, removeCharacter as removeCharacterFromRelations, flushPendingSocialData, clearPendingSocialData } from '../utils/relationshipManager'
 import { RELATIONSHIP_GROUPS } from '../data/relationshipData'
+import { getErrorMessage } from '../utils/errorUtils'
 
 // 导入子组件
 import BatchCompleteModal from './BatchCompleteModal.vue'
@@ -294,14 +295,47 @@ const getSnapshotLabel = (id) => {
 }
 
 // 从备份恢复运行时关系数据，并重新写入 IndexedDB
+const cloneRelationships = () => JSON.parse(JSON.stringify(gameStore.npcRelationships || {}))
+
+const patchRelationshipsIntoChatSnapshots = (chatLog, relationships) => {
+  if (!Array.isArray(chatLog) || chatLog.length === 0) return 0
+
+  const sharedRelationships = JSON.parse(JSON.stringify(relationships || {}))
+  let patchedCount = 0
+
+  for (const entry of chatLog) {
+    if (entry?.snapshot && typeof entry.snapshot === 'object') {
+      entry.snapshot.npcRelationships = sharedRelationships
+      patchedCount++
+    }
+  }
+
+  return patchedCount
+}
+
+const persistRuntimeRelationshipChanges = async (syncWorldbook = false) => {
+  if (snapshotRelSource.value) {
+    clearPendingSocialData()
+    return
+  }
+  await flushPendingSocialData()
+  if (syncWorldbook) {
+    await syncRelationshipsToWorldbook()
+  }
+}
+
 const restoreRuntimeRelationships = async () => {
+  let restored = false
   if (runtimeRelBackup.value) {
     gameStore.npcRelationships = JSON.parse(JSON.stringify(runtimeRelBackup.value))
     runtimeRelBackup.value = null
-    await flushPendingSocialData()
+    restored = true
   }
   snapshotRelSource.value = ''
   snapshotRelData.value = null
+  if (restored) {
+    await flushPendingSocialData()
+  }
 }
 
 // 从存档加载关系数据到当前编辑器
@@ -311,6 +345,7 @@ const loadRelationshipsFromSnapshot = async (snapshotId) => {
     showMessage('已恢复为当前运行时数据')
     return
   }
+  clearPendingSocialData()
   isLoadingSnapshot.value = true
   try {
     const details = await getSnapshotData(snapshotId)
@@ -327,7 +362,7 @@ const loadRelationshipsFromSnapshot = async (snapshotId) => {
     showMessage('已加载存档关系数据，编辑后点击「保存到存档」回写')
   } catch (e) {
     console.error('[RelEditor] Load snapshot failed:', e)
-    alert('加载存档失败: ' + e.message)
+    alert('加载存档失败: ' + getErrorMessage(e))
   } finally {
     isLoadingSnapshot.value = false
   }
@@ -338,13 +373,29 @@ const saveRelationshipsToSnapshot = async () => {
   const sid = snapshotRelSource.value
   if (!sid || !snapshotRelData.value) return
   try {
+    const relationships = cloneRelationships()
     const updatedData = JSON.parse(JSON.stringify(snapshotRelData.value))
-    updatedData.gameState.npcRelationships = JSON.parse(JSON.stringify(gameStore.npcRelationships))
+    updatedData.gameState.npcRelationships = relationships
+
+    let patchedCount = 0
+    if (Array.isArray(updatedData.chatLog) && updatedData.chatLog.length > 0) {
+      patchedCount += patchRelationshipsIntoChatSnapshots(updatedData.chatLog, relationships)
+    } else {
+      const chunkedChatLog = await loadChunkedChatLog(sid)
+      if (Array.isArray(chunkedChatLog) && chunkedChatLog.length > 0) {
+        patchedCount += patchRelationshipsIntoChatSnapshots(chunkedChatLog, relationships)
+        if (patchedCount > 0) {
+          await saveChunkedChatLog(sid, chunkedChatLog)
+        }
+      }
+    }
+
     await saveSnapshotData(sid, updatedData)
+    console.log('[RelEditor] Saved snapshot relationships, patched chat snapshots:', patchedCount)
     showMessage('✅ 关系数据已保存到存档。恢复该存档后，编辑将生效。')
   } catch (e) {
     console.error('[RelEditor] Save to snapshot failed:', e)
-    alert('保存到存档失败: ' + e.message)
+    alert('保存到存档失败: ' + getErrorMessage(e))
   }
 }
 
@@ -678,7 +729,7 @@ const handleSave = async () => {
     showMessage('保存成功！数据已同步到世界书。')
   } catch (e) {
     console.error('[RosterFilter] Save error:', e)
-    showMessage(`保存失败: ${e.message}`)
+    showMessage(`保存失败: ${getErrorMessage(e)}`)
   } finally {
     saving.value = false
   }
@@ -1246,7 +1297,7 @@ const handleConfirmAIImport = async () => {
 
   await saveFullCharacterPool(deepClone(characterPool.value))
   if (addedCount > 0) {
-    await flushPendingSocialData()
+    await persistRuntimeRelationshipChanges()
   }
   showAIImportResult.value = false
   resetAIImport()
@@ -1847,7 +1898,7 @@ async function handleApplyGeneratedClubs() {
     if (newTeacherCount > 0) parts.push(`新增${newTeacherCount}名教师`)
     showMessage(`处理完成：${parts.join('、')}。可在社团编辑中设置活动地点。`)
   } catch (e) {
-    showMessage(`社团应用失败: ${e.message}`)
+    showMessage(`社团应用失败: ${getErrorMessage(e)}`)
   }
 }
 
@@ -1898,11 +1949,8 @@ const handleSaveRelationship = async (formData) => {
   }
 
   setRelationship(source, target, cleanData)
-  await flushPendingSocialData()
+  await persistRuntimeRelationshipChanges(true)
   // 只有在编辑当前运行时数据时才同步到世界书，编辑存档数据时不同步
-  if (!snapshotRelSource.value) {
-    await syncRelationshipsToWorldbook()
-  }
   showRelationshipEditor.value = false
   showMessage(`关系 ${source} → ${target} 已保存`)
 }
@@ -1910,11 +1958,8 @@ const handleSaveRelationship = async (formData) => {
 const handleDeleteRelationship = async (source, target) => {
   if (!confirm(`确定删除 ${source} ↔ ${target} 的双向关系？`)) return
   removeRelationship(source, target)
-  await flushPendingSocialData()
+  await persistRuntimeRelationshipChanges(true)
   // 只有在编辑当前运行时数据时才同步到世界书
-  if (!snapshotRelSource.value) {
-    await syncRelationshipsToWorldbook()
-  }
   showMessage(`已删除 ${source} ↔ ${target} 的关系`)
 }
 
@@ -1924,11 +1969,8 @@ const handleBatchDeleteRelationships = async (pairs) => {
   for (const { source, target } of pairs) {
     removeRelationship(source, target)
   }
-  await flushPendingSocialData()
+  await persistRuntimeRelationshipChanges(true)
   // 只有在编辑当前运行时数据时才同步到世界书
-  if (!snapshotRelSource.value) {
-    await syncRelationshipsToWorldbook()
-  }
   showMessage(`已批量删除 ${pairs.length} 条关系`)
 }
 
@@ -1942,11 +1984,8 @@ const handleClearCharRelations = async (charName) => {
     const otherRels = gameStore.npcRelationships[otherName]?.relations
     if (otherRels?.[charName]) delete otherRels[charName]
   }
-  await flushPendingSocialData()
+  await persistRuntimeRelationshipChanges(true)
   // 只有在编辑当前运行时数据时才同步到世界书
-  if (!snapshotRelSource.value) {
-    await syncRelationshipsToWorldbook()
-  }
   await saveImpressionDataImmediate()
   showMessage(`已清空「${charName}」的所有关系`)
 }
@@ -1957,11 +1996,8 @@ const handleClearCharImpressions = async (charName) => {
     const rel = gameStore.npcRelationships[otherName]?.relations?.[charName]
     if (rel && rel.tags) rel.tags = []
   }
-  await flushPendingSocialData()
+  await persistRuntimeRelationshipChanges(true)
   // 只有在编辑当前运行时数据时才同步到世界书
-  if (!snapshotRelSource.value) {
-    await syncRelationshipsToWorldbook()
-  }
   await saveImpressionDataImmediate()
   showMessage(`已清除所有角色对「${charName}」的印象标签`)
 }
@@ -1969,11 +2005,8 @@ const handleClearCharImpressions = async (charName) => {
 const handleRemoveCharacter = async (charName) => {
   if (!confirm(`⚠️ 确定完全移除「${charName}」？\n将从关系数据中彻底删除该角色及所有相关关系。`)) return
   removeCharacterFromRelations(charName, true)
-  await flushPendingSocialData()
+  await persistRuntimeRelationshipChanges(true)
   // 只有在编辑当前运行时数据时才同步到世界书
-  if (!snapshotRelSource.value) {
-    await syncRelationshipsToWorldbook()
-  }
   showMessage(`已移除角色「${charName}」`)
 }
 
@@ -1987,11 +2020,8 @@ const handleBatchDeleteCharacters = async (charNames) => {
     removeCharacterFromRelations(charName, false)
   }
 
-  await flushPendingSocialData()
+  await persistRuntimeRelationshipChanges(true)
   // 只有在编辑当前运行时数据时才同步到世界书
-  if (!snapshotRelSource.value) {
-    await syncRelationshipsToWorldbook()
-  }
   await saveImpressionDataImmediate()
 
   showMessage(`已批量删除 ${count} 个角色的所有关系数据`)
@@ -1999,12 +2029,17 @@ const handleBatchDeleteCharacters = async (charNames) => {
 
 const handleClearAllRelationships = async () => {
   try {
-    const { clearAllRelationships } = await import('../utils/relationshipManager')
-    await clearAllRelationships()
+    for (const charData of Object.values(gameStore.npcRelationships || {})) {
+      if (charData && typeof charData === 'object' && charData.relations) {
+        charData.relations = {}
+      }
+    }
+    await persistRuntimeRelationshipChanges(true)
+    await saveImpressionDataImmediate()
     showMessage('已清空所有关系数据')
   } catch (e) {
     console.error('[RosterFilter] Failed to clear all relationships:', e)
-    showMessage('清空失败：' + e.message)
+    showMessage('清空失败：' + getErrorMessage(e))
   }
 }
 
@@ -2016,11 +2051,8 @@ const handleClearGhostReferences = async (charName) => {
     const otherRels = rels[otherName]?.relations
     if (otherRels?.[charName]) delete otherRels[charName]
   }
-  await flushPendingSocialData()
+  await persistRuntimeRelationshipChanges(true)
   // 只有在编辑当前运行时数据时才同步到世界书
-  if (!snapshotRelSource.value) {
-    await syncRelationshipsToWorldbook()
-  }
   await saveImpressionDataImmediate()
   showMessage(`已清除所有对幽灵角色「${charName}」的引用`)
 }
@@ -2058,11 +2090,8 @@ const handleClearAllGhosts = async () => {
     }
   }
 
-  await flushPendingSocialData()
+  await persistRuntimeRelationshipChanges(true)
   // 只有在编辑当前运行时数据时才同步到世界书
-  if (!snapshotRelSource.value) {
-    await syncRelationshipsToWorldbook()
-  }
   await saveImpressionDataImmediate()
   showMessage(`已清除 ${ghosts.size} 个幽灵角色的 ${totalCleared} 条引用关系`)
 }

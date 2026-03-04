@@ -222,6 +222,7 @@
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { extractKeywordsFromSummary, cosineSimilarity, callEmbeddingAPI } from '../utils/ragService'
+import { getErrorMessage } from '../utils/errorUtils'
 
 const emit = defineEmits(['close'])
 const gameStore = useGameStore()
@@ -603,7 +604,7 @@ async function searchVectorSimilarity() {
       throw new Error('Empty embedding')
     }
   } catch (e) {
-    console.warn('[Vector] Embedding API failed, fallback to keyword search:', e.message)
+    console.warn('[Vector] Embedding API failed, fallback to keyword search:', getErrorMessage(e))
     // 降级为关键词匹配
     const queryLower = query.toLowerCase()
     const results = vectorNodes.value

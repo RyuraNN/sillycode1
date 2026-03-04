@@ -1,7 +1,8 @@
-/**
+﻿/**
  * IndexedDB Utility for School Simulator
  * Used for storing large data like roster backups that exceed LocalStorage limits.
  */
+import { getErrorName } from './errorUtils'
 
 const DB_NAME = 'SchoolSimulatorDB'
 const DB_VERSION = 3 // Incremented version for snapshot store
@@ -10,6 +11,32 @@ const DATA_STORE_NAME = 'game_data' // For general game data
 const SNAPSHOT_STORE_NAME = 'snapshot_data' // New store for heavy snapshot data
 
 let dbInstance = null
+
+function isDevEnv() {
+  try {
+    return typeof import.meta !== 'undefined' && Boolean(import.meta.env?.DEV)
+  } catch {
+    return false
+  }
+}
+
+function assertSerializableInDev(data, keyPath) {
+  if (!isDevEnv()) return
+  try {
+    JSON.stringify(data)
+    return
+  } catch (jsonError) {
+    try {
+      structuredClone(data)
+      return
+    } catch (cloneError) {
+      console.warn(`[IndexedDB] Non-serializable payload detected before write: ${keyPath}`, {
+        jsonError,
+        cloneError
+      })
+    }
+  }
+}
 
 /**
  * Open the database connection
@@ -68,7 +95,7 @@ export async function setItem(key, data, storeName = DATA_STORE_NAME) {
       const request = store.put(data, key)
 
       request.onsuccess = () => resolve()
-      request.onerror = (event) => {
+         request.onerror = (event) => {
         const error = event.target.error
         // 检测 QuotaExceededError
         if (error && error.name === 'QuotaExceededError') {
@@ -81,7 +108,7 @@ export async function setItem(key, data, storeName = DATA_STORE_NAME) {
   } catch (e) {
     console.error(`[IndexedDB] Error saving item to ${storeName}:`, e)
     // 检测 QuotaExceededError
-    if (e.name === 'QuotaExceededError') {
+    if (getErrorName(e) === 'QuotaExceededError') {
       throw new Error('存储空间不足，请清理旧存档或导出后删除')
     }
     throw e
@@ -176,6 +203,7 @@ export async function getRosterPresets() {
 // Snapshot Data Helpers
 export async function saveSnapshotData(id, data) {
   // console.log(`[IndexedDB] Saving snapshot data for ${id}...`)
+  assertSerializableInDev(data, `snapshot:${id}`)
   return setItem(id, data, SNAPSHOT_STORE_NAME)
 }
 
@@ -340,21 +368,75 @@ export async function migrateFromLocalStorage(keys) {
 // ==================== 分片存储 ====================
 
 const CHUNK_SIZE = 200 // 每片200条消息
-
 /**
  * 分片保存 chatLog
  * @param {string} snapshotId 快照ID
  * @param {Array} chatLog 聊天记录数组
- * @returns {Promise<void>}
+ * @param {Object} [options]
+ * @param {boolean} [options.incremental=false] 
+ * @param {(entry:any, index:number)=>any} [options.serializeEntry] 单条消息序列化函数 * @param {number} [options.rewriteFromIndex] @returns {Promise<void>}
  */
-export async function saveChunkedChatLog(snapshotId, chatLog) {
-  const totalChunks = Math.ceil(chatLog.length / CHUNK_SIZE)
-  for (let i = 0; i < totalChunks; i++) {
-    const chunk = chatLog.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
+export async function saveChunkedChatLog(snapshotId, chatLog, options = {}) {
+  const { incremental = false, serializeEntry, rewriteFromIndex } = options
+  const totalMessages = Array.isArray(chatLog) ? chatLog.length : 0
+  const totalChunks = Math.ceil(totalMessages / CHUNK_SIZE)
+  const metaKey = `${snapshotId}_meta`
+  const previousMeta = incremental ? await getItem(metaKey, SNAPSHOT_STORE_NAME) : null
+
+  let startChunk = 0
+  if (incremental && previousMeta && Number.isInteger(previousMeta.totalMessages)) {
+    const previousMessages = previousMeta.totalMessages
+
+    // 历史被回溯或截断：全量重写
+    if (totalMessages < previousMessages) {
+      startChunk = 0
+    } else if (totalMessages === previousMessages) {
+      // 消息数不变也可能有内容编辑（如图片占位替换），重写最后一个分片兜底
+      startChunk = totalChunks > 0 ? totalChunks - 1 : 0
+    } else if (previousMessages === 0) {
+      startChunk = 0
+    } else if (previousMessages % CHUNK_SIZE === 0) {
+      // 正好从新分片开始追加
+      startChunk = previousMessages / CHUNK_SIZE
+    } else {
+      // 需要重写上一个尾分片 + 新分片
+      startChunk = Math.floor(previousMessages / CHUNK_SIZE)
+    }
+  }
+
+  // 历史编辑场景：强制从被编辑消息所在分片开始重写
+  if (Number.isInteger(rewriteFromIndex) && rewriteFromIndex >= 0) {
+    const forcedStartChunk = Math.floor(rewriteFromIndex / CHUNK_SIZE)
+    startChunk = Math.min(startChunk, forcedStartChunk)
+  }
+
+  for (let i = startChunk; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE
+    const end = Math.min((i + 1) * CHUNK_SIZE, totalMessages)
+    let chunk = chatLog.slice(start, end)
+
+    if (typeof serializeEntry === 'function') {
+      chunk = chunk.map((entry, offset) => serializeEntry(entry, start + offset))
+    }
+    assertSerializableInDev(chunk, `${snapshotId}_chunk_${i}`)
     await setItem(`${snapshotId}_chunk_${i}`, chunk, SNAPSHOT_STORE_NAME)
   }
+
+  // 清理多余旧分片（处理回溯/截断）
+  if (previousMeta && Number.isInteger(previousMeta.totalChunks) && previousMeta.totalChunks > totalChunks) {
+    for (let i = totalChunks; i < previousMeta.totalChunks; i++) {
+      await removeItem(`${snapshotId}_chunk_${i}`, SNAPSHOT_STORE_NAME)
+    }
+  }
   // 保存元数据
-  await setItem(`${snapshotId}_meta`, { totalChunks, totalMessages: chatLog.length }, SNAPSHOT_STORE_NAME)
+  const metaPayload = {
+    totalChunks,
+    totalMessages,
+    chunkSize: CHUNK_SIZE,
+    updatedAt: Date.now()
+  }
+  assertSerializableInDev(metaPayload, metaKey)
+  await setItem(metaKey, metaPayload, SNAPSHOT_STORE_NAME)
 }
 
 /**
@@ -431,7 +513,7 @@ export async function getAllSnapshotIds() {
 
       request.onsuccess = (event) => {
         const keys = event.target.result || []
-        // 提取快照ID（排除分片和元数据键）
+     // 提取快照ID（排除分片和元数据键）
         const snapshotIds = new Set()
         for (const key of keys) {
           if (typeof key === 'string') {
@@ -451,3 +533,4 @@ export async function getAllSnapshotIds() {
     return []
   }
 }
+

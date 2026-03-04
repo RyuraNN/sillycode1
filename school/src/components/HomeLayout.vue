@@ -5,6 +5,7 @@ import { switchSaveSlot, restoreWorldbookFromStore } from '../utils/socialWorldb
 import { clearAllData } from '../utils/indexedDB'
 import { getAllBookNames } from '../utils/worldbookHelper'
 import { syncClubWorldbookState, syncClassWorldbookState, setPlayerClass } from '../utils/worldbookParser'
+import { getErrorMessage } from '../utils/errorUtils'
 
 // 使用异步组件以优化首屏加载性能
 const GameStart = defineAsyncComponent(() => import('./GameStart.vue'))
@@ -58,7 +59,7 @@ const toggleDarkMode = () => {
 const toggleFullscreen = () => {
   if (!document.fullscreenElement) {
     document.documentElement.requestFullscreen().catch(err => {
-      console.error(`Error attempting to enable fullscreen: ${err.message}`)
+      console.error(`Error attempting to enable fullscreen: ${getErrorMessage(err)}`)
     })
   } else {
     document.exitFullscreen()

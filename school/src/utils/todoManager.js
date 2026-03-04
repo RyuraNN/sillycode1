@@ -12,26 +12,44 @@ import { useGameStore } from '../stores/gameStore'
  */
 export function extractTodoCompletionCommands(aiResponse) {
   const commands = []
+  if (!aiResponse) return commands
 
-  // 匹配关键词模式: <complete_todo floor="123" keyword="图书馆见面" />
-  const keywordRegex = /<complete_todo\s+floor="(\d+)"\s+keyword="([^"]+)"\s*\/>/g
-  let match
-  while ((match = keywordRegex.exec(aiResponse)) !== null) {
-    commands.push({
-      floor: parseInt(match[1]),
-      keyword: match[2],
-      mode: 'keyword'
-    })
-  }
+  // 兼容属性顺序变化: <complete_todo keyword="..." floor="123" />
+  const tagRegex = /<complete_todo\b([^>]*)\/?>/gi
+  let tagMatch
 
-  // 匹配索引模式: <complete_todo floor="123" index="0" />
-  const indexRegex = /<complete_todo\s+floor="(\d+)"\s+index="(\d+)"\s*\/>/g
-  while ((match = indexRegex.exec(aiResponse)) !== null) {
-    commands.push({
-      floor: parseInt(match[1]),
-      index: parseInt(match[2]),
-      mode: 'index'
-    })
+  while ((tagMatch = tagRegex.exec(aiResponse)) !== null) {
+    const attrsText = tagMatch[1] || ''
+    const attrs = {}
+    const attrRegex = /(\w+)\s*=\s*"([^"]*)"/g
+    let attrMatch
+
+    while ((attrMatch = attrRegex.exec(attrsText)) !== null) {
+      attrs[attrMatch[1].toLowerCase()] = attrMatch[2]
+    }
+
+    const floor = Number.parseInt(attrs.floor, 10)
+    if (!Number.isInteger(floor)) continue
+
+    if (typeof attrs.keyword === 'string' && attrs.keyword.trim()) {
+      commands.push({
+        floor,
+        keyword: attrs.keyword.trim(),
+        mode: 'keyword'
+      })
+      continue
+    }
+
+    if (attrs.index !== undefined) {
+      const index = Number.parseInt(attrs.index, 10)
+      if (Number.isInteger(index)) {
+        commands.push({
+          floor,
+          index,
+          mode: 'index'
+        })
+      }
+    }
   }
 
   return commands
@@ -45,13 +63,14 @@ export function extractTodoCompletionCommands(aiResponse) {
 export function parseTodoItems(summaryContent) {
   const lines = summaryContent.split('\n')
   for (const line of lines) {
-    if (line.startsWith('待办事项|')) {
-      const todoContent = line.substring('待办事项|'.length).trim()
+    const todoLineMatch = line.match(/^\s*待办事项[|｜](.*)$/)
+    if (todoLineMatch) {
+      const todoContent = todoLineMatch[1].trim()
       if (todoContent === '无' || todoContent === '') {
         return []
       }
-      // 按分号或中文分号分割
-      return todoContent.split(/[;；]/).map(t => t.trim()).filter(t => t)
+      // 按分号、中文分号或顿号分割
+      return todoContent.split(/[;；、]/).map(t => t.trim()).filter(t => t)
     }
   }
   return []
@@ -276,8 +295,9 @@ export function filterCompletedTodos(summaryContent, completedIndices = []) {
     const line = lines[i]
 
     // 找到待办事项行
-    if (line.startsWith('待办事项|')) {
-      const todoContent = line.substring('待办事项|'.length).trim()
+    const todoLineMatch = line.match(/^\s*待办事项[|｜](.*)$/)
+    if (todoLineMatch) {
+      const todoContent = todoLineMatch[1].trim()
 
       // 如果待办内容为"无"，保留
       if (todoContent === '无' || todoContent === '') {
@@ -286,7 +306,7 @@ export function filterCompletedTodos(summaryContent, completedIndices = []) {
       }
 
       // 解析多个待办（按分号分隔）
-      const todos = todoContent.split(/[;；]/).map(t => t.trim()).filter(t => t)
+      const todos = todoContent.split(/[;；、]/).map(t => t.trim()).filter(t => t)
       const remainingTodos = todos.filter((_, idx) => !completedIndices.includes(idx))
 
       if (remainingTodos.length > 0) {

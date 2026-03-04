@@ -8,6 +8,7 @@ import { setVariableParsingWorldbookStatus } from '../utils/worldbookParser'
 import { setItem, getItem, removeItem } from '../utils/indexedDB'
 import { GAME_VERSION } from '../utils/editionDetector'
 import { getMatchingStats } from '../utils/todoManager'
+import { getErrorMessage } from '../utils/errorUtils'
 import SocialApp from './SocialApp.vue'
 import SummaryViewer from './SummaryViewer.vue'
 import MemoryGraph from './MemoryGraph.vue'
@@ -72,7 +73,7 @@ const startBatchSummaryGeneration = async () => {
     alert('小总结补齐完成！')
   } catch (e) {
     console.error(e)
-    alert('生成过程中出错: ' + e.message)
+    alert('生成过程中出错: ' + getErrorMessage(e))
   } finally {
     isBatchProcessing.value = false
     batchType.value = ''
@@ -105,7 +106,7 @@ const startBatchDiaryGeneration = async () => {
     }
   } catch (e) {
     console.error(e)
-    alert('生成过程中出错: ' + e.message)
+    alert('生成过程中出错: ' + getErrorMessage(e))
   } finally {
     isBatchProcessing.value = false
     batchType.value = ''
@@ -126,7 +127,7 @@ const startBatchEmbed = async () => {
     })
     alert(`向量生成完成！成功 ${result.success} 个${result.failed > 0 ? `，失败 ${result.failed} 个` : ''}`)
   } catch (e) {
-    alert('生成向量出错: ' + e.message)
+    alert('生成向量出错: ' + getErrorMessage(e))
   } finally {
     isEmbedding.value = false
   }
@@ -140,7 +141,7 @@ const loadEmbeddingModels = async () => {
     const models = await fetchModels(cfg.apiUrl, cfg.apiKey)
     embeddingModelList.value = models.filter(m => /embed/i.test(m.id))
     if (embeddingModelList.value.length === 0) embeddingModelList.value = models
-  } catch (e) { alert('获取模型列表失败: ' + e.message) }
+  } catch (e) { alert('获取模型列表失败: ' + getErrorMessage(e)) }
   finally { isLoadingEmbModels.value = false }
 }
 
@@ -152,7 +153,7 @@ const loadRerankModels = async () => {
     const models = await fetchModels(cfg.apiUrl, cfg.apiKey)
     rerankModelList.value = models.filter(m => /rerank/i.test(m.id))
     if (rerankModelList.value.length === 0) rerankModelList.value = models
-  } catch (e) { alert('获取模型列表失败: ' + e.message) }
+  } catch (e) { alert('获取模型列表失败: ' + getErrorMessage(e)) }
   finally { isLoadingRerankModels.value = false }
 }
 
@@ -267,7 +268,7 @@ const loadModels = async () => {
       gameStore.settings.assistantAI.model = models[0].id
     }
   } catch (e) {
-    alert('获取模型列表失败: ' + e.message)
+    alert('获取模型列表失败: ' + getErrorMessage(e))
   } finally {
     isLoadingModels.value = false
   }

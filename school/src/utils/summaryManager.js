@@ -2,6 +2,7 @@ import { useGameStore } from '../stores/gameStore'
 import { callAssistantAI } from './assistantAI'
 import { extractKeywordsFromSummary, embedSummary, buildRAGHistory, isRAGReady } from './ragService'
 import { filterCompletedTodos } from './todoManager'
+import { getErrorMessage } from './errorUtils'
 
 /**
  * 总结系统管理器
@@ -321,7 +322,7 @@ export async function generateMinorSummary(content, floor, useAssistant = true, 
     return { success: true, summary }
   } catch (e) {
     console.error('[SummaryManager] Error generating minor summary:', e)
-    return { success: false, error: e.message || '生成小总结时发生错误' }
+    return { success: false, error: getErrorMessage(e, '生成小总结时发生错误') }
   }
 }
 
@@ -390,7 +391,7 @@ export async function generateMajorSummary(floors) {
     return { success: true, summary }
   } catch (e) {
     console.error('[SummaryManager] Error generating major summary:', e)
-    return { success: false, error: e.message }
+    return { success: false, error: getErrorMessage(e) }
   }
 }
 
@@ -558,7 +559,7 @@ export async function generateDiary(gameDate, options = {}) {
     return { success: true, summary }
   } catch (e) {
     console.error(`[SummaryManager] Error generating diary for ${gameDate}:`, e)
-    return { success: false, error: e.message }
+    return { success: false, error: getErrorMessage(e) }
   }
 }
 
@@ -915,9 +916,15 @@ export async function buildSummarizedHistory(chatLog, currentFloor, userInput) {
       // 4. 回退到小总结
       const minorSummary = getSummaryContent(logFloor, 'minor')
       if (minorSummary) {
+        const summaryObj = gameStore.player.summaries.find(s => s.floor === logFloor && s.type === 'minor')
+        let filteredContent = minorSummary
+        if (summaryObj && summaryObj.completedTodos && summaryObj.completedTodos.length > 0) {
+          filteredContent = filterCompletedTodos(minorSummary, summaryObj.completedTodos)
+        }
+
         result.push({
           ...log,
-          content: `[楼层${logFloor}总结] ${minorSummary}`,
+          content: `[楼层${logFloor}总结] ${filteredContent}`,
           isSummary: true,
           summaryType: 'minor'
         })

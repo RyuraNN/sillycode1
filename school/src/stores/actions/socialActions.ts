@@ -109,9 +109,10 @@ export const socialActions = {
   },
 
   /**
-   * 清理过期的快照（保留最近 N 条）
+   * 社交模块旧快照清理逻辑（保留历史实现，避免覆盖 snapshotActions.cleanupSnapshots）
+   * 请优先使用 snapshotActions.cleanupSnapshots（带增量基准依赖保护）
    */
-  cleanupSnapshots(this: any, chatLog: ChatLogEntry[]) {
+  cleanupSocialSnapshots(this: any, chatLog: ChatLogEntry[]) {
     if (!chatLog || chatLog.length === 0) return
     
     const limit = this.settings.snapshotLimit || 10

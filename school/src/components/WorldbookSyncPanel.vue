@@ -3,6 +3,7 @@
 import { ref, watch, computed } from 'vue'
 import { fetchAndDiffAll, applyResolvedDiffs, formatValueForDisplay } from '../utils/worldbookDiff'
 import { isWorldbookAvailable } from '../utils/worldbookHelper'
+import { getErrorMessage } from '../utils/errorUtils'
 
 const props = defineProps({ visible: Boolean })
 const emit = defineEmits(['close'])
@@ -61,7 +62,7 @@ async function startSync() {
     state.value = diffs.value.length > 0 ? 'reviewing' : 'empty'
   } catch (e) {
     state.value = 'error'
-    errorMsg.value = '拉取失败: ' + (e.message || e)
+    errorMsg.value = '拉取失败: ' + getErrorMessage(e)
   }
 }
 
@@ -77,7 +78,7 @@ async function applyChanges() {
     setTimeout(() => close(), 2000)
   } catch (e) {
     state.value = 'error'
-    errorMsg.value = '写入失败: ' + (e.message || e)
+    errorMsg.value = '写入失败: ' + getErrorMessage(e)
   }
 }
 

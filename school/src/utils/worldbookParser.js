@@ -17,6 +17,7 @@ import { ELECTIVE_PREFERENCES } from '../data/coursePoolData'
 import { DEFAULT_TEMPLATES } from './npcScheduleSystem'
 import { parseAcademicTag } from '../data/academicData'
 import { getAllBookNames, getPrimaryBookName } from './worldbookHelper'
+import { getErrorMessage } from './errorUtils'
 
 // ==================== 社团数据格式规范 ====================
 /**
@@ -418,7 +419,7 @@ export async function fetchClubDataFromWorldbook(currentRunId) {
       try {
         entries = await window.getWorldbook(name)
       } catch (e) {
-        console.warn(`[WorldbookParser] Worldbook "${name}" not accessible, skipping:`, e.message || e)
+        console.warn(`[WorldbookParser] Worldbook "${name}" not accessible, skipping:`, getErrorMessage(e))
         continue
       }
       if (!entries || !Array.isArray(entries)) continue
@@ -1173,7 +1174,7 @@ export async function syncClubWorldbookState(currentRunId, useGeminiMode = false
         })
       })
       } catch (e) {
-        console.warn(`[WorldbookParser] Worldbook "${name}" not accessible for club sync, skipping:`, e.message || e)
+        console.warn(`[WorldbookParser] Worldbook "${name}" not accessible for club sync, skipping:`, getErrorMessage(e))
       }
     }
   } catch (e) {
@@ -1301,7 +1302,7 @@ export async function fetchClassDataFromWorldbook() {
       try {
         entries = await window.getWorldbook(name)
       } catch (e) {
-        console.warn(`[WorldbookParser] Worldbook "${name}" not accessible, skipping:`, e.message || e)
+        console.warn(`[WorldbookParser] Worldbook "${name}" not accessible, skipping:`, getErrorMessage(e))
         continue
       }
       if (!entries || !Array.isArray(entries)) continue
@@ -1708,7 +1709,7 @@ export async function fetchMapDataFromWorldbook() {
       try {
         entries = await window.getWorldbook(name)
       } catch (e) {
-        console.warn(`[WorldbookParser] Worldbook "${name}" not accessible, skipping:`, e.message || e)
+        console.warn(`[WorldbookParser] Worldbook "${name}" not accessible, skipping:`, getErrorMessage(e))
         continue
       }
       if (!entries || !Array.isArray(entries)) continue
@@ -2512,7 +2513,7 @@ export async function syncClassWorldbookState(currentRunId, allClassData, useGem
         })
       })
       } catch (e) {
-        console.warn(`[WorldbookParser] Worldbook "${name}" not accessible for class sync, skipping:`, e.message || e)
+        console.warn(`[WorldbookParser] Worldbook "${name}" not accessible for class sync, skipping:`, getErrorMessage(e))
       }
     }
 
@@ -2644,7 +2645,7 @@ export async function setVariableParsingWorldbookStatus(enabled) {
       try {
         entries = await window.getWorldbook(bookName)
       } catch (e) {
-        console.warn(`[WorldbookParser] Worldbook "${bookName}" not accessible, skipping:`, e.message || e)
+        console.warn(`[WorldbookParser] Worldbook "${bookName}" not accessible, skipping:`, getErrorMessage(e))
         continue
       }
       if (!entries || !Array.isArray(entries)) continue
@@ -2817,7 +2818,7 @@ export async function saveMapDataToWorldbook(mapDataList) {
       try {
         entries = await window.getWorldbook(name)
       } catch (e) {
-        console.warn(`[WorldbookParser] Worldbook "${name}" not accessible, skipping:`, e.message || e)
+        console.warn(`[WorldbookParser] Worldbook "${name}" not accessible, skipping:`, getErrorMessage(e))
         continue
       }
       if (!entries || !Array.isArray(entries)) continue

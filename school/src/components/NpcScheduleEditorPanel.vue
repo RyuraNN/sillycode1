@@ -11,6 +11,7 @@ import {
   setScheduleConfig,
   saveScheduleToWorldbook
 } from '../utils/npcScheduleSystem'
+import { getErrorMessage } from '../utils/errorUtils'
 
 const emit = defineEmits(['close'])
 
@@ -487,7 +488,7 @@ const saveAllConfig = async () => {
     }
   } catch (e) {
     console.error('保存失败:', e)
-    alert('保存失败: ' + e.message)
+    alert('保存失败: ' + getErrorMessage(e))
   }
 }
 

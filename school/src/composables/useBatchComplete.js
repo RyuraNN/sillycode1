@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { BASE_RANGES, POTENTIAL_MAP, SUBJECT_TRAITS } from '../data/academicData'
 import { setRelationship, getRelationship } from '../utils/relationshipManager'
 import { removeThinking } from '../utils/summaryManager'
+import { getErrorMessage } from '../utils/errorUtils'
 
 export function useBatchComplete() {
   const batchProcessing = ref(false)
@@ -321,8 +322,9 @@ ${charListStr}
       return { success: true }
     } catch (e) {
       console.error('Batch process error:', e)
-      batchProgress.value.status = `第 ${batchResumeIndex.value + 1}/${chunks.length} 批处理时发生错误: ${e.message}`
-      return { success: false, message: e.message }
+      const errorMessage = getErrorMessage(e)
+      batchProgress.value.status = `第 ${batchResumeIndex.value + 1}/${chunks.length} 批处理时发生错误: ${errorMessage}`
+      return { success: false, message: errorMessage }
     } finally {
       batchProcessing.value = false
     }

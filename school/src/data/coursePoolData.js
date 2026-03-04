@@ -3,6 +3,7 @@
  * 包含所有年级的必修课和选修课
  */
 import { getCurrentBookName, getAllBookNames } from '../utils/worldbookHelper'
+import { getErrorMessage } from '../utils/errorUtils'
 
 // ============ 选课倾向类型定义 ============
 
@@ -983,7 +984,7 @@ export async function loadCoursePoolFromWorldbook(currentRunId) {
       try {
         entries = await window.getWorldbook(name)
       } catch (e) {
-        console.warn(`[CoursePool] Worldbook "${name}" not accessible, skipping:`, e.message || e)
+        console.warn(`[CoursePool] Worldbook "${name}" not accessible, skipping:`, getErrorMessage(e))
         continue
       }
       if (!entries || !Array.isArray(entries)) continue

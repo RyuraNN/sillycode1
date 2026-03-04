@@ -17,6 +17,7 @@ import {
 import { getItem, mapData, getChildren } from '../data/mapData.js'
 import { autoSelectElectives, getCourseById } from '../data/coursePoolData.js'
 import { getCurrentBookName, getAllBookNames } from './worldbookHelper.js'
+import { getErrorMessage } from './errorUtils'
 
 // ==================== 辅助函数 ====================
 
@@ -2581,7 +2582,7 @@ export async function loadScheduleDataFromWorldbook() {
       try {
         entries = await window.getWorldbook(name)
       } catch (e) {
-        console.warn(`[NpcSchedule] Worldbook "${name}" not accessible, skipping:`, e.message || e)
+        console.warn(`[NpcSchedule] Worldbook "${name}" not accessible, skipping:`, getErrorMessage(e))
         continue
       }
       if (!entries || !Array.isArray(entries)) continue

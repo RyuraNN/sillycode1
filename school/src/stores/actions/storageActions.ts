@@ -17,6 +17,7 @@ import {
   saveRosterPresets,
   clearAllData
 } from '../../utils/indexedDB'
+import { getErrorMessage, getErrorName } from '../../utils/errorUtils'
 import { DEFAULT_RELATIONSHIPS, DEFAULT_PERSONALITIES, DEFAULT_GOALS, DEFAULT_PRIORITIES } from '../../data/relationshipData'
 import { createInitialState } from '../gameStoreState'
 
@@ -256,7 +257,7 @@ export const storageActions = {
    * 初始化 NPC 关系数据
    * 优先级：运行时 store > 世界书 [Social_Data] > DEFAULT_RELATIONSHIPS 硬编码
    */
-  async initializeNpcRelationships(this: any) {
+  async initializeNpcRelationships(this: any, options: { preserveCurrentInMemory?: boolean } = {}) {
     console.log('[GameStore] Initializing NPC relationships...')
 
     // 0. 优先从 IndexedDB 加载（按 currentRunId 隔离）
@@ -282,6 +283,11 @@ export const storageActions = {
       socialData = (await fetchSocialData()) || {}
     } catch (e) {
       console.warn('[GameStore] Failed to fetch Social_Data from worldbook, using defaults only:', e)
+    }
+
+    // By default, do not reuse in-memory relationships to avoid cross-run carryover.
+    if (!options?.preserveCurrentInMemory) {
+      this.npcRelationships = {}
     }
 
     const newRelationships: Record<string, any> = {}
@@ -383,7 +389,7 @@ export const storageActions = {
         if (migrated) {
           console.log('[GameStore] Migration complete, saving lightweight snapshots list.')
           // 异步保存，不阻塞初始化
-          this.saveToStorage(true).catch((e: any) => 
+          this.saveToStorage(true).catch((e: unknown) => 
             console.warn('[GameStore] Failed to save migrated snapshots:', e)
           )
         }
@@ -500,7 +506,7 @@ export const storageActions = {
         await setItem('school_game_run_id', this.currentRunId)
       } catch (e) {
         console.error('Failed to save to storage', e)
-        this.saveError = e.message || '存档保存失败'
+        this.saveError = getErrorMessage(e, '存档保存失败')
         console.warn('存档保存可能失败，请检查控制台')
       }
     }
@@ -636,8 +642,10 @@ export const storageActions = {
         console.warn('[Export] Compression failed, using uncompressed format:', compressionError)
         return jsonString
       }
-    } catch (e: any) {
-      if (e.message?.includes('Invalid string length') || e.name === 'RangeError') {
+    } catch (e) {
+      const errorMessage = getErrorMessage(e, '')
+      const errorName = getErrorName(e)
+      if (errorMessage.includes('Invalid string length') || errorName === 'RangeError') {
         console.error('[Export] 存档数据过大，尝试压缩...')
 
         // 如果存档过大，移除 chatLog 中的 snapshot 数据

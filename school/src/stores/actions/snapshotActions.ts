@@ -16,32 +16,45 @@ import {
   type DeltaSnapshot
 } from '../../utils/snapshotUtils'
 import { detectCardEdition, GAME_VERSION } from '../../utils/editionDetector'
+import { getErrorMessage, getErrorName } from '../../utils/errorUtils'
 
 /**
  * 精简 chatLog 拷贝，移除冗余字段
- * @param chatLog 原始聊天记录
+ * 可用于全量映射或增量序列化
+ * @param log 单条聊天记录
  * @returns 精简后的聊天记录
  */
-function createLightChatLogCopy(chatLog: ChatLogEntry[]): ChatLogEntry[] {
-  return chatLog.map(log => {
-    const lightLog: any = {
-      type: log.type,
-      content: log.content,
-      // 不保存: rawContent, preVariableSnapshot（可从 snapshot 恢复）
-    }
+function createLightChatLogEntry(log: ChatLogEntry): ChatLogEntry {
+  const lightLog: any = {
+    type: log.type,
+    content: log.content,
+    // 不保存: rawContent, preVariableSnapshot（可从 snapshot 恢复）
+  }
 
-    // 深拷贝 snapshot，使用 fastClone 移除 Proxy 和不可克隆对象
-    if (log.snapshot) {
-      try {
-        lightLog.snapshot = fastClone(log.snapshot)
-      } catch (e) {
-        console.warn('[createLightChatLogCopy] Failed to serialize snapshot:', e)
-        // 如果序列化失败，跳过该 snapshot
-      }
+  // 深拷贝 snapshot，使用 fastClone 移除 Proxy 和不可克隆对象
+  if (log.snapshot) {
+    try {
+      lightLog.snapshot = fastClone(log.snapshot)
+    } catch (e) {
+      console.warn('[createLightChatLogEntry] Failed to serialize snapshot:', e)
+      // 如果序列化失败，跳过该 snapshot
     }
+  }
 
-    return lightLog as ChatLogEntry
-  })
+  return lightLog as ChatLogEntry
+}
+
+/**
+ * 深拷贝玩家数据并剥离 RAG embedding，避免高楼层快照与状态比对过重
+ */
+function clonePlayerForSnapshot(player: any) {
+  const playerCopy = fastClone(player)
+  if (Array.isArray(playerCopy?.summaries)) {
+    for (const summary of playerCopy.summaries) {
+      delete summary.embedding
+    }
+  }
+  return playerCopy
 }
 
 export const snapshotActions = {
@@ -55,13 +68,7 @@ export const snapshotActions = {
       console.log('[GameStore] Generated real runId:', this.currentRunId)
     }
 
-    // 深拷贝 player 并剥离 embedding 向量，避免快照体积膨胀
-    const playerCopy = fastClone(this.player)
-    if (Array.isArray(playerCopy.summaries)) {
-      for (const s of playerCopy.summaries) {
-        delete s.embedding
-      }
-    }
+    const playerCopy = clonePlayerForSnapshot(this.player)
 
     const gameState: GameStateData = fastClone({
       player: playerCopy,
@@ -84,7 +91,13 @@ export const snapshotActions = {
       clubApplication: this.clubApplication || null,
       clubRejection: this.clubRejection || null,
       clubInvitation: this.clubInvitation || null,
-      npcElectiveSelections: this.npcElectiveSelections || {}
+      npcElectiveSelections: this.npcElectiveSelections || {},
+      completedTodoMarkers: this.completedTodoMarkers || [],
+      todoMatchingMode: this.todoMatchingMode || 'keyword',
+      todoMatchingStats: this.todoMatchingStats || {
+        keyword: { success: 0, total: 0 },
+        index: { success: 0, total: 0 }
+      }
     })
     // 注意：characterNotes, customCoursePool, eventLibrary, eventTriggers 为全局或外部数据，不回溯
 
@@ -120,7 +133,7 @@ export const snapshotActions = {
 
     // 后台触发自动清理
     if (this.autoCleanupSnapshots) {
-      this.autoCleanupSnapshots().catch((e: any) =>
+      this.autoCleanupSnapshots().catch((e: unknown) =>
         console.warn('[GameStore] Auto cleanup failed:', e)
       )
     }
@@ -131,10 +144,11 @@ export const snapshotActions = {
   /**
    * 创建/更新自动存档
    */
-  async createAutoSave(this: any, chatLog: ChatLogEntry[], messageIndex: number) {
+  async createAutoSave(this: any, chatLog: ChatLogEntry[], messageIndex: number, options: { rewriteFromIndex?: number } = {}) {
     try {
+      const playerCopy = clonePlayerForSnapshot(this.player)
       const gameState: GameStateData = fastClone({
-        player: this.player,
+        player: playerCopy,
         npcs: this.npcs,
         npcRelationships: this.npcRelationships,
         graduatedNpcs: this.graduatedNpcs || [],
@@ -154,18 +168,25 @@ export const snapshotActions = {
         clubApplication: this.clubApplication || null,
         clubRejection: this.clubRejection || null,
         clubInvitation: this.clubInvitation || null,
-        npcElectiveSelections: this.npcElectiveSelections || {}
+        npcElectiveSelections: this.npcElectiveSelections || {},
+        completedTodoMarkers: this.completedTodoMarkers || [],
+        todoMatchingMode: this.todoMatchingMode || 'keyword',
+        todoMatchingStats: this.todoMatchingStats || {
+          keyword: { success: 0, total: 0 },
+          index: { success: 0, total: 0 }
+        }
       })
       // 注意：characterNotes, customCoursePool, eventLibrary, eventTriggers 为全局或外部数据，不回溯
 
       const autoSaveId = `autosave_${this.currentRunId}`
 
-      // 精简 chatLog：移除冗余字段
-      const logCopy = createLightChatLogCopy(chatLog)
-
       // 使用分片存储保存 chatLog
       const { saveChunkedChatLog } = await import('../../utils/indexedDB')
-      await saveChunkedChatLog(autoSaveId, logCopy)
+      await saveChunkedChatLog(autoSaveId, chatLog, {
+        incremental: true,
+        serializeEntry: createLightChatLogEntry,
+        rewriteFromIndex: Number.isInteger(options?.rewriteFromIndex) ? options.rewriteFromIndex : undefined
+      })
 
       // 保存 gameState（不分片，因为相对较小）
       const { saveSnapshotData } = await import('../../utils/indexedDB')
@@ -197,15 +218,17 @@ export const snapshotActions = {
       }
 
       this.saveToStorage()
-    } catch (e: any) {
+    } catch (e) {
       console.error('[createAutoSave] Failed to create auto save:', e)
-      this.saveError = e.message || '自动存档失败'
+      const errorMessage = getErrorMessage(e, '自动存档失败')
+      const errorName = getErrorName(e)
+      this.saveError = errorMessage
 
       // 如果是 DataCloneError，提供更具体的错误信息
-      if (e.name === 'DataCloneError') {
+      if (errorName === 'DataCloneError') {
         this.saveError = '自动存档失败：数据包含不可序列化的对象'
         console.error('[createAutoSave] DataCloneError - chatLog may contain non-cloneable objects (Proxy, functions, etc.)')
-      } else if (e.message?.includes('QuotaExceeded')) {
+      } else if (errorMessage.includes('QuotaExceeded')) {
         this.saveError = '存储空间不足，请清理旧存档'
       }
     }
@@ -339,6 +362,12 @@ export const snapshotActions = {
     this.clubRejection = (state as any).clubRejection || null
     this.clubInvitation = (state as any).clubInvitation || null
     this.npcElectiveSelections = (state as any).npcElectiveSelections || {}
+    this.completedTodoMarkers = (state as any).completedTodoMarkers || []
+    this.todoMatchingMode = (state as any).todoMatchingMode || 'keyword'
+    this.todoMatchingStats = (state as any).todoMatchingStats || {
+      keyword: { success: 0, total: 0 },
+      index: { success: 0, total: 0 }
+    }
 
     this.currentRunId = state.currentRunId || Date.now().toString(36)
     this.currentFloor = state.currentFloor || 0
@@ -480,8 +509,9 @@ export const snapshotActions = {
    * 获取当前游戏状态的深拷贝
    */
   getGameState(this: any): GameStateData {
+    const playerCopy = clonePlayerForSnapshot(this.player)
     return fastClone({
-      player: this.player,
+      player: playerCopy,
       npcs: this.npcs,
       npcRelationships: this.npcRelationships,
       graduatedNpcs: this.graduatedNpcs || [],
@@ -501,7 +531,13 @@ export const snapshotActions = {
       clubApplication: this.clubApplication || null,
       clubRejection: this.clubRejection || null,
       clubInvitation: this.clubInvitation || null,
-      npcElectiveSelections: this.npcElectiveSelections || {}
+      npcElectiveSelections: this.npcElectiveSelections || {},
+      completedTodoMarkers: this.completedTodoMarkers || [],
+      todoMatchingMode: this.todoMatchingMode || 'keyword',
+      todoMatchingStats: this.todoMatchingStats || {
+        keyword: { success: 0, total: 0 },
+        index: { success: 0, total: 0 }
+      }
     })
   },
 
@@ -841,6 +877,15 @@ export const snapshotActions = {
     this.clubInvitation = data.clubInvitation || null
     // @ts-ignore
     this.npcElectiveSelections = data.npcElectiveSelections || {}
+    // @ts-ignore
+    this.completedTodoMarkers = data.completedTodoMarkers || []
+    // @ts-ignore
+    this.todoMatchingMode = data.todoMatchingMode || 'keyword'
+    // @ts-ignore
+    this.todoMatchingStats = data.todoMatchingStats || {
+      keyword: { success: 0, total: 0 },
+      index: { success: 0, total: 0 }
+    }
 
     // @ts-ignore
     if (data.currentRunId !== undefined && data.currentRunId !== null) this.currentRunId = data.currentRunId

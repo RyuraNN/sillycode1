@@ -1,6 +1,7 @@
 <script setup>
 import { defineEmits, ref, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
+import { getErrorMessage } from '../utils/errorUtils'
 
 const emit = defineEmits(['back', 'close'])
 const gameStore = useGameStore()
@@ -86,7 +87,7 @@ const handleDebugImport = async () => {
     }
   } catch (e) {
     console.error('Debug import failed:', e)
-    alert('导入失败：' + e.message)
+    alert('导入失败：' + getErrorMessage(e))
   }
 }
 

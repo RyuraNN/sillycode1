@@ -2,6 +2,7 @@
  * 自动重试系统工具
  * 提供错误解析和重试执行器
  */
+import { getErrorMessage } from './errorUtils'
 
 /**
  * 解析错误信息，提取友好提示
@@ -9,7 +10,7 @@
  * @returns {{code: number, friendlyMessage: string, detail: string}}
  */
 export function parseErrorMessage(error) {
-  const msg = error?.message || String(error)
+  const msg = getErrorMessage(error)
 
   // 解析 "API Error: 429 - {...}" 格式
   const apiMatch = msg.match(/API Error:\s*(\d+)\s*-\s*(.*)/)

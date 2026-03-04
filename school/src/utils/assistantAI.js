@@ -1,6 +1,7 @@
 import { useGameStore } from '../stores/gameStore'
 import { buildSystemPromptContent } from './prompts'
 import { getAllBookNames } from './worldbookHelper'
+import { getErrorMessage } from './errorUtils'
 
 /**
  * 验证辅助AI配置是否完整
@@ -252,7 +253,7 @@ async function getVariableParsingEntryContent() {
       try {
         entries = await window.getWorldbook(name)
       } catch (e) {
-        console.warn(`[AssistantAI] Worldbook "${name}" not accessible, skipping:`, e.message || e)
+        console.warn(`[AssistantAI] Worldbook "${name}" not accessible, skipping:`, getErrorMessage(e))
         continue
       }
       if (!entries || !Array.isArray(entries)) continue
@@ -288,7 +289,7 @@ async function getActiveWorldbooksContent() {
       try {
         bookContent = await getWorldbookContent(name)
       } catch (e) {
-        console.warn(`[AssistantAI] Failed to get content for worldbook "${name}", skipping:`, e.message || e)
+        console.warn(`[AssistantAI] Failed to get content for worldbook "${name}", skipping:`, getErrorMessage(e))
         continue
       }
 
@@ -451,8 +452,9 @@ ${mainAIResponse}
   } catch (error) {
     console.error('[AssistantAI] Request failed:', error)
     // 增强错误信息
-    if (error.message && !error.message.startsWith('API Error:')) {
-      throw new Error(`API Error: ${error.message}`)
+    const errorMessage = getErrorMessage(error, '')
+    if (errorMessage && !errorMessage.startsWith('API Error:')) {
+      throw new Error(`API Error: ${errorMessage}`)
     }
     throw error
   }

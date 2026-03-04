@@ -100,7 +100,7 @@ export const timeActions = {
         const prevDateForDiary = new Date(this.gameTime.year, this.gameTime.month - 1, previousDay)
         const prevDateStr = `${prevDateForDiary.getFullYear()}-${String(prevDateForDiary.getMonth()+1).padStart(2,'0')}-${String(prevDateForDiary.getDate()).padStart(2,'0')}`
         import('../../utils/summaryManager').then(({ generateDiary }) => {
-          generateDiary(prevDateStr).catch((e: any) => {
+          generateDiary(prevDateStr).catch((e: unknown) => {
             console.error('[TimeActions] Failed to generate diary:', e)
           })
         })

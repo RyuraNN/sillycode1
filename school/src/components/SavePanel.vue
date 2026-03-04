@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { getEditionShortLabel, GAME_VERSION } from '../utils/editionDetector'
+import { getErrorMessage } from '../utils/errorUtils'
 
 const props = defineProps({
   mode: {
@@ -347,7 +348,7 @@ const handleDebugImport = async () => {
     }
   } catch (e) {
     console.error('Debug import failed:', e)
-    alert('导入失败：' + e.message)
+    alert('导入失败：' + getErrorMessage(e))
   }
 }
 

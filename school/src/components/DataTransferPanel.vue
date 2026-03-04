@@ -6,6 +6,7 @@ import { getScheduleConfig, setScheduleConfig, saveScheduleToWorldbook } from '.
 import { getCoursePoolState, restoreCoursePoolState, saveCoursePoolToWorldbook } from '../data/coursePoolData'
 import { getFullCharacterPool, saveFullCharacterPool, saveRosterBackup } from '../utils/indexedDB'
 import { updateClassDataInWorldbook, saveMapDataToWorldbook } from '../utils/worldbookParser'
+import { getErrorMessage } from '../utils/errorUtils'
 
 const emit = defineEmits(['close'])
 const gameStore = useGameStore()
@@ -188,7 +189,7 @@ const handleExport = async () => {
 
   } catch (e) {
     console.error('[DataTransfer] Export error:', e)
-    alert('导出失败：' + e.message)
+    alert('导出失败：' + getErrorMessage(e))
   } finally {
     loading.value = false
   }
@@ -244,7 +245,7 @@ const parseDebugImportText = () => {
     }
 
   } catch (err) {
-    importError.value = 'JSON 解析失败：' + err.message
+    importError.value = 'JSON 解析失败：' + getErrorMessage(err)
     importData.value = null
   }
 }
@@ -283,7 +284,7 @@ const handleFileSelect = (event) => {
       }
 
     } catch (err) {
-      importError.value = '文件解析失败：' + err.message
+      importError.value = '文件解析失败：' + getErrorMessage(err)
       importData.value = null
     }
   }
@@ -418,7 +419,7 @@ const handleImport = async () => {
 
   } catch (e) {
     console.error('[DataTransfer] Import error:', e)
-    alert('导入失败：' + e.message)
+    alert('导入失败：' + getErrorMessage(e))
   } finally {
     loading.value = false
   }

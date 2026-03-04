@@ -2,6 +2,7 @@ import { useGameStore } from '../stores/gameStore'
 import { cleanImageTags, removeThinking } from './summaryManager'
 import { getNpcsAtLocation } from './npcScheduleSystem.js'
 import { validateAssistantAIConfig } from './assistantAI'
+import { getErrorMessage } from './errorUtils'
 
 /**
  * RAG 记忆检索服务
@@ -267,7 +268,7 @@ export async function embedSummary(summary) {
     }
     return false
   } catch (e) {
-    console.warn('[RAG] embedSummary failed:', e.message)
+    console.warn('[RAG] embedSummary failed:', getErrorMessage(e))
     return false
   }
 }
@@ -372,7 +373,7 @@ export async function rerankSummaries(query, candidates, topN) {
         score: r.relevance_score || 0
       }))
   } catch (e) {
-    console.warn('[RAG] Rerank failed, falling back to embedding order:', e.message)
+    console.warn('[RAG] Rerank failed, falling back to embedding order:', getErrorMessage(e))
     return candidates.slice(0, topN)
   }
 }
@@ -406,7 +407,7 @@ export async function analyzeRecalledSummaries(userInput, ragSummaries, gameTime
       .slice(0, 5)
     contextNpcs.push(...locationNpcs.map(npc => npc.name))
   } catch (e) {
-    console.warn('[Enhanced Recall] Failed to get location NPCs:', e.message)
+    console.warn('[Enhanced Recall] Failed to get location NPCs:', getErrorMessage(e))
   }
 
   // 2. 如果场景NPC不足5个，补充关系亲密的NPC
@@ -428,7 +429,7 @@ export async function analyzeRecalledSummaries(userInput, ragSummaries, gameTime
         .slice(0, 5 - contextNpcs.length)
       contextNpcs.push(...closeNpcs.map(npc => npc.name))
     } catch (e) {
-      console.warn('[Enhanced Recall] Failed to get close NPCs:', e.message)
+      console.warn('[Enhanced Recall] Failed to get close NPCs:', getErrorMessage(e))
     }
   }
 
@@ -447,7 +448,7 @@ export async function analyzeRecalledSummaries(userInput, ragSummaries, gameTime
       }
       contextNpcs.push(...Array.from(mentionedNpcs).slice(0, 8 - contextNpcs.length))
     } catch (e) {
-      console.warn('[Enhanced Recall] Failed to extract mentioned NPCs:', e.message)
+      console.warn('[Enhanced Recall] Failed to extract mentioned NPCs:', getErrorMessage(e))
     }
   }
 
@@ -558,7 +559,7 @@ ${summariesText}
 
     return { pruneFloors, additionalQueries }
   } catch (e) {
-    console.warn('[Enhanced Recall] Analysis failed:', e.message)
+    console.warn('[Enhanced Recall] Analysis failed:', getErrorMessage(e))
     return { pruneFloors: [], additionalQueries: [] }
   }
 }
@@ -594,7 +595,7 @@ export async function executeAdditionalQuery(query, excludeFloors, topN) {
     const reranked = await rerankSummaries(query, candidates, topN)
     results.push(...reranked)
   } catch (e) {
-    console.warn(`[Enhanced Recall] Additional query failed: "${query}"`, e.message)
+    console.warn(`[Enhanced Recall] Additional query failed: "${query}"`, getErrorMessage(e))
   }
 
   return results
@@ -667,7 +668,7 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
         contextNpcs.push(...closeNpcs.map(npc => npc.name))
       }
     } catch (e) {
-      console.warn('[RAG] Failed to collect NPC context:', e.message)
+      console.warn('[RAG] Failed to collect NPC context:', getErrorMessage(e))
     }
   }
 
@@ -708,8 +709,8 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
         }
       }
     } catch (e) {
-      console.warn('[RAG] Query rewrite failed:', e.message)
-      errors.push({ stage: 'queryRewrite', message: e.message })
+      console.warn('[RAG] Query rewrite failed:', getErrorMessage(e))
+      errors.push({ stage: 'queryRewrite', message: getErrorMessage(e) })
     }
   }
 
@@ -790,8 +791,8 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
         }
       }
     } catch (e) {
-      console.warn('[RAG] retrieval failed:', e.message)
-      errors.push({ stage: 'ragRetrieval', message: e.message })
+      console.warn('[RAG] retrieval failed:', getErrorMessage(e))
+      errors.push({ stage: 'ragRetrieval', message: getErrorMessage(e) })
     }
   }
 
@@ -842,12 +843,12 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
             }
           }
         } catch (e) {
-          console.warn('[Enhanced Recall] Combined query failed:', e.message)
+          console.warn('[Enhanced Recall] Combined query failed:', getErrorMessage(e))
         }
       }
     } catch (e) {
-      console.warn('[Enhanced Recall] Enhancement failed, using original results:', e.message)
-      errors.push({ stage: 'enhancedRecall', message: e.message })
+      console.warn('[Enhanced Recall] Enhancement failed, using original results:', getErrorMessage(e))
+      errors.push({ stage: 'enhancedRecall', message: getErrorMessage(e) })
     }
   }
 

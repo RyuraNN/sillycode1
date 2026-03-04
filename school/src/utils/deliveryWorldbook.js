@@ -1,3 +1,5 @@
+import { getErrorMessage } from './errorUtils'
+
 /**
  * 外卖系统世界书解析器
  *
@@ -165,7 +167,7 @@ export async function fetchProductCatalogFromWorldbook() {
       try {
         entries = await window.getWorldbook(name)
       } catch (e) {
-        console.warn(`[DeliveryWorldbook] Worldbook "${name}" not accessible, skipping:`, e.message || e)
+        console.warn(`[DeliveryWorldbook] Worldbook "${name}" not accessible, skipping:`, getErrorMessage(e))
         continue
       }
       if (!entries || !Array.isArray(entries)) continue

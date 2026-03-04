@@ -6,6 +6,7 @@ import { useGameStore } from './stores/gameStore'
 import { requestPersistence, clearAllData } from './utils/indexedDB'
 import { loadCoursePoolFromWorldbook } from './data/coursePoolData'
 import { isWorldbookAvailable, getCurrentBookName } from './utils/worldbookHelper'
+import { getErrorMessage } from './utils/errorUtils'
 
 const gameStore = useGameStore()
 
@@ -63,14 +64,14 @@ async function checkWorldbookReady(lenient = false) {
       }
       console.log(`[App] Worldbook "${bookName}" verified: ${entries.length} entries loaded`)
     } catch (wbError) {
-      console.log(`[App] getWorldbook("${bookName}") threw error (content not ready?):`, wbError?.message || wbError)
+      console.log(`[App] getWorldbook("${bookName}") threw error (content not ready?):`, getErrorMessage(wbError))
       return false
     }
 
     console.log('[App] Worldbook ready:', bookName)
     return true
   } catch (e) {
-    console.log('[App] Error checking worldbook:', e?.message || e)
+    console.log('[App] Error checking worldbook:', getErrorMessage(e))
     return false
   }
 }
@@ -127,7 +128,7 @@ async function doInitialize() {
     }
   } catch (e) {
     console.error('[App] ❌ Critical initialization error:', e)
-    crashError.value = `初始化失败: ${e.message || e}`
+    crashError.value = `初始化失败: ${getErrorMessage(e)}`
     showCrashRecovery.value = true
     showWorldbookWaitModal.value = false
   } finally {

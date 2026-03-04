@@ -4,6 +4,7 @@
  */
 import { ref } from 'vue'
 import { removeThinking } from '../utils/summaryManager'
+import { getErrorMessage } from '../utils/errorUtils'
 
 export function useAutoClubGenerate() {
   const generating = ref(false)
@@ -300,8 +301,9 @@ ${teacherList}
       return { success: true, clubs: allClubs, additions: allAdditions, newAdvisors: allNewAdvisors }
     } catch (e) {
       console.error('[AutoClub] Error:', e)
-      clubError.value = e.message
-      return { success: false, message: e.message }
+      const errorMessage = getErrorMessage(e)
+      clubError.value = errorMessage
+      return { success: false, message: errorMessage }
     } finally {
       generating.value = false
       progress.value = ''

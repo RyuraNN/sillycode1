@@ -6,6 +6,7 @@ import { useAutoClubGenerate } from '../composables/useAutoClubGenerate'
 import { registerCustomCourse, saveCoursePoolToWorldbook, initCustomClass, getAllElectives, getRequiredCourses } from '../data/coursePoolData'
 import { updateClassDataInWorldbook, updateAcademicDataInWorldbook, createClubInWorldbook, addNpcToClubInWorldbook, syncClubWorldbookState } from '../utils/worldbookParser'
 import { saveRosterBackup, saveFullCharacterPool } from '../utils/indexedDB'
+import { getErrorMessage } from '../utils/errorUtils'
 import StepCharacterSelect from './autoSchedule/StepCharacterSelect.vue'
 import StepScheduleResult from './autoSchedule/StepScheduleResult.vue'
 import StepConfirm from './autoSchedule/StepConfirm.vue'
@@ -178,7 +179,7 @@ async function handleConfirm({ clubMode }) {
     userChoices.value = {}
   } catch (e) {
     console.error('[AutoSchedule] Sync error:', e)
-    emit('show-message', `同步失败: ${e.message}`)
+    emit('show-message', `同步失败: ${getErrorMessage(e)}`)
   } finally {
     syncing.value = false
   }

@@ -8,6 +8,7 @@
 
 import { useGameStore } from '../stores/gameStore'
 import { getAllBookNames } from './worldbookHelper'
+import { getErrorMessage } from './errorUtils'
 
 // ==================== 事件库解析 ====================
 
@@ -612,7 +613,7 @@ export async function loadEventLibraryFromWorldbook() {
       try {
         entries = await window.getWorldbook(name)
       } catch (e) {
-        console.warn(`[EventSystem] Worldbook "${name}" not accessible, skipping:`, e.message || e)
+        console.warn(`[EventSystem] Worldbook "${name}" not accessible, skipping:`, getErrorMessage(e))
         continue
       }
       if (!entries || !Array.isArray(entries)) continue
@@ -650,7 +651,7 @@ export async function loadEventTriggersFromWorldbook() {
       try {
         entries = await window.getWorldbook(name)
       } catch (e) {
-        console.warn(`[EventSystem] Worldbook "${name}" not accessible, skipping:`, e.message || e)
+        console.warn(`[EventSystem] Worldbook "${name}" not accessible, skipping:`, getErrorMessage(e))
         continue
       }
       if (!entries || !Array.isArray(entries)) continue

@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { generateDiary } from '../utils/summaryManager'
 import { parseTodoItems, isTodoCompleted } from '../utils/todoManager'
+import { getErrorMessage } from '../utils/errorUtils'
 
 const emit = defineEmits(['close'])
 const gameStore = useGameStore()
@@ -245,7 +246,7 @@ const generateDiaryFromSelected = async () => {
       }
     }
   } catch (e) {
-    alert('生成出错：' + e.message)
+    alert('生成出错：' + getErrorMessage(e))
   } finally {
     isGenerating.value = false
   }

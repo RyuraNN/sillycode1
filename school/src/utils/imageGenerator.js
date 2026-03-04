@@ -2,6 +2,7 @@
  * Image Generator Utility
  * Handles communication with the SillyTavern image generation plugin
  */
+import { getErrorMessage } from './errorUtils'
 
 const EventType = {
     GENERATE_IMAGE_REQUEST: 'generate-image-request',
@@ -101,7 +102,7 @@ export async function requestImageGeneration(prompt, change, width, height) {
             console.log(`[ImageGenerator] Listener registered for ${requestId}`);
         } catch (e) {
             cleanup();
-            reject(new Error('Failed to register event listener: ' + e.message));
+            reject(new Error('Failed to register event listener: ' + getErrorMessage(e)));
             return;
         }
 

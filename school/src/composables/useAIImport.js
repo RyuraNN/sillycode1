@@ -4,6 +4,7 @@ import { ELECTIVE_PREFERENCES } from '../data/coursePoolData'
 import { DEFAULT_TEMPLATES } from '../utils/npcScheduleSystem'
 import { BASE_RANGES, POTENTIAL_MAP, SUBJECT_TRAITS } from '../data/academicData'
 import { removeThinking } from '../utils/summaryManager'
+import { getErrorMessage } from '../utils/errorUtils'
 
 export function useAIImport() {
   const aiImportLoading = ref(false)
@@ -282,7 +283,7 @@ ${querySection}`
       return { success: true }
     } catch (e) {
       console.error('[AI Import] Error:', e)
-      aiImportError.value = `AI调用失败: ${e.message}`
+      aiImportError.value = `AI调用失败: ${getErrorMessage(e)}`
       return { success: false }
     } finally {
       aiImportLoading.value = false

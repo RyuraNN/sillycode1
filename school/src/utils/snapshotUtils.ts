@@ -336,7 +336,8 @@ export function computeDelta(
       'allClassData', 'allClubs', 'graduatedNpcs', 'lastAcademicYear',
       'currentRunId', 'currentFloor', 'examHistory', 'electiveAcademicData',
       'lastExamDate', 'eventChecks', 'clubApplication', 'clubRejection',
-      'clubInvitation', 'npcElectiveSelections'
+      'clubInvitation', 'npcElectiveSelections',
+      'completedTodoMarkers', 'todoMatchingMode', 'todoMatchingStats'
     ]
 
     for (const field of keyFields) {
@@ -367,7 +368,8 @@ export function computeDelta(
     'allClassData', 'allClubs', 'graduatedNpcs', 'lastAcademicYear',
     'currentRunId', 'currentFloor', 'examHistory', 'electiveAcademicData',
     'lastExamDate', 'eventChecks', 'clubApplication', 'clubRejection',
-    'clubInvitation', 'npcElectiveSelections'
+    'clubInvitation', 'npcElectiveSelections',
+    'completedTodoMarkers', 'todoMatchingMode', 'todoMatchingStats'
   ]
 
   for (const field of topLevelFields) {

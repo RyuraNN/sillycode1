@@ -16,6 +16,7 @@ import { optimizeWorldbook, setVariableParsingWorldbookStatus, fetchMapDataFromW
 import { callAssistantAI, callImageAnalysisAI } from '../utils/assistantAI'
 import { setMapData } from '../data/mapData'
 import { processPostReply, buildSummarizedHistory, extractSummary, removeThinking } from '../utils/summaryManager'
+import { getErrorMessage } from '../utils/errorUtils'
 
 // 工具函数
 import { parseGameData, applyGameData, mergeGameData, deepMerge, generateDetailedChanges } from '../utils/gameDataParser'
@@ -383,7 +384,7 @@ const retryImageGeneration = async (prompt, reqId, logIndex) => {
     handleNewContent(contentAreaRef.value)
   } catch (e) {
     console.error('[GameMain] Retry image generation failed:', e)
-    const errorHtml = `<div class="image-error" data-req-id="${reqId}" data-prompt="${encodeURIComponent(prompt)}" data-log-index="${logIndex}" style="padding: 10px; color: #d32f2f; background: #ffebee; border-radius: 4px; font-size: 0.9em; max-width: 100%; box-sizing: border-box; overflow: hidden;">❌ 图片生成失败: ${e.message} <button class="retry-image-btn" style="margin-left: 8px; padding: 2px 8px; cursor: pointer; border: 1px solid #d32f2f; background: white; color: #d32f2f; border-radius: 4px; font-size: 0.85em;">重试</button></div>`
+    const errorHtml = `<div class="image-error" data-req-id="${reqId}" data-prompt="${encodeURIComponent(prompt)}" data-log-index="${logIndex}" style="padding: 10px; color: #d32f2f; background: #ffebee; border-radius: 4px; font-size: 0.9em; max-width: 100%; box-sizing: border-box; overflow: hidden;">❌ 图片生成失败: ${getErrorMessage(e)} <button class="retry-image-btn" style="margin-left: 8px; padding: 2px 8px; cursor: pointer; border: 1px solid #d32f2f; background: white; color: #d32f2f; border-radius: 4px; font-size: 0.85em;">重试</button></div>`
     const placeholderRegex = new RegExp(`<div id="${reqId}"[^>]*>[\\s\\S]*?<\\/div>`, 'i')
     targetLog.content = targetLog.content.replace(placeholderRegex, errorHtml)
   }
@@ -434,7 +435,7 @@ const handleImageRegenerate = async (newPrompt) => {
     const oldRefHtml = `<image-ref id="${oldId}" prompt="${selectedImageInfo.value.prompt}" history="${history.join(',')}" />`
     const placeholderRegex = new RegExp(`<div id="${reqId}"[^>]*>[\\s\\S]*?<\\/div>`, 'i')
     targetLog.content = targetLog.content.replace(placeholderRegex, oldRefHtml)
-    alert('重绘失败: ' + e.message)
+    alert('重绘失败: ' + getErrorMessage(e))
   }
 }
 
@@ -1026,6 +1027,7 @@ const processAIResponse = async (response) => {
   let assistantDataList = []
   let preGeneratedSummary = null
   let imageAnalysisResult = null
+  let assistantRawResponse = ''
 
   const mainSummary = extractSummary(cleanResponse, 'minor')
   if (mainSummary) {
@@ -1092,6 +1094,7 @@ const processAIResponse = async (response) => {
         }
 
         const cleanAssistantResponse = removeThinking(assistantResponse)
+        assistantRawResponse = cleanAssistantResponse
         assistantDataList = parseGameData(cleanAssistantResponse)
 
         const assistantSummary = extractSummary(cleanAssistantResponse, 'minor')
@@ -1126,7 +1129,7 @@ const processAIResponse = async (response) => {
 
     } catch (e) {
       console.error('辅助AI调用失败:', e)
-      allChanges.push('辅助AI调用失败: ' + e.message)
+      allChanges.push('辅助AI调用失败: ' + getErrorMessage(e))
     }
   }
   
@@ -1350,7 +1353,13 @@ const processAIResponse = async (response) => {
       try {
         const { extractTodoCompletionCommands, markTodoAsCompletedByKeyword, markTodoAsCompletedByIndex } = await import('../utils/todoManager')
 
-        const todoCommands = extractTodoCompletionCommands(fullResponse)
+        const assistantCommands = extractTodoCompletionCommands(assistantRawResponse)
+        const mainCommands = extractTodoCompletionCommands(response)
+        const todoCommands = [...assistantCommands, ...mainCommands].filter((cmd, idx, list) => {
+          const key = `${cmd.floor}:${cmd.mode}:${cmd.keyword ?? cmd.index}`
+          return list.findIndex(item => `${item.floor}:${item.mode}:${item.keyword ?? item.index}` === key) === idx
+        })
+
         if (todoCommands.length > 0) {
           const currentFloor = gameLog.value.length
           const mode = gameStore.todoMatchingMode || 'keyword'
@@ -1439,7 +1448,7 @@ const processAIResponse = async (response) => {
         }).catch(e => {
           console.error(`[GameMain] Image generation failed for reqId ${req.reqId}:`, e)
           if (targetLog) {
-            const errorHtml = `<div class="image-error" data-req-id="${req.reqId}" data-prompt="${encodeURIComponent(req.prompt)}" data-log-index="${targetLogIndex}" style="padding: 10px; color: #d32f2f; background: #ffebee; border-radius: 4px; font-size: 0.9em; max-width: 100%; box-sizing: border-box; overflow: hidden;">❌ 图片生成失败: ${e.message} <button class="retry-image-btn" style="margin-left: 8px; padding: 2px 8px; cursor: pointer; border: 1px solid #d32f2f; background: white; color: #d32f2f; border-radius: 4px; font-size: 0.85em;">重试</button></div>`
+            const errorHtml = `<div class="image-error" data-req-id="${req.reqId}" data-prompt="${encodeURIComponent(req.prompt)}" data-log-index="${targetLogIndex}" style="padding: 10px; color: #d32f2f; background: #ffebee; border-radius: 4px; font-size: 0.9em; max-width: 100%; box-sizing: border-box; overflow: hidden;">❌ 图片生成失败: ${getErrorMessage(e)} <button class="retry-image-btn" style="margin-left: 8px; padding: 2px 8px; cursor: pointer; border: 1px solid #d32f2f; background: white; color: #d32f2f; border-radius: 4px; font-size: 0.85em;">重试</button></div>`
             const placeholderRegex = new RegExp(`<div id="${req.reqId}"[^>]*>([\\s\\S]*?)<\\/div>`, 'i')
             targetLog.content = targetLog.content.replace(placeholderRegex, errorHtml)
           }
@@ -1506,14 +1515,14 @@ const handleReroll = async () => {
   if (playerMsg && snapshot) {
     try {
       // 使用支持增量快照的方法
-      gameStore.restoreFromMessageSnapshot(snapshot, gameLog.value)
+      await gameStore.restoreFromMessageSnapshot(snapshot, gameLog.value)
       await gameStore.syncWorldbook()
       inputText.value = ''
       await sendMessage()
     } catch (e) {
       console.error('回溯失败:', e)
       showDanmaku([
-        '⚠️ 回溯失败: ' + e.message,
+        '⚠️ 回溯失败: ' + getErrorMessage(e),
         '建议：增加快照保留层数或切换到完整快照模式'
       ])
     }
@@ -1554,11 +1563,11 @@ const handleRollbackToFloor = async (targetIndex) => {
 
   // 恢复状态
   try {
-    gameStore.restoreFromMessageSnapshot(snapshotLog.snapshot, gameLog.value)
+    await gameStore.restoreFromMessageSnapshot(snapshotLog.snapshot, gameLog.value)
   } catch (e) {
     console.error('回溯失败:', e)
     showDanmaku([
-      '⚠️ 回溯失败: ' + e.message,
+      '⚠️ 回溯失败: ' + getErrorMessage(e),
       '建议：增加快照保留层数或切换到完整快照模式'
     ])
     return
@@ -1686,7 +1695,7 @@ const handleAssistantReroll = async () => {
     
   } catch (e) {
     console.error('变量思考重roll失败:', e)
-    showDanmaku(['变量思考重roll失败: ' + e.message])
+    showDanmaku(['变量思考重roll失败: ' + getErrorMessage(e)])
   } finally {
     isAssistantProcessing.value = false
   }
@@ -1786,7 +1795,8 @@ const openEditModal = (index) => {
 const handleEditSubmit = (content) => {
   if (editingMessageIndex.value === -1) return
   
-  const log = gameLog.value[editingMessageIndex.value]
+  const editedIndex = editingMessageIndex.value
+  const log = gameLog.value[editedIndex]
   if (log) {
     log.rawContent = content
     
@@ -1841,6 +1851,12 @@ const handleEditSubmit = (content) => {
   showEditModal.value = false
   editingMessageContent.value = ''
   editingMessageIndex.value = -1
+
+  // 历史内容发生变化，清理渲染/RAG缓存并触发增量重写存档
+  contentRenderCache.clear()
+  cachedRAGHistory.value = null
+  cachedRAGUserInput.value = ''
+  gameStore.createAutoSave(gameLog.value, gameStore.currentFloor, { rewriteFromIndex: editedIndex })
 }
 
 const handleEditCancel = () => {

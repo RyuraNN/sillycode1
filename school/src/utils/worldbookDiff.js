@@ -19,6 +19,7 @@ import {
 } from '../data/coursePoolData'
 import { isWorldbookAvailable } from './worldbookHelper'
 import { useGameStore } from '../stores/gameStore'
+import { getErrorMessage } from './errorUtils'
 
 // ==================== 工具函数 ====================
 
@@ -256,9 +257,9 @@ export async function fetchAndDiffAll() {
   try {
     // 并行拉取班级、社团、学力
     const [wbClassData, wbClubs, wbAcademic] = await Promise.all([
-      fetchClassDataFromWorldbook().catch(e => { errors.push('班级: ' + e.message); return null }),
-      fetchClubDataFromWorldbook(gameStore.currentRunId).catch(e => { errors.push('社团: ' + e.message); return null }),
-      fetchAcademicDataFromWorldbook().catch(e => { errors.push('学力: ' + e.message); return null })
+      fetchClassDataFromWorldbook().catch(e => { errors.push('班级: ' + getErrorMessage(e)); return null }),
+      fetchClubDataFromWorldbook(gameStore.currentRunId).catch(e => { errors.push('社团: ' + getErrorMessage(e)); return null }),
+      fetchAcademicDataFromWorldbook().catch(e => { errors.push('学力: ' + getErrorMessage(e)); return null })
     ])
 
     // 班级 diff
@@ -286,14 +287,14 @@ export async function fetchAndDiffAll() {
         allDiffs.push(...diffCoursePool(currentSnapshot, wbSnapshot))
       }
     } catch (e) {
-      errors.push('课程池: ' + e.message)
+      errors.push('课程池: ' + getErrorMessage(e))
     }
 
     const error = errors.length > 0 ? '部分数据拉取失败: ' + errors.join('; ') : undefined
     return { diffs: allDiffs, error }
 
   } catch (e) {
-    return { diffs: [], error: '拉取世界书数据失败: ' + e.message }
+    return { diffs: [], error: '拉取世界书数据失败: ' + getErrorMessage(e) }
   }
 }
 

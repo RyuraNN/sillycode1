@@ -2,6 +2,7 @@
  * 世界书辅助工具
  * 统一处理世界书名称获取，支持角色卡绑定、聊天绑定、全局世界书三种来源
  */
+import { getErrorMessage } from './errorUtils'
 
 /**
  * 获取当前可用的世界书名称（优先级：角色卡 primary > 聊天绑定 > 角色卡 additional）
@@ -24,7 +25,7 @@ export function getCurrentBookName() {
 
     return null
   } catch (e) {
-    console.warn('[WorldbookHelper] Error getting book name:', e?.message || e)
+    console.warn('[WorldbookHelper] Error getting book name:', getErrorMessage(e))
     return null
   }
 }
@@ -46,7 +47,7 @@ export function getPrimaryBookName() {
     }
     return null
   } catch (e) {
-    console.warn('[WorldbookHelper] Error getting primary book name:', e?.message || e)
+    console.warn('[WorldbookHelper] Error getting primary book name:', getErrorMessage(e))
     return null
   }
 }
@@ -68,7 +69,7 @@ export function getAllBookNames() {
       if (chatBook) names.add(chatBook)
     }
   } catch (e) {
-    console.warn('[WorldbookHelper] Error getting all book names:', e?.message || e)
+    console.warn('[WorldbookHelper] Error getting all book names:', getErrorMessage(e))
   }
   return [...names]
 }

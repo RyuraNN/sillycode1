@@ -5,6 +5,7 @@ import { fetchModels, IMAGE_ANALYSIS_PROMPT, validateAssistantAIConfig, callAssi
 import { DEFAULT_INSTRUCTIONS_PROMPT, DEFAULT_STYLE_PROMPT, DEFAULT_CORE_RULES_PROMPT, DEFAULT_BANNED_WORDS_PROMPT } from '../utils/prompts'
 import { GAME_VERSION } from '../utils/editionDetector'
 import { getMatchingStats } from '../utils/todoManager'
+import { getErrorMessage } from '../utils/errorUtils'
 
 defineEmits(['back'])
 
@@ -182,7 +183,7 @@ const testAssistantAIConfig = async () => {
     })
     alert('配置测试成功！辅助AI响应正常。')
   } catch (e) {
-    alert(`配置测试失败: ${e.message}`)
+    alert(`配置测试失败: ${getErrorMessage(e)}`)
   } finally {
     isTestingConfig.value = false
   }
@@ -201,7 +202,7 @@ const loadModels = async () => {
       gameStore.settings.assistantAI.model = models[0].id
     }
   } catch (e) {
-    alert('获取模型列表失败: ' + e.message)
+    alert('获取模型列表失败: ' + getErrorMessage(e))
   } finally {
     isLoadingModels.value = false
   }
@@ -221,7 +222,7 @@ const loadEmbeddingModels = async () => {
       embeddingModelList.value = models
     }
   } catch (e) {
-    alert('获取模型列表失败: ' + e.message)
+    alert('获取模型列表失败: ' + getErrorMessage(e))
   } finally {
     isLoadingEmbModels.value = false
   }
@@ -241,7 +242,7 @@ const loadRerankModels = async () => {
       rerankModelList.value = models
     }
   } catch (e) {
-    alert('获取模型列表失败: ' + e.message)
+    alert('获取模型列表失败: ' + getErrorMessage(e))
   } finally {
     isLoadingRerankModels.value = false
   }

@@ -13,7 +13,7 @@ export const playerActions = {
    */
   setPlayerName(this: any, name: string) {
     this.player.name = name
-    updatePartTimeWorldbookEntry(this.currentRunId, this.player.partTimeJob.history, this.player.name).catch((e: any) => console.error('[GameStore] Failed to update part-time worldbook name:', e))
+    updatePartTimeWorldbookEntry(this.currentRunId, this.player.partTimeJob.history, this.player.name).catch((e: unknown) => console.error('[GameStore] Failed to update part-time worldbook name:', e))
   },
 
   /**

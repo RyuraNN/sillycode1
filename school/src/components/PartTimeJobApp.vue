@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { mapData, getItem } from '../data/mapData'
 import { checkPartTimeJobEligibility, checkWorkTime } from '../utils/conditionChecker'
+import { getErrorMessage } from '../utils/errorUtils'
 
 const emit = defineEmits(['close'])
 const gameStore = useGameStore()
@@ -79,7 +80,7 @@ const applyForJob = async (locationId) => {
     await gameStore.applyForPartTimeJob(locationId, jobData)
     alert(`成功申请「${jobData.name}」兼职！`)
   } catch (e) {
-    alert('申请失败: ' + e.message)
+    alert('申请失败: ' + getErrorMessage(e))
   }
 }
 
@@ -99,7 +100,7 @@ const quitJob = async () => {
     await gameStore.quitPartTimeJob()
     alert('已成功辞职')
   } catch (e) {
-    alert('辞职失败: ' + e.message)
+    alert('辞职失败: ' + getErrorMessage(e))
   }
 }
 
@@ -119,7 +120,7 @@ const startWork = async () => {
     await gameStore.startWorking()
     startWorkTimer()
   } catch (e) {
-    alert('开始工作失败: ' + e.message)
+    alert('开始工作失败: ' + getErrorMessage(e))
   }
 }
 
@@ -136,7 +137,7 @@ const endWork = async () => {
       alert(result.message || '工作结束')
     }
   } catch (e) {
-    alert('结束工作失败: ' + e.message)
+    alert('结束工作失败: ' + getErrorMessage(e))
   }
 }
 

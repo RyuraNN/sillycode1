@@ -6,6 +6,7 @@ import { ref } from 'vue'
 import { removeThinking } from '../utils/summaryManager'
 import { ELECTIVE_PREFERENCES, getGradeFromClassId } from '../data/coursePoolData'
 import { mapData, getItem } from '../data/mapData'
+import { getErrorMessage } from '../utils/errorUtils'
 
 const CHUNK_SIZE = 15
 
@@ -390,9 +391,10 @@ ${charList}
       return { success: true }
     } catch (e) {
       console.error('[AutoSchedule] Error:', e)
-      scheduleError.value = e.message
-      scheduleProgress.value.status = `处理出错: ${e.message}`
-      return { success: false, message: e.message }
+      const errorMessage = getErrorMessage(e)
+      scheduleError.value = errorMessage
+      scheduleProgress.value.status = `处理出错: ${errorMessage}`
+      return { success: false, message: errorMessage }
     } finally {
       scheduling.value = false
     }
