@@ -481,7 +481,7 @@ const formatTimestamp = (ts) => {
         </template>
       </div>
 
-      <div class="summary-list">
+    <div v-if="currentTab !== 'todos'" class="summary-list">
         <div v-if="summaries.length === 0" class="empty-tip">暂无总结数据</div>
         <div 
           v-for="(summary, index) in summaries" 
@@ -580,6 +580,7 @@ const formatTimestamp = (ts) => {
 }
 
 .tabs {
+  flex-shrink: 0;
   display: flex;
   padding: 10px;
   gap: 10px;
@@ -748,6 +749,7 @@ const formatTimestamp = (ts) => {
 
 /* 统计信息栏 */
 .stats-bar {
+  flex-shrink: 0;
   display: flex;
   justify-content: center;
   gap: 16px;

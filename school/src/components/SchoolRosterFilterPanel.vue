@@ -7,7 +7,7 @@ import { useCharacterPool } from '../composables/useCharacterPool'
 import { useBatchComplete } from '../composables/useBatchComplete'
 import { useAIImport } from '../composables/useAIImport'
 import { useAutoClubGenerate } from '../composables/useAutoClubGenerate'
-import { saveRosterBackup, saveFullCharacterPool, getSnapshotData, saveSnapshotData, loadChunkedChatLog, saveChunkedChatLog } from '../utils/indexedDB'
+import { saveRosterBackup, saveFullCharacterPool, getSnapshotData, saveSnapshotData } from '../utils/indexedDB'
 import { updateClassDataInWorldbook, updateAcademicDataInWorldbook, updateTagDataInWorldbook, updateStaffRosterInWorldbook, ensureClubExistsInWorldbook, syncClubWorldbookState, createClubInWorldbook, addNpcToClubInWorldbook, batchUpdateClubsInWorldbook, removeClubFromWorldbook } from '../utils/worldbookParser'
 import { saveSocialData } from '../utils/socialRelationshipsWorldbook'
 import { saveImpressionDataImmediate } from '../utils/impressionWorldbook'
@@ -297,22 +297,6 @@ const getSnapshotLabel = (id) => {
 // 从备份恢复运行时关系数据，并重新写入 IndexedDB
 const cloneRelationships = () => JSON.parse(JSON.stringify(gameStore.npcRelationships || {}))
 
-const patchRelationshipsIntoChatSnapshots = (chatLog, relationships) => {
-  if (!Array.isArray(chatLog) || chatLog.length === 0) return 0
-
-  const sharedRelationships = JSON.parse(JSON.stringify(relationships || {}))
-  let patchedCount = 0
-
-  for (const entry of chatLog) {
-    if (entry?.snapshot && typeof entry.snapshot === 'object') {
-      entry.snapshot.npcRelationships = sharedRelationships
-      patchedCount++
-    }
-  }
-
-  return patchedCount
-}
-
 const persistRuntimeRelationshipChanges = async (syncWorldbook = false) => {
   if (snapshotRelSource.value) {
     clearPendingSocialData()
@@ -377,22 +361,9 @@ const saveRelationshipsToSnapshot = async () => {
     const updatedData = JSON.parse(JSON.stringify(snapshotRelData.value))
     updatedData.gameState.npcRelationships = relationships
 
-    let patchedCount = 0
-    if (Array.isArray(updatedData.chatLog) && updatedData.chatLog.length > 0) {
-      patchedCount += patchRelationshipsIntoChatSnapshots(updatedData.chatLog, relationships)
-    } else {
-      const chunkedChatLog = await loadChunkedChatLog(sid)
-      if (Array.isArray(chunkedChatLog) && chunkedChatLog.length > 0) {
-        patchedCount += patchRelationshipsIntoChatSnapshots(chunkedChatLog, relationships)
-        if (patchedCount > 0) {
-          await saveChunkedChatLog(sid, chunkedChatLog)
-        }
-      }
-    }
-
     await saveSnapshotData(sid, updatedData)
-    console.log('[RelEditor] Saved snapshot relationships, patched chat snapshots:', patchedCount)
-    showMessage('✅ 关系数据已保存到存档。恢复该存档后，编辑将生效。')
+    console.log('[RelEditor] Saved snapshot relationships (final gameState only).')
+    showMessage('✅ 已保存到存档。仅影响该存档的最终状态；历史楼层关系保持原样。')
   } catch (e) {
     console.error('[RelEditor] Save to snapshot failed:', e)
     alert('保存到存档失败: ' + getErrorMessage(e))

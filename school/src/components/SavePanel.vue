@@ -187,23 +187,38 @@ const restoreToChatIndex = async (index) => {
       snapshot = result
     }
 
+    const chatLog = Array.isArray(snapshot.chatLog) ? snapshot.chatLog : []
+    const safeIndex = Number.isInteger(index) ? index : -1
+    const targetIndex = chatLog.length > 0
+      ? Math.min(Math.max(safeIndex, 0), chatLog.length - 1)
+      : safeIndex
+
     // 2. 查找快照
     restoreStep.value = '查找回溯点...'
     restoreProgress.value = 40
     let snapshotToRestore = null
-    for (let i = index; i >= 0; i--) {
-      if (snapshot.chatLog[i] && snapshot.chatLog[i].snapshot) {
-        snapshotToRestore = snapshot.chatLog[i].snapshot
-        break
+    let shouldRestoreFromMessageSnapshot = false
+    if (chatLog.length === 0) {
+      console.warn('[SavePanel] Snapshot has no chatLog, keeping restored final gameState.')
+    } else if (targetIndex === chatLog.length - 1) {
+      // Latest floor: keep the final gameState already restored by restoreSnapshot().
+      console.log('[SavePanel] Restoring latest floor, keeping restored final gameState.')
+    } else {
+      for (let i = targetIndex; i >= 0; i--) {
+        if (chatLog[i] && chatLog[i].snapshot) {
+          snapshotToRestore = chatLog[i].snapshot
+          shouldRestoreFromMessageSnapshot = true
+          break
+        }
       }
     }
 
     // 3. 恢复游戏状态
     restoreStep.value = '恢复游戏状态...'
     restoreProgress.value = 60
-    if (snapshotToRestore) {
-      await gameStore.restoreFromMessageSnapshot(snapshotToRestore, snapshot.chatLog)
-    } else {
+    if (shouldRestoreFromMessageSnapshot && snapshotToRestore) {
+      await gameStore.restoreFromMessageSnapshot(snapshotToRestore, chatLog)
+    } else if (chatLog.length > 0 && targetIndex !== chatLog.length - 1) {
       console.warn('未找到任何可用快照，使用存档最终状态')
     }
 
@@ -218,11 +233,11 @@ const restoreToChatIndex = async (index) => {
     // 5. 截断聊天记录
     const restoredSnapshot = {
       ...snapshot,
-      chatLog: snapshot.chatLog.slice(0, index + 1)
+      chatLog: chatLog.length > 0 ? chatLog.slice(0, targetIndex + 1) : []
     }
 
     // 6. 更新 currentFloor 为截断后的长度，并持久化
-    gameStore.currentFloor = index + 1
+    gameStore.currentFloor = targetIndex + 1
     gameStore.saveToStorage(true)
 
     emit('restore', restoredSnapshot)
