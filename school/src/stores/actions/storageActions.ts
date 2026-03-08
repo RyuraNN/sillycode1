@@ -9,6 +9,7 @@ import {
   migrateFromLocalStorage, 
   saveSnapshotData, 
   getSnapshotData,
+  saveChunkedChatLog,
   getRosterBackup,
   saveRosterBackup,
   getFullCharacterPool,
@@ -20,6 +21,7 @@ import {
 import { getErrorMessage, getErrorName } from '../../utils/errorUtils'
 import { DEFAULT_RELATIONSHIPS, DEFAULT_PERSONALITIES, DEFAULT_GOALS, DEFAULT_PRIORITIES } from '../../data/relationshipData'
 import { createInitialState } from '../gameStoreState'
+import { fastClone, stripEmbeddingData } from '../../utils/snapshotUtils'
 
 let saveTimer: any = null
 
@@ -171,6 +173,23 @@ function validateAndRepairSettings(settings: any): any {
   settings._schemaVersion = CURRENT_SCHEMA_VERSION
 
   return settings
+}
+
+function createPortableChatLogEntry(log: any) {
+  const portable: any = {
+    type: log.type,
+    content: log.content
+  }
+
+  if (log.rawContent !== undefined) {
+    portable.rawContent = log.rawContent
+  }
+
+  if (log.snapshot) {
+    portable.snapshot = stripEmbeddingData(fastClone(log.snapshot))
+  }
+
+  return portable
 }
 
 /**
@@ -554,26 +573,14 @@ export const storageActions = {
       // 增量快照已经过优化，每个只有 5-15KB，1600层约 16MB（可接受）
       // 基准快照每20层一个，1600层约 80个 × 250KB = 20MB
       // 总计约 36MB，相比之前的 375MB 已经大幅减少
+      if (fullSnapshot.gameState) {
+        fullSnapshot.gameState = stripEmbeddingData(fastClone(fullSnapshot.gameState))
+      }
       if (fullSnapshot.chatLog && Array.isArray(fullSnapshot.chatLog)) {
-        fullSnapshot.chatLog = fullSnapshot.chatLog.map((log: any) => ({
-          type: log.type,
-          content: log.content,
-          rawContent: log.rawContent,
-          snapshot: log.snapshot // 保留快照数据
-          // 不导出: preVariableSnapshot（仅用于辅助AI重卷）
-        }))
+        fullSnapshot.chatLog = fullSnapshot.chatLog.map((log: any) => createPortableChatLogEntry(log))
       }
 
       fullSnapshots.push(fullSnapshot)
-    }
-
-    // 移除 embedding 向量数据以减小存档体积，防止 RangeError
-    for (const snap of fullSnapshots) {
-      if (snap.gameState?.player?.summaries) {
-        for (const s of snap.gameState.player.summaries) {
-          delete s.embedding
-        }
-      }
     }
 
     // 获取扩展数据 (IndexedDB)
@@ -781,9 +788,14 @@ export const storageActions = {
         const snapshot = { ...s }
         
         if (snapshot.gameState || snapshot.chatLog) {
+          if (Array.isArray(snapshot.chatLog)) {
+            await saveChunkedChatLog(snapshot.id, snapshot.chatLog, {
+              serializeEntry: createPortableChatLogEntry
+            })
+          }
+
           await saveSnapshotData(snapshot.id, {
-            gameState: snapshot.gameState,
-            chatLog: snapshot.chatLog
+            gameState: snapshot.gameState ? stripEmbeddingData(fastClone(snapshot.gameState)) : snapshot.gameState
           })
           
           delete snapshot.gameState

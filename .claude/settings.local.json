@@ -26,7 +26,9 @@
       "WebFetch(domain:docs.siliconflow.cn)",
       "WebFetch(domain:siliconflow.cn)",
       "Bash(sort:*)",
-      "WebFetch(domain:docs.sillytavern.app)"
+      "WebFetch(domain:docs.sillytavern.app)",
+      "Bash(wc:*)",
+      "Bash(git:*)"
     ]
   }
 }

@@ -17,7 +17,77 @@ import {
 import { updateAcademicWorldbookEntry } from '../../utils/academicWorldbook'
 import { SUBJECT_MAP, SUBJECT_NAME_MAP, EXAM_SCHEDULE, getResolvedExamOnDate } from '../../data/academicData'
 import { getAllElectives } from '../../data/coursePoolData'
+import { generateCharId } from '../../data/relationshipData'
 import type { ExamRecord } from '../gameStoreTypes'
+
+function ensureAcademicStudentNpc(store: any, student: any, classId: string) {
+  if (!student?.name) return null
+
+  let npc = (store.npcs || []).find((n: any) => n.name === student.name)
+  if (!npc) {
+    npc = {
+      id: generateCharId(student.name),
+      name: student.name,
+      gender: student.gender,
+      origin: student.origin,
+      relationship: 0,
+      isAlive: false,
+      location: classId,
+      classId,
+      role: 'student',
+      academicProfile: student.academicProfile,
+      electivePreference: student.electivePreference,
+      scheduleTag: student.scheduleTag
+    }
+    if (!Array.isArray(store.npcs)) {
+      store.npcs = []
+    }
+    store.npcs.push(npc)
+    return npc
+  }
+
+  npc.classId = classId
+  if (!npc.location || npc.location === npc.classId) npc.location = classId
+  if (!npc.role) npc.role = 'student'
+  if (student.gender && !npc.gender) npc.gender = student.gender
+  if (student.origin && !npc.origin) npc.origin = student.origin
+  if (student.academicProfile && !npc.academicProfile) npc.academicProfile = student.academicProfile
+  if (student.electivePreference && !npc.electivePreference) npc.electivePreference = student.electivePreference
+  if (student.scheduleTag && !npc.scheduleTag) npc.scheduleTag = student.scheduleTag
+
+  return npc
+}
+
+function getAcademicStudentEntries(store: any) {
+  const entries: Array<{ classId: string; npc: any }> = []
+  const seen = new Set<string>()
+  const allClassData = store.allClassData || {}
+
+  if (typeof store.initializeAllClassNpcs === 'function') {
+    store.initializeAllClassNpcs()
+  }
+
+  for (const [classId, classInfo] of Object.entries(allClassData) as [string, any][]) {
+    const students = Array.isArray(classInfo?.students) ? classInfo.students : []
+    for (const student of students) {
+      if (!student?.name || seen.has(student.name) || student.name === store.player?.name) continue
+      const npc = ensureAcademicStudentNpc(store, student, classId)
+      if (!npc) continue
+      seen.add(student.name)
+      entries.push({ classId, npc })
+    }
+  }
+
+  return entries
+}
+
+function getAcademicStudentMap(store: any) {
+  const map = new Map<string, { classId: string; npc: any }>()
+  for (const entry of getAcademicStudentEntries(store)) {
+    map.set(entry.npc.name, entry)
+  }
+  return map
+}
 
 export const academicActions = {
 
@@ -75,25 +145,11 @@ export const academicActions = {
       classResults[classId] = {}
     }
 
-    // 为每个学生NPC生成成绩
-    for (const npc of this.npcs) {
-      if (npc.role !== 'student' || !npc.isAlive) continue
-      
-      // 找到NPC所在班级
-      let npcClassId = ''
-      for (const [classId, classInfo] of Object.entries(allClassData) as [string, any][]) {
-        const students = classInfo.students || []
-        if (students.some((s: any) => s.name === npc.name)) {
-          npcClassId = classId
-          break
-        }
-      }
-      
-      if (!npcClassId) continue
-      if (!classResults[npcClassId]) classResults[npcClassId] = {}
-
+    // 为所有在籍学生生成成绩（不能依赖 isAlive，它只表示当前是否在场）
+    for (const { classId, npc } of getAcademicStudentEntries(this)) {
+      if (!classResults[classId]) classResults[classId] = {}
       const scores = generateNpcExamScores(npc, { examType, month })
-      classResults[npcClassId][npc.name] = scores
+      classResults[classId][npc.name] = scores
     }
 
     // 添加玩家成绩（如果玩家是学生）
@@ -193,8 +249,7 @@ export const academicActions = {
   updateDailyAcademicGrowth(this: any) {
     let updatedCount = 0
     
-    for (const npc of this.npcs) {
-      if (npc.role !== 'student' || !npc.isAlive) continue
+    for (const { npc } of getAcademicStudentEntries(this)) {
       
       const { subjectGrowth, motivationDelta } = dailyAcademicGrowth(npc)
       npc.subjectGrowth = subjectGrowth
@@ -282,15 +337,16 @@ export const academicActions = {
     // 2. 识别目标类型
     let type = 'private'
     let targets = []
+    const academicStudentMap = getAcademicStudentMap(this)
     
     // 2a. 尝试作为班级ID查找
     const classData = this.allClassData[targetNameOrId]
     if (classData && classData.students) {
       type = 'class'
-      // 收集班级内所有存活学生NPC
+      // 收集班级内所有在籍学生 NPC（不能依赖 isAlive）
       for (const student of classData.students) {
-        const npc = this.npcs.find((n: any) => n.name === student.name && n.isAlive)
-        if (npc) targets.push(npc)
+        const entry = academicStudentMap.get(student.name)
+        if (entry?.npc) targets.push(entry.npc)
       }
     } else {
       // 2b. 尝试作为选修课查找 (ID 或 名称)
@@ -303,11 +359,20 @@ export const academicActions = {
         // 查找选了这门课的学生
         for (const [studentName, selections] of Object.entries(this.npcElectiveSelections)) {
           if ((selections as string[]).includes(courseId)) {
-            const npc = this.npcs.find((n: any) => n.name === studentName && n.isAlive)
-            if (npc) targets.push(npc)
+            const entry = academicStudentMap.get(studentName)
+            if (entry?.npc) targets.push(entry.npc)
           }
         }
       } 
+
+      if (targets.length > 0) {
+        const seen = new Set<string>()
+        targets = targets.filter((npc: any) => {
+          if (!npc?.name || seen.has(npc.name)) return false
+          seen.add(npc.name)
+          return true
+        })
+      }
       
       // 如果不是选修课，或者选修课没人选
       if (targets.length === 0) {
@@ -401,8 +466,7 @@ export const academicActions = {
     if (!weekNumber) return
 
     const snapshot: Record<string, any> = {}
-    for (const npc of this.npcs) {
-      if (npc.role !== 'student' || !npc.isAlive) continue
+    for (const { npc } of getAcademicStudentEntries(this)) {
       const stats = npc.academicStats?.subjects || {}
       const subjectData: Record<string, any> = {}
       for (const [k, v] of Object.entries(stats) as [string, any][]) {
@@ -444,8 +508,7 @@ export const academicActions = {
     let totalMotivationDelta = 0
     let npcCount = 0
 
-    for (const npc of this.npcs) {
-      if (npc.role !== 'student' || !npc.isAlive) continue
+    for (const { npc } of getAcademicStudentEntries(this)) {
       const prev = snapshot.data[npc.name]
       if (!prev) continue
       npcCount++

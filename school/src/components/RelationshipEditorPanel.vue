@@ -605,9 +605,7 @@ function handleBatchDeleteCharacters() {
 function selectAllFilteredChars() {
   const s = new Set(charBatchSelected.value)
   for (const char of filteredCharacters.value) {
-    if (!char.ghost) {  // 排除幽灵角色
-      s.add(char.name)
-    }
+    s.add(char.name)
   }
   charBatchSelected.value = s
 }

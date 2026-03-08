@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { 
   UNIVERSAL_ELECTIVES, 
@@ -13,6 +13,10 @@ import {
   initCustomClass,
   removeCustomClass
 } from '../data/coursePoolData'
+import { LOCATION_NAMES } from '../utils/scheduleGenerator'
+import { mapData, setMapData } from '../data/mapData'
+import { fetchMapDataFromWorldbook } from '../utils/worldbookParser'
+import MapEditorPanel from './MapEditorPanel.vue'
 
 const emit = defineEmits(['close'])
 const gameStore = useGameStore()
@@ -24,6 +28,16 @@ const showAddClassModal = ref(false)
 const selectedClassToAdd = ref('')
 const customClasses = ref(Object.keys(CUSTOM_CLASS_COURSES))
 const dataVersion = ref(0) // 用于强制更新UI
+const showLocationPicker = ref(false)
+
+onMounted(async () => {
+  if (mapData.length === 0) {
+    const loadedMapData = await fetchMapDataFromWorldbook()
+    if (Array.isArray(loadedMapData) && loadedMapData.length > 0) {
+      setMapData(loadedMapData)
+    }
+  }
+})
 
 // 监听 CUSTOM_CLASS_COURSES 的变化（虽然它本身不是响应式的，但我们通过操作更新 customClasses）
 // 如果是从外部加载的，可能需要这一步？暂时先手动同步
@@ -240,8 +254,7 @@ const handleDeleteCustomClass = (e, classId) => {
   }
 }
 
-// 辅助：获取可用的locations (简化列表)
-const locationOptions = [
+const baseLocationOptions = [
   { value: 'classroom', label: '班级教室' },
   { value: 'classroom_1a', label: '1-A教室' },
   { value: 'classroom_1b', label: '1-B教室' },
@@ -262,6 +275,48 @@ const locationOptions = [
   { value: 'auditorium', label: '大礼堂' },
   { value: 'library', label: '图书馆' }
 ]
+
+const shouldIncludeCourseLocation = (item) => {
+  if (!item?.id || !item?.name) return false
+  const id = String(item.id).toLowerCase()
+  const name = String(item.name)
+  return id.includes('classroom') || name.includes('教室') || name.includes('实验室') || name.includes('礼堂') || name.includes('图书馆') || name.includes('操场') || name.includes('体育馆')
+}
+
+const locationOptions = computed(() => {
+  const optionMap = new Map(baseLocationOptions.map(opt => [opt.value, opt.label]))
+
+  Object.entries(LOCATION_NAMES || {}).forEach(([id, name]) => {
+    optionMap.set(id, name)
+  })
+
+  for (const item of mapData) {
+    if (shouldIncludeCourseLocation(item)) {
+      optionMap.set(item.id, item.name)
+    }
+  }
+
+  return Array.from(optionMap.entries())
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'))
+})
+
+const getLocationLabel = (locationId) => {
+  if (!locationId) return '未设置'
+  if (locationId === 'classroom') return '班级教室'
+  return locationOptions.value.find(opt => opt.value === locationId)?.label || locationId
+}
+
+const openLocationPicker = () => {
+  if (!editingCourse.value) return
+  showLocationPicker.value = true
+}
+
+const handleLocationSelected = (location) => {
+  if (!editingCourse.value) return
+  editingCourse.value.location = location.id
+  showLocationPicker.value = false
+}
 
 const currentTabLabel = computed(() => {
   const tab = tabs.value.find(t => t.id === activeTab.value)
@@ -497,18 +552,12 @@ const currentTabLabel = computed(() => {
                   <span class="label-icon">📍</span>
                   上课地点
                 </label>
-                <select v-model="editingCourse.location">
-                  <option v-for="opt in locationOptions" :key="opt.value" :value="opt.value">
-                    {{ opt.label }}
-                  </option>
-                  <option value="custom">自定义...</option>
-                </select>
-                <input 
-                  v-if="editingCourse.location === 'custom' || !locationOptions.some(o => o.value === editingCourse.location)" 
-                  v-model="editingCourse.location" 
-                  placeholder="输入地点ID"
-                  class="custom-input"
-                />
+                <div class="location-picker-field">
+                  <input :value="getLocationLabel(editingCourse.location)" readonly />
+                  <button type="button" class="save-btn location-btn" @click="openLocationPicker">
+                    <span>🗺️</span> 选择地点
+                  </button>
+                </div>
               </div>
             </div>
             
@@ -521,6 +570,15 @@ const currentTabLabel = computed(() => {
           </div>
         </div>
       </Transition>
+
+      <MapEditorPanel
+        v-if="showLocationPicker"
+        :selection-mode="true"
+        selection-title="选择课程上课地点"
+        initial-parent-id="tianhua_high_school"
+        @location-selected="handleLocationSelected"
+        @close="showLocationPicker = false"
+      />
       </div>
     </div>
   </Teleport>
@@ -1100,6 +1158,22 @@ const currentTabLabel = computed(() => {
   outline: none;
   border-color: var(--primary-color);
   box-shadow: 0 0 0 3px rgba(211, 47, 47, 0.1);
+}
+
+.location-picker-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.location-picker-field input {
+  flex: 1;
+  min-width: 0;
+}
+
+.location-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .custom-input {

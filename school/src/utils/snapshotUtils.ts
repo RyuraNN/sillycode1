@@ -109,6 +109,33 @@ export const fastClone = <T>(obj: T): T => {
   }
 }
 
+export function stripEmbeddingData<T>(value: T, seen = new WeakSet<object>()): T {
+  if (!value || typeof value !== 'object') return value
+
+  if (seen.has(value as object)) {
+    return value
+  }
+  seen.add(value as object)
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      stripEmbeddingData(item, seen)
+    }
+    return value
+  }
+
+  const target = value as Record<string, any>
+  for (const key of Object.keys(target)) {
+    if (key === 'embedding') {
+      delete target[key]
+      continue
+    }
+    stripEmbeddingData(target[key], seen)
+  }
+
+  return value
+}
+
 /**
  * 导出反序列化函数供外部使用
  */
@@ -307,7 +334,6 @@ function compareNpcArray(
 function shouldSkipField(key: string): boolean {
   // 跳过一些不需要记录差异的大型字段或内部字段
   const skipFields = [
-    'classRoster', // 班级花名册（大型数据）
     '_internal',   // 内部字段
     '_cache'       // 缓存字段
   ]
@@ -332,12 +358,14 @@ export function computeDelta(
   if (!oldState) {
     // 统一使用完整字段列表
     const keyFields = [
-      'player', 'gameTime', 'npcs', 'npcRelationships', 'worldState',
+      'player', 'gameTime', 'npcs', 'npcRelationships', 'characterNotes', 'worldState',
       'allClassData', 'allClubs', 'graduatedNpcs', 'lastAcademicYear',
       'currentRunId', 'currentFloor', 'examHistory', 'electiveAcademicData',
-      'lastExamDate', 'eventChecks', 'clubApplication', 'clubRejection',
+      'lastExamDate', 'customCoursePool', 'eventChecks', 'clubApplication', 'clubRejection',
       'clubInvitation', 'npcElectiveSelections',
-      'completedTodoMarkers', 'todoMatchingMode', 'todoMatchingStats'
+      'completedTodoMarkers', 'todoMatchingMode', 'todoMatchingStats',
+      'unviewedExamIds', 'lastViewedWeeklyPreview', 'viewedClubIds',
+      'weeklySnapshot', 'weeklyPreviewData', 'showWeeklyPreview', 'lastWeeklyPreviewWeek'
     ]
 
     for (const field of keyFields) {
@@ -364,12 +392,14 @@ export function computeDelta(
 
   // 处理其他顶层字段
   const topLevelFields = [
-    'player', 'gameTime', 'npcRelationships', 'worldState',
+    'player', 'gameTime', 'npcRelationships', 'characterNotes', 'worldState',
     'allClassData', 'allClubs', 'graduatedNpcs', 'lastAcademicYear',
     'currentRunId', 'currentFloor', 'examHistory', 'electiveAcademicData',
-    'lastExamDate', 'eventChecks', 'clubApplication', 'clubRejection',
+    'lastExamDate', 'customCoursePool', 'eventChecks', 'clubApplication', 'clubRejection',
     'clubInvitation', 'npcElectiveSelections',
-    'completedTodoMarkers', 'todoMatchingMode', 'todoMatchingStats'
+    'completedTodoMarkers', 'todoMatchingMode', 'todoMatchingStats',
+    'unviewedExamIds', 'lastViewedWeeklyPreview', 'viewedClubIds',
+    'weeklySnapshot', 'weeklyPreviewData', 'showWeeklyPreview', 'lastWeeklyPreviewWeek'
   ]
 
   for (const field of topLevelFields) {

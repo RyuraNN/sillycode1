@@ -576,6 +576,108 @@ const loadRerankModels = async () => {
                   </div>
                 </div>
 
+                <div class="input-group" :style="{ opacity: gameStore.settings.ragSystem.autoAdjust ? 0.5 : 1 }">
+                  <label class="input-label">向量召回数量 (topK)</label>
+                  <div class="range-row">
+                    <input
+                      type="range"
+                      v-model.number="gameStore.settings.ragSystem.topK"
+                      min="10"
+                      max="100"
+                      step="5"
+                      class="range-slider"
+                      :disabled="gameStore.settings.ragSystem.autoAdjust"
+                      @change="gameStore.saveToStorage()"
+                    >
+                    <span class="range-value">{{ gameStore.settings.ragSystem.topK }}</span>
+                  </div>
+                </div>
+
+                <div class="input-group" :style="{ opacity: gameStore.settings.ragSystem.autoAdjust ? 0.5 : 1 }">
+                  <label class="input-label">Rerank 保留数量 (topN)</label>
+                  <div class="range-row">
+                    <input
+                      type="range"
+                      v-model.number="gameStore.settings.ragSystem.rerankTopN"
+                      min="5"
+                      max="30"
+                      step="1"
+                      class="range-slider"
+                      :disabled="gameStore.settings.ragSystem.autoAdjust"
+                      @change="gameStore.saveToStorage()"
+                    >
+                    <span class="range-value">{{ gameStore.settings.ragSystem.rerankTopN }}</span>
+                  </div>
+                </div>
+
+                <div class="input-group">
+                  <label class="input-label">最低向量匹配度</label>
+                  <div class="range-row">
+                    <input
+                      type="range"
+                      v-model.number="gameStore.settings.ragSystem.minVectorScore"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      class="range-slider"
+                      @change="gameStore.saveToStorage()"
+                    >
+                    <span class="range-value">{{ gameStore.settings.ragSystem.minVectorScore.toFixed(2) }}</span>
+                  </div>
+                  <span class="setting-hint">粗召回低于该分数的记忆直接丢弃，减少弱相关旧记忆进入候选池</span>
+                </div>
+
+                <div class="input-group">
+                  <label class="input-label">最低 Rerank 匹配度</label>
+                  <div class="range-row">
+                    <input
+                      type="range"
+                      v-model.number="gameStore.settings.ragSystem.minRerankScore"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      class="range-slider"
+                      @change="gameStore.saveToStorage()"
+                    >
+                    <span class="range-value">{{ gameStore.settings.ragSystem.minRerankScore.toFixed(2) }}</span>
+                  </div>
+                  <span class="setting-hint">精排后低于该分数的结果不注入上下文，优先过滤“沾边但没用”的记忆</span>
+                </div>
+
+                <div class="input-group">
+                  <label class="input-label">旧记忆衰减强度</label>
+                  <div class="range-row">
+                    <input
+                      type="range"
+                      v-model.number="gameStore.settings.ragSystem.recencyBias"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      class="range-slider"
+                      @change="gameStore.saveToStorage()"
+                    >
+                    <span class="range-value">{{ gameStore.settings.ragSystem.recencyBias.toFixed(2) }}</span>
+                  </div>
+                  <span class="setting-hint">值越高，越偏向近期楼层；值越低，越保留远期记忆的竞争力</span>
+                </div>
+
+                <div class="input-group">
+                  <label class="input-label">旧记忆半衰期（楼层）</label>
+                  <div class="range-row">
+                    <input
+                      type="range"
+                      v-model.number="gameStore.settings.ragSystem.recencyHalfLife"
+                      min="10"
+                      max="200"
+                      step="5"
+                      class="range-slider"
+                      @change="gameStore.saveToStorage()"
+                    >
+                    <span class="range-value">{{ gameStore.settings.ragSystem.recencyHalfLife }}</span>
+                  </div>
+                  <span class="setting-hint">半衰期越小，旧楼层扣分越明显；越大则更容易保留远期关键记忆</span>
+                </div>
+
                 <div class="setting-row" style="margin-top: 12px;">
                   <div class="setting-info">
                     <span class="setting-label">使用上下文增强检索</span>

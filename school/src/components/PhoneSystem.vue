@@ -914,6 +914,38 @@ const handleHomeClick = () => {
                           </div>
 
                           <div class="setting-item" style="margin-top: 8px;">
+                            <span class="setting-label">最低向量匹配度: {{ gameStore.settings.ragSystem.minVectorScore.toFixed(2) }}</span>
+                          </div>
+                          <div class="slider-container">
+                            <input type="range" v-model.number="gameStore.settings.ragSystem.minVectorScore" min="0" max="1" step="0.05" @change="gameStore.saveToStorage()" class="setting-slider" />
+                          </div>
+                          <p class="hint">粗召回低于阈值的记忆会被直接丢弃</p>
+
+                          <div class="setting-item" style="margin-top: 8px;">
+                            <span class="setting-label">最低 Rerank 匹配度: {{ gameStore.settings.ragSystem.minRerankScore.toFixed(2) }}</span>
+                          </div>
+                          <div class="slider-container">
+                            <input type="range" v-model.number="gameStore.settings.ragSystem.minRerankScore" min="0" max="1" step="0.05" @change="gameStore.saveToStorage()" class="setting-slider" />
+                          </div>
+                          <p class="hint">精排后低于阈值的结果不再注入上下文</p>
+
+                          <div class="setting-item" style="margin-top: 8px;">
+                            <span class="setting-label">旧记忆衰减强度: {{ gameStore.settings.ragSystem.recencyBias.toFixed(2) }}</span>
+                          </div>
+                          <div class="slider-container">
+                            <input type="range" v-model.number="gameStore.settings.ragSystem.recencyBias" min="0" max="1" step="0.05" @change="gameStore.saveToStorage()" class="setting-slider" />
+                          </div>
+                          <p class="hint">越高越偏向近期楼层，越低越保留远期记忆</p>
+
+                          <div class="setting-item" style="margin-top: 8px;">
+                            <span class="setting-label">旧记忆半衰期: {{ gameStore.settings.ragSystem.recencyHalfLife }} 楼</span>
+                          </div>
+                          <div class="slider-container">
+                            <input type="range" v-model.number="gameStore.settings.ragSystem.recencyHalfLife" min="10" max="200" step="5" @change="gameStore.saveToStorage()" class="setting-slider" />
+                          </div>
+                          <p class="hint">越小扣分越明显，越大越容易保留远期关键记忆</p>
+
+                          <div class="setting-item" style="margin-top: 8px;">
                             <span class="setting-label">使用上下文增强检索</span>
                             <label class="switch">
                               <input type="checkbox" v-model="gameStore.settings.ragSystem.useContextQuery" @change="gameStore.saveToStorage()">

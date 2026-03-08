@@ -188,6 +188,10 @@ export interface RAGSettings {
   }
   topK: number              // 向量召回数量，默认 50（范围 10-100）
   rerankTopN: number         // Rerank 后保留数量，默认 15（范围 5-30）
+  minVectorScore: number     // 向量召回最低分数阈值，默认 0.35（范围 0-1）
+  minRerankScore: number     // Rerank 最低分数阈值，默认 0.15（范围 0-1）
+  recencyBias: number        // 旧记忆衰减强度，默认 0.25（范围 0-1）
+  recencyHalfLife: number    // 旧记忆衰减半衰期（楼层），默认 60
   useContextQuery: boolean   // 使用最近一轮对话作为检索 query，默认 true
   autoAdjust: boolean        // 根据总结数量自动调整 topK 和 rerankTopN
   enhancedRecall: boolean    // 是否启用增强召回模式，默认 false

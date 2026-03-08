@@ -1,5 +1,8 @@
 {
   "devDependencies": {
     "typescript": "^5.9.3"
+  },
+  "scripts": {
+    "project-map": "node scripts/generate-project-map.js"
   }
 }

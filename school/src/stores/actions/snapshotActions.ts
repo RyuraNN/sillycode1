@@ -3,7 +3,7 @@
  */
 
 import type { ChatLogEntry, SaveSnapshot, GameStateData } from '../gameStoreTypes'
-import { saveSnapshotData, getSnapshotData, removeSnapshotData, loadChunkedChatLog } from '../../utils/indexedDB'
+import { saveSnapshotData, getSnapshotData, removeSnapshotData, loadChunkedChatLog, saveChunkedChatLog } from '../../utils/indexedDB'
 import { updateAcademicWorldbookEntry } from '../../utils/academicWorldbook'
 import { createInitialState } from '../gameStoreState'
 import {
@@ -13,6 +13,7 @@ import {
   shouldCreateBaseSnapshot,
   createLightSnapshot,
   fastClone,
+  stripEmbeddingData,
   type DeltaSnapshot
 } from '../../utils/snapshotUtils'
 import { detectCardEdition, GAME_VERSION } from '../../utils/editionDetector'
@@ -34,7 +35,7 @@ function createLightChatLogEntry(log: ChatLogEntry): ChatLogEntry {
   // 深拷贝 snapshot，使用 fastClone 移除 Proxy 和不可克隆对象
   if (log.snapshot) {
     try {
-      lightLog.snapshot = fastClone(log.snapshot)
+      lightLog.snapshot = stripEmbeddingData(fastClone(log.snapshot))
     } catch (e) {
       console.warn('[createLightChatLogEntry] Failed to serialize snapshot:', e)
       // 如果序列化失败，跳过该 snapshot
@@ -49,12 +50,7 @@ function createLightChatLogEntry(log: ChatLogEntry): ChatLogEntry {
  */
 function clonePlayerForSnapshot(player: any) {
   const playerCopy = fastClone(player)
-  if (Array.isArray(playerCopy?.summaries)) {
-    for (const summary of playerCopy.summaries) {
-      delete summary.embedding
-    }
-  }
-  return playerCopy
+  return stripEmbeddingData(playerCopy)
 }
 
 export const snapshotActions = {
@@ -97,18 +93,25 @@ export const snapshotActions = {
       todoMatchingStats: this.todoMatchingStats || {
         keyword: { success: 0, total: 0 },
         index: { success: 0, total: 0 }
-      }
+      },
+      characterNotes: this.characterNotes || {},
+      customCoursePool: this.customCoursePool || null,
+      unviewedExamIds: this.unviewedExamIds || [],
+      lastViewedWeeklyPreview: this.lastViewedWeeklyPreview || 0,
+      viewedClubIds: this.viewedClubIds || [],
+      weeklySnapshot: this.weeklySnapshot || null,
+      weeklyPreviewData: this.weeklyPreviewData || null,
+      showWeeklyPreview: !!this.showWeeklyPreview,
+      lastWeeklyPreviewWeek: this.lastWeeklyPreviewWeek || 0
     })
-    // 注意：characterNotes, customCoursePool, eventLibrary, eventTriggers 为全局或外部数据，不回溯
 
     const id = Date.now().toString()
-    const logCopy = fastClone(chatLog)
 
-    // 保存重数据到分离的 Store
-    await saveSnapshotData(id, {
-      gameState,
-      chatLog: logCopy
+    await saveChunkedChatLog(id, chatLog, {
+      serializeEntry: createLightChatLogEntry
     })
+
+    await saveSnapshotData(id, { gameState })
 
     // 保存轻量级元数据
     const snapshot: SaveSnapshot = {
@@ -174,9 +177,17 @@ export const snapshotActions = {
         todoMatchingStats: this.todoMatchingStats || {
           keyword: { success: 0, total: 0 },
           index: { success: 0, total: 0 }
-        }
+        },
+        characterNotes: this.characterNotes || {},
+        customCoursePool: this.customCoursePool || null,
+        unviewedExamIds: this.unviewedExamIds || [],
+        lastViewedWeeklyPreview: this.lastViewedWeeklyPreview || 0,
+        viewedClubIds: this.viewedClubIds || [],
+        weeklySnapshot: this.weeklySnapshot || null,
+        weeklyPreviewData: this.weeklyPreviewData || null,
+        showWeeklyPreview: !!this.showWeeklyPreview,
+        lastWeeklyPreviewWeek: this.lastWeeklyPreviewWeek || 0
       })
-      // 注意：characterNotes, customCoursePool, eventLibrary, eventTriggers 为全局或外部数据，不回溯
 
       const autoSaveId = `autosave_${this.currentRunId}`
 
@@ -368,6 +379,15 @@ export const snapshotActions = {
       keyword: { success: 0, total: 0 },
       index: { success: 0, total: 0 }
     }
+    this.characterNotes = (state as any).characterNotes || {}
+    this.customCoursePool = (state as any).customCoursePool || null
+    this.unviewedExamIds = (state as any).unviewedExamIds || []
+    this.lastViewedWeeklyPreview = (state as any).lastViewedWeeklyPreview || 0
+    this.viewedClubIds = (state as any).viewedClubIds || []
+    this.weeklySnapshot = (state as any).weeklySnapshot || null
+    this.weeklyPreviewData = (state as any).weeklyPreviewData || null
+    this.showWeeklyPreview = !!(state as any).showWeeklyPreview
+    this.lastWeeklyPreviewWeek = (state as any).lastWeeklyPreviewWeek || 0
 
     this.currentRunId = state.currentRunId || Date.now().toString(36)
     this.currentFloor = state.currentFloor || 0
@@ -514,6 +534,7 @@ export const snapshotActions = {
       player: playerCopy,
       npcs: this.npcs,
       npcRelationships: this.npcRelationships,
+      characterNotes: this.characterNotes || {},
       graduatedNpcs: this.graduatedNpcs || [],
       lastAcademicYear: this.lastAcademicYear || 0,
       gameTime: this.gameTime,
@@ -531,7 +552,15 @@ export const snapshotActions = {
       clubApplication: this.clubApplication || null,
       clubRejection: this.clubRejection || null,
       clubInvitation: this.clubInvitation || null,
+      customCoursePool: this.customCoursePool || null,
       npcElectiveSelections: this.npcElectiveSelections || {},
+      unviewedExamIds: this.unviewedExamIds || [],
+      lastViewedWeeklyPreview: this.lastViewedWeeklyPreview || 0,
+      viewedClubIds: this.viewedClubIds || [],
+      weeklySnapshot: this.weeklySnapshot || null,
+      weeklyPreviewData: this.weeklyPreviewData || null,
+      showWeeklyPreview: !!this.showWeeklyPreview,
+      lastWeeklyPreviewWeek: this.lastWeeklyPreviewWeek || 0,
       completedTodoMarkers: this.completedTodoMarkers || [],
       todoMatchingMode: this.todoMatchingMode || 'keyword',
       todoMatchingStats: this.todoMatchingStats || {
@@ -886,6 +915,15 @@ export const snapshotActions = {
       keyword: { success: 0, total: 0 },
       index: { success: 0, total: 0 }
     }
+    this.characterNotes = (data as any).characterNotes || {}
+    this.customCoursePool = (data as any).customCoursePool || null
+    this.unviewedExamIds = (data as any).unviewedExamIds || []
+    this.lastViewedWeeklyPreview = (data as any).lastViewedWeeklyPreview || 0
+    this.viewedClubIds = (data as any).viewedClubIds || []
+    this.weeklySnapshot = (data as any).weeklySnapshot || null
+    this.weeklyPreviewData = (data as any).weeklyPreviewData || null
+    this.showWeeklyPreview = !!(data as any).showWeeklyPreview
+    this.lastWeeklyPreviewWeek = (data as any).lastWeeklyPreviewWeek || 0
 
     // @ts-ignore
     if (data.currentRunId !== undefined && data.currentRunId !== null) this.currentRunId = data.currentRunId

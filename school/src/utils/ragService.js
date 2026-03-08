@@ -311,6 +311,26 @@ export function calcAutoRAGParams(summaryCount) {
   return { topK, topN }
 }
 
+function clampNumber(value, min, max, fallback) {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return fallback
+  return Math.min(max, Math.max(min, num))
+}
+
+function calcRecencyMultiplier(distance, recencyBias, recencyHalfLife) {
+  const normalizedDistance = Math.max(0, distance)
+  const bias = clampNumber(recencyBias, 0, 1, 0.25)
+  const halfLife = Math.max(1, clampNumber(recencyHalfLife, 1, 9999, 60))
+  const recencyWeight = Math.exp(-normalizedDistance / halfLife)
+  return (1 - bias) + (bias * recencyWeight)
+}
+
+function adjustScoreByRecency(score, floor, currentFloor, recencyBias, recencyHalfLife) {
+  if (!Number.isFinite(currentFloor) || !Number.isFinite(floor)) return score
+  const distance = Math.max(0, currentFloor - floor)
+  return score * calcRecencyMultiplier(distance, recencyBias, recencyHalfLife)
+}
+
 /**
  * 获取生效的 RAG 参数（自动调整 or 手动设置）
  * @returns {{ topK: number, topN: number }}
@@ -318,13 +338,23 @@ export function calcAutoRAGParams(summaryCount) {
 export function getEffectiveRAGParams() {
   const gameStore = useGameStore()
   const ragSettings = gameStore.settings.ragSystem
+  const thresholds = {
+    minVectorScore: clampNumber(ragSettings.minVectorScore, 0, 1, 0.35),
+    minRerankScore: clampNumber(ragSettings.minRerankScore, 0, 1, 0.15),
+    recencyBias: clampNumber(ragSettings.recencyBias, 0, 1, 0.25),
+    recencyHalfLife: clampNumber(ragSettings.recencyHalfLife, 1, 300, 60)
+  }
   if (ragSettings.autoAdjust) {
     const summaryCount = gameStore.player.summaries.filter(
       s => s.type === 'minor' && s.embedding && s.embedding.length > 0
     ).length
-    return calcAutoRAGParams(summaryCount)
+    return { ...calcAutoRAGParams(summaryCount), ...thresholds }
   }
-  return { topK: ragSettings.topK || 50, topN: ragSettings.rerankTopN || 15 }
+  return {
+    topK: ragSettings.topK || 50,
+    topN: ragSettings.rerankTopN || 15,
+    ...thresholds
+  }
 }
 
 // ==================== 检索与重排序 ====================
@@ -333,19 +363,38 @@ export function getEffectiveRAGParams() {
  * 向量检索：从所有已向量化的 minor 总结中找出最相似的 topK 个
  * @param {string} query 查询文本
  * @param {number} topK 返回数量
+ * @param {object} options 可选参数
+ * @param {number} options.currentFloor 当前楼层，用于旧记忆衰减
+ * @param {Set<number>} options.excludeFloors 需要排除的楼层
+ * @param {number} options.minVectorScore 最低向量分数阈值
+ * @param {number} options.recencyBias 旧记忆衰减强度
+ * @param {number} options.recencyHalfLife 旧记忆半衰期（楼层）
  * @returns {Promise<Array<{summary: object, score: number}>>}
  */
-export async function searchSimilarSummaries(query, topK) {
+export async function searchSimilarSummaries(query, topK, options = {}) {
   const gameStore = useGameStore()
+  const {
+    currentFloor = null,
+    excludeFloors = new Set(),
+    minVectorScore = 0,
+    recencyBias = 0,
+    recencyHalfLife = 60
+  } = options
   const queryEmbedding = await callEmbeddingAPI(query)
   if (!queryEmbedding || queryEmbedding.length === 0) return []
 
   const candidates = gameStore.player.summaries
-    .filter(s => s.type === 'minor' && s.embedding && s.embedding.length > 0)
-    .map(s => ({
-      summary: s,
-      score: cosineSimilarity(queryEmbedding, s.embedding)
-    }))
+    .filter(s => s.type === 'minor' && s.embedding && s.embedding.length > 0 && !excludeFloors.has(s.floor))
+    .map(s => {
+      const rawScore = cosineSimilarity(queryEmbedding, s.embedding)
+      const score = adjustScoreByRecency(rawScore, s.floor, currentFloor, recencyBias, recencyHalfLife)
+      return {
+        summary: s,
+        score,
+        rawScore
+      }
+    })
+    .filter(item => item.score >= minVectorScore)
     .sort((a, b) => b.score - a.score)
     .slice(0, topK)
 
@@ -357,24 +406,45 @@ export async function searchSimilarSummaries(query, topK) {
  * @param {string} query 查询文本
  * @param {Array<{summary: object, score: number}>} candidates 候选列表
  * @param {number} topN 保留数量
+ * @param {object} options 可选参数
+ * @param {number} options.currentFloor 当前楼层，用于旧记忆衰减
+ * @param {number} options.minRerankScore 最低 rerank 分数阈值
+ * @param {number} options.recencyBias 旧记忆衰减强度
+ * @param {number} options.recencyHalfLife 旧记忆半衰期（楼层）
  * @returns {Promise<Array<{summary: object, score: number}>>}
  */
-export async function rerankSummaries(query, candidates, topN) {
+export async function rerankSummaries(query, candidates, topN, options = {}) {
   if (candidates.length === 0) return []
+  const {
+    currentFloor = null,
+    minRerankScore = 0,
+    recencyBias = 0,
+    recencyHalfLife = 60
+  } = options
   try {
     const documents = candidates.map(c => c.summary.content)
     const results = await callRerankAPI(query, documents, topN)
     // 按 relevance_score 排序，映射回原始 summary
     return results
-      .sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0))
+      .map(r => {
+        const summary = candidates[r.index]?.summary
+        const rawScore = r.relevance_score || 0
+        if (!summary) return null
+        return {
+          summary,
+          score: adjustScoreByRecency(rawScore, summary.floor, currentFloor, recencyBias, recencyHalfLife),
+          rawScore
+        }
+      })
+      .filter(Boolean)
+      .filter(item => item.score >= minRerankScore)
+      .sort((a, b) => b.score - a.score)
       .slice(0, topN)
-      .map(r => ({
-        summary: candidates[r.index].summary,
-        score: r.relevance_score || 0
-      }))
   } catch (e) {
     console.warn('[RAG] Rerank failed, falling back to embedding order:', getErrorMessage(e))
-    return candidates.slice(0, topN)
+    return candidates
+      .filter(item => item.score >= minRerankScore)
+      .slice(0, topN)
   }
 }
 
@@ -572,27 +642,29 @@ ${summariesText}
  * @returns {Promise<Array<{summary: object, score: number}>>}
  */
 export async function executeAdditionalQuery(query, excludeFloors, topN) {
-  const gameStore = useGameStore()
   const results = []
 
   try {
-    // 向量检索
-    const queryEmbedding = await callEmbeddingAPI(query)
-    if (!queryEmbedding || queryEmbedding.length === 0) return results
+    const gameStore = useGameStore()
+    const { minVectorScore, minRerankScore, recencyBias, recencyHalfLife } = getEffectiveRAGParams()
 
-    const candidates = gameStore.player.summaries
-      .filter(s => s.type === 'minor' && s.embedding && s.embedding.length > 0 && !excludeFloors.has(s.floor))
-      .map(s => ({
-        summary: s,
-        score: cosineSimilarity(queryEmbedding, s.embedding)
-      }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, Math.min(50, topN * 2)) // 取 topN*2 个候选
+    const candidates = await searchSimilarSummaries(query, Math.min(50, topN * 2), {
+      currentFloor: gameStore.currentFloor,
+      excludeFloors,
+      minVectorScore,
+      recencyBias,
+      recencyHalfLife
+    })
 
     if (candidates.length === 0) return results
 
     // Rerank
-    const reranked = await rerankSummaries(query, candidates, topN)
+    const reranked = await rerankSummaries(query, candidates, topN, {
+      currentFloor: gameStore.currentFloor,
+      minRerankScore,
+      recencyBias,
+      recencyHalfLife
+    })
     results.push(...reranked)
   } catch (e) {
     console.warn(`[Enhanced Recall] Additional query failed: "${query}"`, getErrorMessage(e))
@@ -763,13 +835,18 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
   const ragCandidateCount = olderFloors.length - bridgeFloors.length
   if (ragCandidateCount > 0 && userInput) {
     try {
-      const { topK, topN } = getEffectiveRAGParams()
+      const { topK, topN, minVectorScore, minRerankScore, recencyBias, recencyHalfLife } = getEffectiveRAGParams()
 
       const embeddedSummaries = gameStore.player.summaries.filter(
         s => s.type === 'minor' && s.embedding && s.embedding.length > 0 && !excludeSet.has(s.floor)
       )
       if (embeddedSummaries.length <= topN) {
-        ragSummaries = embeddedSummaries.map(s => ({ summary: s, score: 1 }))
+        ragSummaries = embeddedSummaries
+          .map(s => ({
+            summary: s,
+            score: adjustScoreByRecency(1, s.floor, currentFloor, recencyBias, recencyHalfLife)
+          }))
+          .filter(item => item.score >= minRerankScore)
       } else {
         // 合并主查询和所有补充查询为单次检索
         let finalQuery = mainQuery
@@ -783,10 +860,20 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
         }
 
         // 单次检索（合并主查询和补充查询）
-        const candidates = await searchSimilarSummaries(finalQuery, topK)
-        const filtered = candidates.filter(c => !excludeSet.has(c.summary.floor))
-        if (filtered.length > 0) {
-          ragSummaries = await rerankSummaries(finalQuery, filtered, topN)
+        const candidates = await searchSimilarSummaries(finalQuery, topK, {
+          currentFloor,
+          excludeFloors: excludeSet,
+          minVectorScore,
+          recencyBias,
+          recencyHalfLife
+        })
+        if (candidates.length > 0) {
+          ragSummaries = await rerankSummaries(finalQuery, candidates, topN, {
+            currentFloor,
+            minRerankScore,
+            recencyBias,
+            recencyHalfLife
+          })
           console.log('[RAG] Retrieved summaries:', ragSummaries.length)
         }
       }

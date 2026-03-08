@@ -10,16 +10,24 @@ import SchoolRosterFilterPanel from './SchoolRosterFilterPanel.vue'
 import EventEditorPanel from './EventEditorPanel.vue'
 import NpcScheduleEditorPanel from './NpcScheduleEditorPanel.vue'
 import DataTransferPanel from './DataTransferPanel.vue'
-import { setPlayerClass, setupTeacherClassEntries } from '../utils/worldbookParser'
+import MapEditorPanel from './MapEditorPanel.vue'
+import { setPlayerClass, setupTeacherClassEntries, fetchMapDataFromWorldbook } from '../utils/worldbookParser'
 import { DEFAULT_FORUM_POSTS, saveForumToWorldbook } from '../utils/forumWorldbook'
 import { getCoursePoolState, getElectiveCourses, getRequiredCourses, UNIVERSAL_ELECTIVES, GRADE_1_COURSES, GRADE_2_COURSES, GRADE_3_COURSES, registerCustomCourse, saveCoursePoolToWorldbook, ELECTIVE_PREFERENCES } from '../data/coursePoolData'
 import { generateIndependentTeacherSchedule, getTermInfo, LOCATION_NAMES } from '../utils/scheduleGenerator'
+import { mapData, setMapData } from '../data/mapData'
 
 const emit = defineEmits(['back', 'startGame'])
 const gameStore = useGameStore()
 
 onMounted(async () => {
   await gameStore.loadClassData()
+  if (mapData.length === 0) {
+    const loadedMapData = await fetchMapDataFromWorldbook()
+    if (Array.isArray(loadedMapData) && loadedMapData.length > 0) {
+      setMapData(loadedMapData)
+    }
+  }
   loadPresetsFromStorage()
 })
 
@@ -179,6 +187,7 @@ const formatDate = (timestamp) => {
 
 // 自定义课程相关状态
 const showAddCourseModal = ref(false)
+const showCourseLocationPicker = ref(false)
 const newCourseForm = ref({
   name: '',
   type: 'elective',
@@ -186,6 +195,22 @@ const newCourseForm = ref({
   preference: 'general',
   location: 'classroom'
 })
+
+const getCourseLocationLabel = (locationId) => {
+  if (!locationId) return '未设置'
+  if (locationId === 'classroom') return '普通教室'
+  const mapItem = mapData.find(item => item.id === locationId)
+  return mapItem?.name || LOCATION_NAMES?.[locationId] || locationId
+}
+
+const handleSelectCourseLocation = () => {
+  showCourseLocationPicker.value = true
+}
+
+const handleCourseLocationSelected = (location) => {
+  newCourseForm.value.location = location.id
+  showCourseLocationPicker.value = false
+}
 
 const openAddCourseModal = () => {
   newCourseForm.value = { name: '', type: 'elective', grade: 'universal', preference: 'general', location: 'classroom' }
@@ -1606,12 +1631,10 @@ const confirmSignature = async () => {
 
         <div class="form-row">
           <label>上课地点：</label>
-          <select v-model="newCourseForm.location" class="input-field">
-            <option value="classroom">普通教室</option>
-            <option v-for="(name, id) in LOCATION_NAMES" :key="id" :value="id">
-              {{ name }}
-            </option>
-          </select>
+          <div class="location-picker-field">
+            <input :value="getCourseLocationLabel(newCourseForm.location)" class="input-field" readonly />
+            <button type="button" class="action-btn small" @click="handleSelectCourseLocation">地图选择</button>
+          </div>
         </div>
 
         <div class="modal-actions">
@@ -1620,6 +1643,17 @@ const confirmSignature = async () => {
         </div>
       </div>
     </div>
+
+    <Teleport to="body">
+      <MapEditorPanel
+        v-if="showCourseLocationPicker"
+        :selection-mode="true"
+        selection-title="选择课程上课地点"
+        initial-parent-id="tianhua_high_school"
+        @location-selected="handleCourseLocationSelected"
+        @close="showCourseLocationPicker = false"
+      />
+    </Teleport>
   </div>
 </template>
 
@@ -1997,6 +2031,17 @@ const confirmSignature = async () => {
 
 .input-field:focus {
   border-bottom-color: #d32f2f;
+}
+
+.location-picker-field {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.location-picker-field .input-field {
+  min-width: 0;
 }
 
 .class-info-box {
