@@ -21,11 +21,11 @@ export function extractTodoCompletionCommands(aiResponse) {
   while ((tagMatch = tagRegex.exec(aiResponse)) !== null) {
     const attrsText = tagMatch[1] || ''
     const attrs = {}
-    const attrRegex = /(\w+)\s*=\s*"([^"]*)"/g
+    const attrRegex = /(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g
     let attrMatch
 
     while ((attrMatch = attrRegex.exec(attrsText)) !== null) {
-      attrs[attrMatch[1].toLowerCase()] = attrMatch[2]
+      attrs[attrMatch[1].toLowerCase()] = attrMatch[2] ?? attrMatch[3] ?? ''
     }
 
     const floor = Number.parseInt(attrs.floor, 10)
@@ -135,8 +135,11 @@ function getTodoMarkerCandidateFloors(summary, requestedFloor) {
 }
 
 export function findSummaryByTodoFloor(gameStore, floor) {
-  return (gameStore.player.summaries || []).find(summary =>
-    (summary.type === 'minor' || summary.type === 'diary') && getSummaryCoveredFloors(summary).includes(floor)
+  const summaries = gameStore.player.summaries || []
+  return summaries.find(summary =>
+    summary.type === 'minor' && getSummaryCoveredFloors(summary).includes(floor)
+  ) || summaries.find(summary =>
+    summary.type === 'diary' && getSummaryCoveredFloors(summary).includes(floor)
   ) || null
 }
 

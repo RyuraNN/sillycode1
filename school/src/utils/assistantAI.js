@@ -2,6 +2,7 @@ import { useGameStore } from '../stores/gameStore'
 import { buildSystemPromptContent } from './prompts'
 import { getAllBookNames } from './worldbookHelper'
 import { getErrorMessage } from './errorUtils'
+import { isTodoCompleted, parseTodoItems } from './todoManager'
 
 /**
  * 验证辅助AI配置是否完整
@@ -304,6 +305,29 @@ async function getActiveWorldbooksContent() {
   }
 }
 
+function buildPendingTodosContext(gameStore) {
+  const summaries = gameStore.player?.summaries || []
+  const pendingTodoBlocks = summaries
+    .filter(summary => summary.type === 'minor' && Number.isFinite(summary.floor))
+    .map(summary => {
+      const pendingTodos = parseTodoItems(summary.content)
+        .map((content, index) => ({ content, index }))
+        .filter(todo => !isTodoCompleted(gameStore, summary.floor, todo.index))
+
+      if (pendingTodos.length === 0) {
+        return ''
+      }
+
+      const meta = [summary.gameDate, summary.title].filter(Boolean).join(' | ')
+      const header = meta ? `[Todo Floor ${summary.floor} | ${meta}]` : `[Todo Floor ${summary.floor}]`
+      const items = pendingTodos.map(todo => `- ${todo.content}`).join('\n')
+      return `${header}\n${items}`
+    })
+    .filter(Boolean)
+
+  return pendingTodoBlocks.join('\n\n')
+}
+
 /**
  * 待办事项管理提示词
  */
@@ -370,6 +394,7 @@ export async function callAssistantAI(mainAIResponse, options = {}) {
     const pendingPrompts = gameStore.player.pendingCommands.map(cmd => cmd.text).join('\n')
     const activeWorldbooks = await getActiveWorldbooksContent()
     const variableParsingBook = await getVariableParsingEntryContent()
+    const pendingTodos = buildPendingTodosContext(gameStore)
 
     userContent = `
 [System Context]
@@ -377,6 +402,9 @@ ${systemPrompt}
 
 [Pending Commands]
 ${pendingPrompts}
+
+[Pending Todos]
+${pendingTodos || '无'}
 
 [Worldbooks]
 ${activeWorldbooks}

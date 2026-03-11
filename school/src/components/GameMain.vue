@@ -1402,13 +1402,12 @@ const processAIResponse = async (response) => {
 
         if (todoCommands.length > 0) {
           const currentFloor = gameLog.value.length
-          const mode = gameStore.todoMatchingMode || 'keyword'
 
           for (const cmd of todoCommands) {
             let success = false
-            if (cmd.mode === 'keyword' && mode === 'keyword') {
+            if (cmd.mode === 'keyword') {
               success = markTodoAsCompletedByKeyword(gameStore, cmd.floor, cmd.keyword, currentFloor)
-            } else if (cmd.mode === 'index' && mode === 'index') {
+            } else if (cmd.mode === 'index') {
               success = markTodoAsCompletedByIndex(gameStore, cmd.floor, cmd.index, currentFloor)
             }
 
@@ -1755,6 +1754,10 @@ const handleSummarySubmit = async (content) => {
         // 使用 updateMessageSnapshot 保持增量快照链的完整性
         lastLog.snapshot = gameStore.updateMessageSnapshot(lastLog.snapshot, gameLog.value)
       }
+
+      // 补总结会改变世界状态与消息快照，需要立刻刷新自动存档；
+      // 否则“读取”面板里基于自动存档的回溯可能仍使用旧快照链。
+      gameStore.createAutoSave(gameLog.value, gameStore.currentFloor)
     }
   }
   
