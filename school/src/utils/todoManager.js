@@ -117,6 +117,43 @@ function updateMatchingStats(gameStore, mode, success) {
   }
 }
 
+function getSummaryCoveredFloors(summary) {
+  if (!summary) return []
+  if (Array.isArray(summary.coveredFloors) && summary.coveredFloors.length > 0) {
+    return [...new Set(summary.coveredFloors)].sort((a, b) => a - b)
+  }
+  return Number.isFinite(summary.floor) ? [summary.floor] : []
+}
+
+function getTodoMarkerCandidateFloors(summary, requestedFloor) {
+  const floors = new Set([
+    requestedFloor,
+    getTodoMarkerFloor(summary, requestedFloor),
+    ...getSummaryCoveredFloors(summary)
+  ].filter(floor => Number.isFinite(floor)))
+  return [...floors]
+}
+
+export function findSummaryByTodoFloor(gameStore, floor) {
+  return (gameStore.player.summaries || []).find(summary =>
+    (summary.type === 'minor' || summary.type === 'diary') && getSummaryCoveredFloors(summary).includes(floor)
+  ) || null
+}
+
+export function getTodoMarkerFloor(summary, requestedFloor) {
+  if (!summary) return requestedFloor
+  return Number.isFinite(summary.floor) ? summary.floor : requestedFloor
+}
+
+export function findTodoMarker(gameStore, floor, todoIndex) {
+  const summary = findSummaryByTodoFloor(gameStore, floor)
+  if (!summary) return null
+  const candidateFloors = getTodoMarkerCandidateFloors(summary, floor)
+  return gameStore.completedTodoMarkers?.find(
+    marker => candidateFloors.includes(marker.floor) && marker.todoIndex === todoIndex
+  ) || null
+}
+
 /**
  * 标记待办为已完成（关键词模式）
  * @param {Object} gameStore 游戏状态
@@ -126,7 +163,7 @@ function updateMatchingStats(gameStore, mode, success) {
  * @returns {boolean} 是否成功
  */
 export function markTodoAsCompletedByKeyword(gameStore, floor, keyword, currentFloor) {
-  const summary = gameStore.player.summaries.find(s => s.floor === floor)
+  const summary = findSummaryByTodoFloor(gameStore, floor)
   if (!summary) {
     console.warn(`[TodoManager] Summary not found for floor ${floor}`)
     updateMatchingStats(gameStore, 'keyword', false)
@@ -153,14 +190,17 @@ export function markTodoAsCompletedByKeyword(gameStore, floor, keyword, currentF
     gameStore.completedTodoMarkers = []
   }
 
+  const markerFloor = getTodoMarkerFloor(summary, floor)
+  const candidateFloors = getTodoMarkerCandidateFloors(summary, floor)
+
   // 检查是否已标记
   const exists = gameStore.completedTodoMarkers.some(
-    m => m.floor === floor && m.todoIndex === matchedIndex
+    m => candidateFloors.includes(m.floor) && m.todoIndex === matchedIndex
   )
 
   if (!exists) {
     gameStore.completedTodoMarkers.push({
-      floor,
+      floor: markerFloor,
       todoIndex: matchedIndex,
       todoKeyword: keyword,
       completedAt: currentFloor,
@@ -194,7 +234,7 @@ export function markTodoAsCompletedByKeyword(gameStore, floor, keyword, currentF
  * @returns {boolean} 是否成功
  */
 export function markTodoAsCompletedByIndex(gameStore, floor, todoIndex, currentFloor) {
-  const summary = gameStore.player.summaries.find(s => s.floor === floor)
+  const summary = findSummaryByTodoFloor(gameStore, floor)
   if (!summary) {
     console.warn(`[TodoManager] Summary not found for floor ${floor}`)
     updateMatchingStats(gameStore, 'index', false)
@@ -212,13 +252,16 @@ export function markTodoAsCompletedByIndex(gameStore, floor, todoIndex, currentF
     gameStore.completedTodoMarkers = []
   }
 
+  const markerFloor = getTodoMarkerFloor(summary, floor)
+  const candidateFloors = getTodoMarkerCandidateFloors(summary, floor)
+
   const exists = gameStore.completedTodoMarkers.some(
-    m => m.floor === floor && m.todoIndex === todoIndex
+    m => candidateFloors.includes(m.floor) && m.todoIndex === todoIndex
   )
 
   if (!exists) {
     gameStore.completedTodoMarkers.push({
-      floor,
+      floor: markerFloor,
       todoIndex,
       completedAt: currentFloor,
       completedTimestamp: Date.now(),
@@ -249,9 +292,7 @@ export function markTodoAsCompletedByIndex(gameStore, floor, todoIndex, currentF
  * @returns {boolean} 是否已完成
  */
 export function isTodoCompleted(gameStore, floor, todoIndex) {
-  return gameStore.completedTodoMarkers?.some(
-    m => m.floor === floor && m.todoIndex === todoIndex
-  ) || false
+  return !!findTodoMarker(gameStore, floor, todoIndex)
 }
 
 /**

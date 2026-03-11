@@ -265,6 +265,11 @@ export function createInitialState(): GameState {
     weeklyPreviewData: null as any,
     showWeeklyPreview: false,
     lastWeeklyPreviewWeek: 0,
+    ragDiagnostics: {
+      traces: [],
+      activeTraceId: null,
+      maxEntries: 15
+    },
     worldbookLoadResults: {
       classData: null,
       clubData: null,

@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { generateDiary } from '../utils/summaryManager'
-import { parseTodoItems, isTodoCompleted } from '../utils/todoManager'
+import { parseTodoItems, isTodoCompleted, findSummaryByTodoFloor, findTodoMarker, getTodoMarkerFloor } from '../utils/todoManager'
 import { getErrorMessage } from '../utils/errorUtils'
 
 const emit = defineEmits(['close'])
@@ -278,9 +278,7 @@ const allTodos = computed(() => {
       const todoItems = parseTodoItems(summary.content)
       todoItems.forEach((content, index) => {
         const isCompleted = isTodoCompleted(gameStore, summary.floor, index)
-        const marker = gameStore.completedTodoMarkers?.find(
-          m => m.floor === summary.floor && m.todoIndex === index
-        )
+        const marker = findTodoMarker(gameStore, summary.floor, index)
 
         todos.push({
           floor: summary.floor,
@@ -308,13 +306,17 @@ const filteredTodos = computed(() => {
 })
 
 const toggleTodoCompletion = (todo) => {
-  const summary = gameStore.player.summaries.find(s => s.floor === todo.floor)
+  const summary = findSummaryByTodoFloor(gameStore, todo.floor)
   if (!summary) return
+  const markerFloor = getTodoMarkerFloor(summary, todo.floor)
+  const coveredFloors = Array.isArray(summary.coveredFloors) && summary.coveredFloors.length > 0
+    ? summary.coveredFloors
+    : [summary.floor]
 
   if (todo.isCompleted) {
     // 取消完成标记
     gameStore.completedTodoMarkers = gameStore.completedTodoMarkers?.filter(
-      m => !(m.floor === todo.floor && m.todoIndex === todo.index)
+      m => !(m.todoIndex === todo.index && (m.floor === markerFloor || coveredFloors.includes(m.floor)))
     ) || []
 
     if (summary.completedTodos) {
@@ -326,7 +328,7 @@ const toggleTodoCompletion = (todo) => {
       gameStore.completedTodoMarkers = []
     }
     gameStore.completedTodoMarkers.push({
-      floor: todo.floor,
+      floor: markerFloor,
       todoIndex: todo.index,
       completedAt: gameStore.currentFloor,
       completedTimestamp: Date.now(),

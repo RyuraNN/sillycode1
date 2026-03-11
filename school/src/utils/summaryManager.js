@@ -1,6 +1,6 @@
 import { useGameStore } from '../stores/gameStore'
 import { callAssistantAI } from './assistantAI'
-import { extractKeywordsFromSummary, embedSummary, buildRAGHistory, isRAGReady } from './ragService'
+import { extractKeywordsFromSummary, embedSummary, buildRAGHistory, isRAGReady, summaryNeedsEmbeddingRefresh } from './ragService'
 import { filterCompletedTodos } from './todoManager'
 import { getErrorMessage } from './errorUtils'
 
@@ -401,18 +401,24 @@ export async function generateMajorSummary(floors) {
  */
 function addSummary(summary) {
   const gameStore = useGameStore()
+  const normalizedSummary = {
+    ...summary,
+    coveredFloors: Array.isArray(summary.coveredFloors) && summary.coveredFloors.length > 0
+      ? [...new Set(summary.coveredFloors)].sort((a, b) => a - b)
+      : [summary.floor]
+  }
   
   // 检查是否已存在相同楼层和类型的总结
   const existingIndex = gameStore.player.summaries.findIndex(
-    s => s.floor === summary.floor && s.type === summary.type
+    s => s.floor === normalizedSummary.floor && s.type === normalizedSummary.type
   )
   
   if (existingIndex >= 0) {
     // 替换现有的
-    gameStore.player.summaries[existingIndex] = summary
+    gameStore.player.summaries[existingIndex] = normalizedSummary
   } else {
     // 添加新的
-    gameStore.player.summaries.push(summary)
+    gameStore.player.summaries.push(normalizedSummary)
   }
 }
 
@@ -669,7 +675,7 @@ export function getSummaryContent(floor, type) {
   
   if (type === 'minor') {
     const summary = gameStore.player.summaries.find(
-      s => s.type === 'minor' && s.floor === floor
+      s => s.type === 'minor' && ((Array.isArray(s.coveredFloors) && s.coveredFloors.length > 0 && s.coveredFloors.includes(floor)) || s.floor === floor)
     )
     return summary?.content || null
   }
@@ -768,9 +774,12 @@ export async function buildSummarizedHistory(chatLog, currentFloor, userInput) {
 
   // RAG 分支：启用且有用户输入时走 RAG 路径
   if (isRAGReady() && userInput) {
-    const { history, errors } = await buildRAGHistory(chatLog, currentFloor, userInput)
+    const { history, errors, traceId } = await buildRAGHistory(chatLog, currentFloor, userInput)
     if (errors && errors.length > 0) {
       history._ragErrors = errors
+    }
+    if (traceId) {
+      history._ragTraceId = traceId
     }
     return history
   }
@@ -823,7 +832,9 @@ export async function buildSummarizedHistory(chatLog, currentFloor, userInput) {
       const summary = getSummaryContent(logFloor, 'minor')
       if (summary) {
         // 过滤已完成的待办事项
-        const summaryObj = gameStore.player.summaries.find(s => s.floor === logFloor && s.type === 'minor')
+        const summaryObj = gameStore.player.summaries.find(
+          s => s.type === 'minor' && ((Array.isArray(s.coveredFloors) && s.coveredFloors.length > 0 && s.coveredFloors.includes(logFloor)) || s.floor === logFloor)
+        )
         let filteredContent = summary
         if (summaryObj && summaryObj.completedTodos && summaryObj.completedTodos.length > 0) {
           filteredContent = filterCompletedTodos(summary, summaryObj.completedTodos)
@@ -916,7 +927,9 @@ export async function buildSummarizedHistory(chatLog, currentFloor, userInput) {
       // 4. 回退到小总结
       const minorSummary = getSummaryContent(logFloor, 'minor')
       if (minorSummary) {
-        const summaryObj = gameStore.player.summaries.find(s => s.floor === logFloor && s.type === 'minor')
+        const summaryObj = gameStore.player.summaries.find(
+          s => s.type === 'minor' && ((Array.isArray(s.coveredFloors) && s.coveredFloors.length > 0 && s.coveredFloors.includes(logFloor)) || s.floor === logFloor)
+        )
         let filteredContent = minorSummary
         if (summaryObj && summaryObj.completedTodos && summaryObj.completedTodos.length > 0) {
           filteredContent = filterCompletedTodos(minorSummary, summaryObj.completedTodos)
@@ -1014,7 +1027,7 @@ export async function generateBatchSummaries(chatLog, onProgress, options = {}) 
         await generateMinorSummary(cleanImageTags(group[0].content), group[0].floor, true)
         // 自动计算向量
         if (options.autoEmbed) {
-          const newSummary = (gameStore.player.summaries || []).find(s => s.floor === group[0].floor && s.type === 'minor' && !s.embedding)
+          const newSummary = (gameStore.player.summaries || []).find(s => s.floor === group[0].floor && s.type === 'minor' && summaryNeedsEmbeddingRefresh(s))
           if (newSummary) await embedSummary(newSummary)
         }
       } catch (e) {

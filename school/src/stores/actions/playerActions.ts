@@ -175,7 +175,7 @@ export const playerActions = {
     }
     this.player.summaries.push({
       ...data,
-      coveredFloors: [],
+      coveredFloors: [data.floor],
       timestamp: Date.now()
     })
   },

@@ -126,6 +126,212 @@ export function extractKeywordsFromSummary(summaryContent) {
   return [...new Set(keywords)]
 }
 
+const TRACE_TEXT_LIMIT = 6000
+const TRACE_CANDIDATE_LIMIT = 10
+const TRACE_DOC_LIMIT = 10
+const RRF_K = 20
+
+function clampTraceText(text, max = TRACE_TEXT_LIMIT) {
+  if (text === null || text === undefined) return ''
+  const value = String(text)
+  return value.length > max ? `${value.slice(0, max)}\n...[truncated]` : value
+}
+
+function uniqueQueries(queries, limit = 2) {
+  const seen = new Set()
+  const result = []
+  for (const query of queries || []) {
+    const normalized = (query || '').trim()
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    result.push(normalized)
+    if (result.length >= limit) break
+  }
+  return result
+}
+
+function getSummaryCoveredFloors(summary) {
+  const floors = Array.isArray(summary?.coveredFloors) && summary.coveredFloors.length > 0
+    ? summary.coveredFloors
+    : [summary?.floor]
+  return [...new Set(floors.filter(floor => Number.isFinite(floor)))].sort((a, b) => a - b)
+}
+
+function getSummaryMinFloor(summary) {
+  const floors = getSummaryCoveredFloors(summary)
+  return floors.length > 0 ? floors[0] : summary?.floor
+}
+
+function getSummaryMaxFloor(summary) {
+  const floors = getSummaryCoveredFloors(summary)
+  return floors.length > 0 ? floors[floors.length - 1] : summary?.floor
+}
+
+function getSummaryAnchorFloor(summary) {
+  return getSummaryMaxFloor(summary)
+}
+
+function getSummaryCoverageKey(summary) {
+  const floors = getSummaryCoveredFloors(summary)
+  return `${summary?.type || 'minor'}:${floors.join(',')}`
+}
+
+function summaryIntersectsFloors(summary, floorSet) {
+  if (!floorSet || floorSet.size === 0) return false
+  return getSummaryCoveredFloors(summary).some(floor => floorSet.has(floor))
+}
+
+function formatSummaryFloorLabel(summary, prefix = '楼层') {
+  const minFloor = getSummaryMinFloor(summary)
+  const maxFloor = getSummaryMaxFloor(summary)
+  return minFloor === maxFloor ? `${prefix}${maxFloor}` : `${prefix}${minFloor}-${maxFloor}`
+}
+
+function previewSummaryContent(content, max = 220) {
+  const normalized = clampTraceText((content || '').replace(/\s+/g, ' ').trim(), max)
+  return normalized
+}
+
+function parseStructuredSummaryContent(content) {
+  if (!content) return {}
+  const sections = {}
+  const lines = content.split('\n')
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const match = line.match(/^([^|｜\n]+)[|｜](.+)$/)
+    if (!match) continue
+    sections[match[1].trim()] = match[2].trim()
+  }
+  return sections
+}
+
+function hashText(text) {
+  let hash = 2166136261
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i)
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24)
+  }
+  return (hash >>> 0).toString(16)
+}
+
+function buildEmbeddingText(summary) {
+  const sections = parseStructuredSummaryContent(summary?.content || '')
+  const orderedFields = [
+    ['标题', '标题'],
+    ['日期', '日期'],
+    ['地点', '地点'],
+    ['人物', '人物'],
+    ['描述', '描述'],
+    ['人物关系', '人物关系'],
+    ['重要信息', '重要信息'],
+    ['角色意图', '角色意图'],
+    ['互动内容', '互动内容'],
+    ['待办事项', '待办事项']
+  ]
+  const semanticLines = orderedFields
+    .map(([sourceKey, label]) => sections[sourceKey] ? `${label}: ${sections[sourceKey]}` : '')
+    .filter(Boolean)
+
+  if (semanticLines.length >= 3) {
+    return semanticLines.join('\n')
+  }
+
+  return summary?.content || ''
+}
+
+export function summaryNeedsEmbeddingRefresh(summary) {
+  if (!summary || summary.type !== 'minor') return false
+
+  const gameStore = useGameStore()
+  const expectedModel = gameStore.settings.ragSystem?.embedding?.model || ''
+  const embedding = Array.isArray(summary.embedding) ? summary.embedding : []
+  const meta = summary.embeddingMeta
+
+  if (embedding.length === 0) return true
+  if (!meta) return true
+  if (!meta.model || meta.model !== expectedModel) return true
+  if (!Number.isFinite(meta.dims) || meta.dims !== embedding.length) return true
+
+  const contentHash = hashText(buildEmbeddingText(summary))
+  return meta.contentHash !== contentHash
+}
+
+function getTrace(traceId) {
+  const gameStore = useGameStore()
+  return (gameStore.ragDiagnostics?.traces || []).find(trace => trace.id === traceId) || null
+}
+
+function appendTraceStep(traceId, stage, title, status = 'info', data, detail) {
+  if (!traceId) return
+  const gameStore = useGameStore()
+  gameStore.appendRagTraceStep(traceId, {
+    stage,
+    title,
+    status,
+    detail,
+    data
+  })
+}
+
+function appendTraceError(traceId, stage, error) {
+  if (!traceId) return
+  const gameStore = useGameStore()
+  const trace = getTrace(traceId)
+  const nextErrors = [...(trace?.errors || []), { stage, message: getErrorMessage(error) }]
+  gameStore.updateRagTrace(traceId, {
+    errors: nextErrors,
+    status: 'warning'
+  })
+}
+
+function buildTraceCandidate(item, extra = {}) {
+  const summary = item.summary || item
+  return {
+    summaryKey: getSummaryCoverageKey(summary),
+    floor: summary.floor,
+    minFloor: getSummaryMinFloor(summary),
+    maxFloor: getSummaryMaxFloor(summary),
+    coveredFloors: getSummaryCoveredFloors(summary),
+    type: summary.type,
+    score: item.score,
+    rawScore: item.rawScore,
+    preview: previewSummaryContent(summary.content),
+    ...extra
+  }
+}
+
+function weightedReciprocalRankFusion(queryBuckets, topK) {
+  const fusedMap = new Map()
+
+  for (const bucket of queryBuckets) {
+    for (let i = 0; i < bucket.candidates.length; i++) {
+      const candidate = bucket.candidates[i]
+      const summaryKey = getSummaryCoverageKey(candidate.summary)
+      const rankScore = bucket.weight / (RRF_K + i + 1)
+      if (!fusedMap.has(summaryKey)) {
+        fusedMap.set(summaryKey, {
+          summary: candidate.summary,
+          score: 0,
+          rawScore: candidate.rawScore ?? candidate.score ?? 0,
+          sourceKinds: new Set(),
+          sourceQueries: new Set()
+        })
+      }
+
+      const fused = fusedMap.get(summaryKey)
+      fused.score += rankScore
+      fused.rawScore = Math.max(fused.rawScore, candidate.rawScore ?? candidate.score ?? 0)
+      fused.sourceKinds.add(bucket.kind)
+      fused.sourceQueries.add(bucket.query)
+    }
+  }
+
+  return [...fusedMap.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK)
+}
+
 // ==================== Query 改写 ====================
 
 /**
@@ -149,7 +355,7 @@ export async function rewriteQueryWithAI(userInput, gameTime, lastRound, options
     return userInput
   }
 
-  const { enableProactiveQuery = false, npcContext = [] } = options
+  const { enableProactiveQuery = false, npcContext = [], traceId = null } = options
 
   // 基础Query改写的System Prompt
   let systemPrompt = `你是一个查询改写助手。将用户的输入改写为适合语义检索的查询文本。
@@ -200,6 +406,20 @@ ${contextBlock}${npcContextBlock}
 
 请将当前玩家输入改写为适合语义检索的查询文本：`
 
+  if (traceId) {
+    gameStore.updateRagTrace(traceId, {
+      rewritePrompt: {
+        system: systemPrompt,
+        user: userPrompt
+      }
+    })
+    appendTraceStep(traceId, 'queryRewrite', '查询改写请求', 'info', {
+      promptUserLength: userPrompt.length,
+      proactiveEnabled: enableProactiveQuery,
+      npcContext
+    })
+  }
+
   let endpoint = apiUrl.replace(/\/+$/, '')
   if (!endpoint.endsWith('/chat/completions')) {
     endpoint += '/chat/completions'
@@ -231,6 +451,12 @@ ${contextBlock}${npcContextBlock}
   let result = (data.choices?.[0]?.message?.content || '').trim()
   result = removeThinking(result).trim()
 
+  if (traceId) {
+    gameStore.updateRagTrace(traceId, {
+      rewriteResponse: result
+    })
+  }
+
   // 如果启用主动查询生成，解析XML输出
   if (enableProactiveQuery) {
     const mainMatch = result.match(/<main>(.+?)<\/main>/s)
@@ -245,7 +471,21 @@ ${contextBlock}${npcContextBlock}
       }
     }
 
+    if (traceId) {
+      appendTraceStep(traceId, 'queryRewrite', '查询改写完成', 'success', {
+        mainQuery,
+        additionalQueries
+      })
+    }
+
     return { mainQuery, additionalQueries }
+  }
+
+  if (traceId) {
+    appendTraceStep(traceId, 'queryRewrite', '查询改写完成', 'success', {
+      mainQuery: result || userInput,
+      additionalQueries: []
+    })
   }
 
   // 未启用主动查询，返回字符串（向后兼容）
@@ -260,15 +500,30 @@ ${contextBlock}${npcContextBlock}
  * @returns {Promise<boolean>} 是否成功
  */
 export async function embedSummary(summary) {
+  const gameStore = useGameStore()
   try {
-    const embedding = await callEmbeddingAPI(summary.content)
+    const embeddingText = buildEmbeddingText(summary)
+    const embedding = await callEmbeddingAPI(embeddingText)
     if (embedding && embedding.length > 0) {
       summary.embedding = embedding
+      summary.embeddingMeta = {
+        model: gameStore.settings.ragSystem?.embedding?.model || '',
+        dims: embedding.length,
+        contentHash: hashText(embeddingText),
+        updatedAt: Date.now()
+      }
       return true
     }
     return false
   } catch (e) {
     console.warn('[RAG] embedSummary failed:', getErrorMessage(e))
+    const traceId = gameStore.ragDiagnostics?.activeTraceId || gameStore.ragDiagnostics?.traces?.[0]?.id || null
+    appendTraceError(traceId, 'embedding', e)
+    appendTraceStep(traceId, 'embedding', '向量生成失败', 'error', {
+      floor: summary?.floor,
+      summaryKey: getSummaryCoverageKey(summary),
+      embeddingText: clampTraceText(buildEmbeddingText(summary))
+    }, getErrorMessage(e))
     return false
   }
 }
@@ -281,7 +536,7 @@ export async function embedSummary(summary) {
 export async function batchEmbedSummaries(progressCallback) {
   const gameStore = useGameStore()
   const summaries = gameStore.player.summaries.filter(
-    s => s.type === 'minor' && !s.embedding
+    s => s.type === 'minor' && summaryNeedsEmbeddingRefresh(s)
   )
   let success = 0, failed = 0
   for (let i = 0; i < summaries.length; i++) {
@@ -346,7 +601,7 @@ export function getEffectiveRAGParams() {
   }
   if (ragSettings.autoAdjust) {
     const summaryCount = gameStore.player.summaries.filter(
-      s => s.type === 'minor' && s.embedding && s.embedding.length > 0
+      s => s.type === 'minor' && !summaryNeedsEmbeddingRefresh(s)
     ).length
     return { ...calcAutoRAGParams(summaryCount), ...thresholds }
   }
@@ -378,16 +633,17 @@ export async function searchSimilarSummaries(query, topK, options = {}) {
     excludeFloors = new Set(),
     minVectorScore = 0,
     recencyBias = 0,
-    recencyHalfLife = 60
+    recencyHalfLife = 60,
+    traceMeta = null
   } = options
   const queryEmbedding = await callEmbeddingAPI(query)
   if (!queryEmbedding || queryEmbedding.length === 0) return []
 
   const candidates = gameStore.player.summaries
-    .filter(s => s.type === 'minor' && s.embedding && s.embedding.length > 0 && !excludeFloors.has(s.floor))
+    .filter(s => s.type === 'minor' && !summaryNeedsEmbeddingRefresh(s) && !summaryIntersectsFloors(s, excludeFloors))
     .map(s => {
       const rawScore = cosineSimilarity(queryEmbedding, s.embedding)
-      const score = adjustScoreByRecency(rawScore, s.floor, currentFloor, recencyBias, recencyHalfLife)
+      const score = adjustScoreByRecency(rawScore, getSummaryAnchorFloor(s), currentFloor, recencyBias, recencyHalfLife)
       return {
         summary: s,
         score,
@@ -396,7 +652,25 @@ export async function searchSimilarSummaries(query, topK, options = {}) {
     })
     .filter(item => item.score >= minVectorScore)
     .sort((a, b) => b.score - a.score)
-    .slice(0, topK)
+    .slice(0, Math.max(0, topK))
+
+  if (traceMeta?.traceId) {
+    const trace = getTrace(traceMeta.traceId)
+    const perQueryCandidates = [...(trace?.perQueryCandidates || []), {
+      query,
+      kind: traceMeta.kind,
+      candidates: candidates.slice(0, TRACE_CANDIDATE_LIMIT).map(item => buildTraceCandidate(item, {
+        sourceQuery: query,
+        sourceKind: traceMeta.kind
+      }))
+    }]
+    gameStore.updateRagTrace(traceMeta.traceId, { perQueryCandidates })
+    appendTraceStep(traceMeta.traceId, 'embeddingSearch', `向量检索：${traceMeta.kind}`, 'success', {
+      query,
+      candidateCount: candidates.length,
+      topCandidates: perQueryCandidates[perQueryCandidates.length - 1].candidates
+    })
+  }
 
   return candidates
 }
@@ -419,11 +693,33 @@ export async function rerankSummaries(query, candidates, topN, options = {}) {
     currentFloor = null,
     minRerankScore = 0,
     recencyBias = 0,
-    recencyHalfLife = 60
+    recencyHalfLife = 60,
+    traceMeta = null
   } = options
   try {
     const documents = candidates.map(c => c.summary.content)
+    if (traceMeta?.traceId) {
+      const gameStore = useGameStore()
+      gameStore.updateRagTrace(traceMeta.traceId, {
+        rerankRequest: {
+          query,
+          topN,
+          documentsPreview: documents.slice(0, TRACE_DOC_LIMIT).map(doc => clampTraceText(doc, 500))
+        }
+      })
+    }
     const results = await callRerankAPI(query, documents, topN)
+    if (traceMeta?.traceId) {
+      const gameStore = useGameStore()
+      gameStore.updateRagTrace(traceMeta.traceId, {
+        rerankResponse: results.slice(0, TRACE_DOC_LIMIT)
+      })
+      appendTraceStep(traceMeta.traceId, 'rerank', 'Rerank 完成', 'success', {
+        query,
+        resultCount: results.length,
+        topResults: results.slice(0, TRACE_DOC_LIMIT)
+      })
+    }
     // 按 relevance_score 排序，映射回原始 summary
     return results
       .map(r => {
@@ -432,7 +728,7 @@ export async function rerankSummaries(query, candidates, topN, options = {}) {
         if (!summary) return null
         return {
           summary,
-          score: adjustScoreByRecency(rawScore, summary.floor, currentFloor, recencyBias, recencyHalfLife),
+          score: adjustScoreByRecency(rawScore, getSummaryAnchorFloor(summary), currentFloor, recencyBias, recencyHalfLife),
           rawScore
         }
       })
@@ -442,8 +738,12 @@ export async function rerankSummaries(query, candidates, topN, options = {}) {
       .slice(0, topN)
   } catch (e) {
     console.warn('[RAG] Rerank failed, falling back to embedding order:', getErrorMessage(e))
+    appendTraceError(traceMeta?.traceId, 'rerank', e)
+    appendTraceStep(traceMeta?.traceId, 'rerank', 'Rerank 失败，回退向量顺序', 'warning', {
+      query,
+      candidateCount: candidates.length
+    }, getErrorMessage(e))
     return candidates
-      .filter(item => item.score >= minRerankScore)
       .slice(0, topN)
   }
 }
@@ -455,16 +755,17 @@ export async function rerankSummaries(query, candidates, topN, options = {}) {
  * @param {string} userInput 用户当前输入
  * @param {Array<{summary: object, score: number}>} ragSummaries 召回的总结列表
  * @param {object} gameTime 当前游戏时间
- * @returns {Promise<{pruneFloors: number[], additionalQuery: string}>}
+ * @returns {Promise<{pruneIndexes: number[], additionalQueries: string[]}>}
  */
-export async function analyzeRecalledSummaries(userInput, ragSummaries, gameTime) {
+export async function analyzeRecalledSummaries(userInput, ragSummaries, gameTime, options = {}) {
   const gameStore = useGameStore()
   const { apiUrl, apiKey, model } = gameStore.settings.assistantAI
+  const { traceId = null } = options
 
   const validation = validateAssistantAIConfig(gameStore.settings.assistantAI, true)
   if (!validation.valid) {
     console.warn(`[Enhanced Recall] Skipped: ${validation.error}`)
-    return { pruneFloors: [], additionalQueries: [] }
+    return { pruneIndexes: [], additionalQueries: [] }
   }
 
   // 收集场景NPC上下文
@@ -555,8 +856,8 @@ export async function analyzeRecalledSummaries(userInput, ragSummaries, gameTime
 **输出格式** (XML):
 <analysis>
 <prune>
-<floor>楼层号1</floor>
-<floor>楼层号2</floor>
+<item>召回项序号1</item>
+<item>召回项序号2</item>
 </prune>
 <additional>补充查询1</additional>
 <additional>补充查询2</additional>
@@ -565,7 +866,7 @@ export async function analyzeRecalledSummaries(userInput, ragSummaries, gameTime
 如果无需剪枝或补充，对应标签留空即可。`
 
   const summariesText = ragSummaries
-    .map((item, idx) => `[${idx + 1}] 楼层${item.summary.floor} | 相关度${(item.score * 100).toFixed(0)}%\n${item.summary.content}`)
+    .map((item, idx) => `[${idx + 1}] ${formatSummaryFloorLabel(item.summary)} | 相关度${(item.score * 100).toFixed(0)}%\n${item.summary.content}`)
     .join('\n\n')
 
   const userPrompt = `**用户当前输入**: ${userInput}
@@ -578,6 +879,18 @@ ${summariesText}
   let endpoint = apiUrl.replace(/\/+$/, '')
   if (!endpoint.endsWith('/chat/completions')) {
     endpoint += '/chat/completions'
+  }
+
+  if (traceId) {
+    gameStore.updateRagTrace(traceId, {
+      analyzerPrompt: {
+        system: systemPrompt,
+        user: userPrompt
+      }
+    })
+    appendTraceStep(traceId, 'enhancedRecall', '增强召回分析请求', 'info', {
+      recalledCount: ragSummaries.length
+    })
   }
 
   try {
@@ -607,15 +920,21 @@ ${summariesText}
     let result = (data.choices?.[0]?.message?.content || '').trim()
     result = removeThinking(result).trim()
 
+    if (traceId) {
+      gameStore.updateRagTrace(traceId, {
+        analyzerResponse: result
+      })
+    }
+
     // 解析 XML 输出
-    const pruneFloors = []
+    const pruneIndexes = []
     const additionalQueries = []
 
-    // 提取 <floor> 标签
-    const floorMatches = result.matchAll(/<floor>(\d+)<\/floor>/g)
-    for (const match of floorMatches) {
-      const floor = parseInt(match[1], 10)
-      if (!isNaN(floor)) pruneFloors.push(floor)
+    // 提取 <item> 标签
+    const itemMatches = result.matchAll(/<item>(\d+)<\/item>/g)
+    for (const match of itemMatches) {
+      const itemIndex = parseInt(match[1], 10)
+      if (!isNaN(itemIndex)) pruneIndexes.push(itemIndex)
     }
 
     // 提取 <additional> 标签（多个）
@@ -627,50 +946,91 @@ ${summariesText}
       }
     }
 
-    return { pruneFloors, additionalQueries }
+    if (traceId) {
+      gameStore.updateRagTrace(traceId, {
+        pruneIndexes,
+        enhancedQueries: additionalQueries
+      })
+      appendTraceStep(traceId, 'enhancedRecall', '增强召回分析完成', 'success', {
+        pruneIndexes,
+        additionalQueries
+      })
+    }
+
+    return { pruneIndexes, additionalQueries: uniqueQueries(additionalQueries, 2) }
   } catch (e) {
     console.warn('[Enhanced Recall] Analysis failed:', getErrorMessage(e))
-    return { pruneFloors: [], additionalQueries: [] }
+    appendTraceError(traceId, 'enhancedRecall', e)
+    appendTraceStep(traceId, 'enhancedRecall', '增强召回分析失败', 'warning', null, getErrorMessage(e))
+    return { pruneIndexes: [], additionalQueries: [] }
   }
 }
 
 /**
  * 对补充查询执行二次检索
- * @param {string} query 补充查询文本
+ * @param {string|string[]} queries 补充查询文本或列表
  * @param {Set<number>} excludeFloors 需要排除的楼层集合
  * @param {number} topN 返回的结果数量
  * @returns {Promise<Array<{summary: object, score: number}>>}
  */
-export async function executeAdditionalQuery(query, excludeFloors, topN) {
-  const results = []
+export async function executeAdditionalQuery(queries, excludeFloors, topN, options = {}) {
+  const queryList = uniqueQueries(Array.isArray(queries) ? queries : [queries], 2)
+  if (queryList.length === 0) return []
 
   try {
     const gameStore = useGameStore()
-    const { minVectorScore, minRerankScore, recencyBias, recencyHalfLife } = getEffectiveRAGParams()
+    const { traceId = null, mainQuery = queryList[0] } = options
+    const { topK, minVectorScore, minRerankScore, recencyBias, recencyHalfLife } = getEffectiveRAGParams()
+    const queryBuckets = []
 
-    const candidates = await searchSimilarSummaries(query, Math.min(50, topN * 2), {
-      currentFloor: gameStore.currentFloor,
-      excludeFloors,
-      minVectorScore,
-      recencyBias,
-      recencyHalfLife
-    })
+    for (const query of queryList) {
+      const candidates = await searchSimilarSummaries(query, Math.min(topK, 50), {
+        currentFloor: gameStore.currentFloor,
+        excludeFloors,
+        minVectorScore,
+        recencyBias,
+        recencyHalfLife,
+        traceMeta: {
+          traceId,
+          kind: 'enhanced'
+        }
+      })
 
-    if (candidates.length === 0) return results
+      if (candidates.length > 0) {
+        queryBuckets.push({
+          query,
+          kind: 'enhanced',
+          weight: 0.6,
+          candidates
+        })
+      }
+    }
 
-    // Rerank
-    const reranked = await rerankSummaries(query, candidates, topN, {
+    if (queryBuckets.length === 0) return []
+
+    const fusedCandidates = weightedReciprocalRankFusion(queryBuckets, Math.min(topK, 50))
+    if (traceId) {
+      appendTraceStep(traceId, 'enhancedRecall', '增强召回候选融合', 'success', {
+        fusedCandidates: fusedCandidates.slice(0, TRACE_CANDIDATE_LIMIT).map(item => buildTraceCandidate(item))
+      })
+    }
+
+    return await rerankSummaries(mainQuery, fusedCandidates, topN, {
       currentFloor: gameStore.currentFloor,
       minRerankScore,
       recencyBias,
-      recencyHalfLife
+      recencyHalfLife,
+      traceMeta: {
+        traceId,
+        kind: 'enhanced'
+      }
     })
-    results.push(...reranked)
   } catch (e) {
-    console.warn(`[Enhanced Recall] Additional query failed: "${query}"`, getErrorMessage(e))
+    console.warn(`[Enhanced Recall] Additional query failed: "${queryList.join(' | ')}"`, getErrorMessage(e))
+    appendTraceError(options?.traceId, 'enhancedRecall', e)
   }
 
-  return results
+  return []
 }
 
 // ==================== RAG 历史构建 ====================
@@ -690,8 +1050,25 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
   const settings = gameStore.settings.summarySystem
   const ragSettings = gameStore.settings.ragSystem
   const errors = [] // 收集各环节错误
+  const traceId = gameStore.startRagTrace({
+    floor: currentFloor,
+    userInput,
+    originalQuery: userInput,
+    cacheHit: false,
+    status: 'running',
+    errors: []
+  })
+  const traceStartedAt = Date.now()
 
-  if (!chatLog || chatLog.length === 0) return { history: chatLog, errors }
+  if (!chatLog || chatLog.length === 0) {
+    appendTraceStep(traceId, 'historyBuild', '无历史可检索', 'info')
+    gameStore.finishRagTrace(traceId, {
+      status: 'success',
+      totalMs: Date.now() - traceStartedAt,
+      finalSummaries: []
+    })
+    return { history: chatLog, errors, traceId }
+  }
 
   const result = []
   const recentThreshold = settings.minorSummaryStartFloor || 6
@@ -702,7 +1079,7 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
   if (ragSettings.useContextQuery !== false) {
     const recentSummaries = gameStore.player.summaries
       .filter(s => s.type === 'minor')
-      .sort((a, b) => b.floor - a.floor)
+      .sort((a, b) => getSummaryAnchorFloor(b) - getSummaryAnchorFloor(a))
       .slice(0, 2)
       .reverse()
     if (recentSummaries.length > 0) {
@@ -710,6 +1087,15 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
       query = (summaryContext + '\n' + userInput).slice(0, 2000)
     }
   }
+
+  gameStore.updateRagTrace(traceId, {
+    originalQuery: userInput,
+    contextualQuery: query
+  })
+  appendTraceStep(traceId, 'buildQuery', '构建检索 Query', 'success', {
+    originalQuery: userInput,
+    contextualQuery: query
+  })
 
   // 收集场景NPC上下文（用于主动查询生成）
   const contextNpcs = []
@@ -763,7 +1149,8 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
       // 构建rewriteOptions
       const rewriteOptions = {
         enableProactiveQuery: ragSettings.proactiveQueryGeneration || false,
-        npcContext: contextNpcs
+        npcContext: contextNpcs,
+        traceId
       }
 
       const rewriteResult = await rewriteQueryWithAI(query, gameStore.gameTime, lastRound, rewriteOptions)
@@ -773,7 +1160,7 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
         mainQuery = rewriteResult
       } else if (rewriteResult && typeof rewriteResult === 'object') {
         mainQuery = rewriteResult.mainQuery || query
-        additionalQueries = rewriteResult.additionalQueries || []
+        additionalQueries = uniqueQueries(rewriteResult.additionalQueries || [], 2)
 
         // 记录日志
         if (additionalQueries.length > 0) {
@@ -783,8 +1170,14 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
     } catch (e) {
       console.warn('[RAG] Query rewrite failed:', getErrorMessage(e))
       errors.push({ stage: 'queryRewrite', message: getErrorMessage(e) })
+      appendTraceError(traceId, 'queryRewrite', e)
     }
   }
+
+  gameStore.updateRagTrace(traceId, {
+    mainQuery,
+    proactiveQueries: additionalQueries
+  })
 
   // 1. 分离最近楼层（Layer 1: 原文）和更早楼层
   const recentLogs = []
@@ -806,14 +1199,22 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
   const bridgeSet = new Set(bridgeFloors)
   const recentFloorSet = new Set(recentLogs.map(r => r.floor))
   const excludeSet = new Set([...bridgeSet, ...recentFloorSet])
+  const minorSummaries = gameStore.player.summaries.filter(s => s.type === 'minor')
 
   // 3. 桥接层：查找对应小总结，按楼层升序注入
   const bridgeSummaries = []
+  const usedBridgeKeys = new Set()
   for (const floor of [...bridgeFloors].sort((a, b) => a - b)) {
-    const summary = gameStore.player.summaries.find(
-      s => s.type === 'minor' && s.floor === floor
-    )
+    const summary = minorSummaries
+      .filter(s => getSummaryCoveredFloors(s).includes(floor) && !usedBridgeKeys.has(getSummaryCoverageKey(s)))
+      .sort((a, b) => {
+        const spanA = getSummaryCoveredFloors(a).length
+        const spanB = getSummaryCoveredFloors(b).length
+        if (spanA !== spanB) return spanA - spanB
+        return getSummaryAnchorFloor(b) - getSummaryAnchorFloor(a)
+      })[0]
     if (summary) {
+      usedBridgeKeys.add(getSummaryCoverageKey(summary))
       // 过滤已完成的待办事项
       let filteredContent = summary.content
       if (summary.completedTodos && summary.completedTodos.length > 0) {
@@ -823,12 +1224,17 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
 
       bridgeSummaries.push({
         type: 'summary',
-        content: `[桥接总结 楼层${floor}] ${filteredContent}`,
+        content: `[桥接总结 ${formatSummaryFloorLabel(summary)}] ${filteredContent}`,
         isSummary: true,
         summaryType: 'bridge'
       })
     }
   }
+
+  appendTraceStep(traceId, 'historyBuild', '桥接层构建完成', 'success', {
+    bridgeFloors,
+    bridgeSummaryCount: bridgeSummaries.length
+  })
 
   // 4. RAG 检索（排除原文层和桥接层楼层的总结）
   let ragSummaries = []
@@ -837,49 +1243,83 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
     try {
       const { topK, topN, minVectorScore, minRerankScore, recencyBias, recencyHalfLife } = getEffectiveRAGParams()
 
-      const embeddedSummaries = gameStore.player.summaries.filter(
-        s => s.type === 'minor' && s.embedding && s.embedding.length > 0 && !excludeSet.has(s.floor)
+      const embeddedSummaries = minorSummaries.filter(
+        s => !summaryNeedsEmbeddingRefresh(s) && !summaryIntersectsFloors(s, excludeSet)
       )
-      if (embeddedSummaries.length <= topN) {
-        ragSummaries = embeddedSummaries
-          .map(s => ({
-            summary: s,
-            score: adjustScoreByRecency(1, s.floor, currentFloor, recencyBias, recencyHalfLife)
-          }))
-          .filter(item => item.score >= minRerankScore)
+
+      if (embeddedSummaries.length === 0) {
+        appendTraceStep(traceId, 'embeddingSearch', '无可用向量候选', 'warning', {
+          excludedFloors: [...excludeSet]
+        })
       } else {
-        // 合并主查询和所有补充查询为单次检索
-        let finalQuery = mainQuery
-        if (additionalQueries.length > 0) {
-          finalQuery = [mainQuery, ...additionalQueries].join(' ')
-          console.log('[RAG] Combined main + proactive queries:', finalQuery)
-          console.log('[RAG] Main query:', mainQuery)
-          console.log('[RAG] Additional queries:', additionalQueries)
-        } else {
-          console.log('[RAG] Using main query only:', mainQuery)
+        const seenQueries = new Set()
+        const querySpecs = []
+        for (const spec of [
+          { query: mainQuery, kind: 'main', weight: 1.0 },
+          ...additionalQueries.map(query => ({ query, kind: 'proactive', weight: 0.75 }))
+        ]) {
+          const normalizedQuery = (spec.query || '').trim()
+          if (!normalizedQuery || seenQueries.has(normalizedQuery)) continue
+          seenQueries.add(normalizedQuery)
+          querySpecs.push({ ...spec, query: normalizedQuery })
         }
 
-        // 单次检索（合并主查询和补充查询）
-        const candidates = await searchSimilarSummaries(finalQuery, topK, {
-          currentFloor,
-          excludeFloors: excludeSet,
-          minVectorScore,
-          recencyBias,
-          recencyHalfLife
+        gameStore.updateRagTrace(traceId, {
+          searchQueries: querySpecs
         })
-        if (candidates.length > 0) {
-          ragSummaries = await rerankSummaries(finalQuery, candidates, topN, {
+
+        const queryBuckets = []
+        for (const spec of querySpecs) {
+          const candidates = await searchSimilarSummaries(spec.query, Math.min(topK, embeddedSummaries.length), {
+            currentFloor,
+            excludeFloors: excludeSet,
+            minVectorScore,
+            recencyBias,
+            recencyHalfLife,
+            traceMeta: {
+              traceId,
+              kind: spec.kind
+            }
+          })
+          if (candidates.length > 0) {
+            queryBuckets.push({
+              ...spec,
+              candidates
+            })
+          }
+        }
+
+        if (queryBuckets.length > 0) {
+          const fusedCandidates = weightedReciprocalRankFusion(queryBuckets, Math.min(topK, embeddedSummaries.length))
+          gameStore.updateRagTrace(traceId, {
+            fusedCandidates: fusedCandidates.slice(0, TRACE_CANDIDATE_LIMIT).map(item => buildTraceCandidate(item))
+          })
+          appendTraceStep(traceId, 'queryFusion', '候选融合完成', 'success', {
+            fusedCount: fusedCandidates.length,
+            topCandidates: fusedCandidates.slice(0, TRACE_CANDIDATE_LIMIT).map(item => buildTraceCandidate(item))
+          })
+
+          ragSummaries = await rerankSummaries(mainQuery, fusedCandidates, Math.min(topN, fusedCandidates.length), {
             currentFloor,
             minRerankScore,
             recencyBias,
-            recencyHalfLife
+            recencyHalfLife,
+            traceMeta: {
+              traceId,
+              kind: 'main'
+            }
           })
           console.log('[RAG] Retrieved summaries:', ragSummaries.length)
+        } else {
+          appendTraceStep(traceId, 'embeddingSearch', '所有 Query 都未命中候选', 'warning', {
+            queries: querySpecs.map(item => item.query)
+          })
         }
       }
     } catch (e) {
       console.warn('[RAG] retrieval failed:', getErrorMessage(e))
       errors.push({ stage: 'ragRetrieval', message: getErrorMessage(e) })
+      appendTraceError(traceId, 'ragRetrieval', e)
     }
   }
 
@@ -887,42 +1327,44 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
   if (ragSettings.enhancedRecall && gameStore.settings.assistantAI?.enabled && ragSummaries.length > 0) {
     try {
       // 1. 分析召回结果
-      const { pruneFloors, additionalQueries: enhancedQueries } = await analyzeRecalledSummaries(
-        userInput, ragSummaries, gameStore.gameTime
+      const { pruneIndexes, additionalQueries: enhancedQueries } = await analyzeRecalledSummaries(
+        userInput, ragSummaries, gameStore.gameTime, { traceId }
       )
 
       // 2. 剪枝：移除标记的总结
-      if (pruneFloors.length > 0) {
-        console.log('[Enhanced Recall] Pruning floors:', pruneFloors)
-        ragSummaries = ragSummaries.filter(item => !pruneFloors.includes(item.summary.floor))
+      if (pruneIndexes.length > 0) {
+        console.log('[Enhanced Recall] Pruning item indexes:', pruneIndexes)
+        const pruneSet = new Set(pruneIndexes)
+        ragSummaries = ragSummaries.filter((item, index) => !pruneSet.has(index + 1))
       }
 
       // 3. 补充查询：二次检索（支持多个查询）
       if (enhancedQueries && enhancedQueries.length > 0) {
         console.log('[Enhanced Recall] Additional queries:', enhancedQueries)
-        const enhancedExcludeSet = new Set([
-          ...excludeSet,
-          ...ragSummaries.map(item => item.summary.floor)
-        ])
+        const enhancedExcludeSet = new Set([...excludeSet])
+        for (const item of ragSummaries) {
+          for (const floor of getSummaryCoveredFloors(item.summary)) {
+            enhancedExcludeSet.add(floor)
+          }
+        }
 
         const { topN } = getEffectiveRAGParams()
 
-        // 合并所有补充查询为一个综合查询
-        const combinedEnhancedQuery = enhancedQueries.join(' ')
-        console.log('[Enhanced Recall] Combined query:', combinedEnhancedQuery)
-        console.log('[Enhanced Recall] Original queries:', enhancedQueries)
-
         try {
           const enhancedResults = await executeAdditionalQuery(
-            combinedEnhancedQuery,
+            enhancedQueries,
             enhancedExcludeSet,
-            Math.ceil(topN / 2)
+            Math.ceil(topN / 2),
+            {
+              traceId,
+              mainQuery
+            }
           )
 
           if (enhancedResults.length > 0) {
-            const floorSet = new Set(ragSummaries.map(item => item.summary.floor))
+            const summaryKeySet = new Set(ragSummaries.map(item => getSummaryCoverageKey(item.summary)))
             const uniqueAdditional = enhancedResults.filter(
-              item => !floorSet.has(item.summary.floor)
+              item => !summaryKeySet.has(getSummaryCoverageKey(item.summary))
             )
             if (uniqueAdditional.length > 0) {
               console.log('[Enhanced Recall] Added summaries:', uniqueAdditional.length)
@@ -936,13 +1378,14 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
     } catch (e) {
       console.warn('[Enhanced Recall] Enhancement failed, using original results:', getErrorMessage(e))
       errors.push({ stage: 'enhancedRecall', message: getErrorMessage(e) })
+      appendTraceError(traceId, 'enhancedRecall', e)
     }
   }
 
   // 5. 组装结果：[RAG召回] → [桥接总结] → [最近原文]
 
   if (ragSummaries.length > 0) {
-    const sorted = ragSummaries.sort((a, b) => a.summary.floor - b.summary.floor)
+    const sorted = [...ragSummaries].sort((a, b) => getSummaryAnchorFloor(a.summary) - getSummaryAnchorFloor(b.summary))
     for (const item of sorted) {
       const s = item.summary
       // 过滤已完成的待办事项
@@ -954,7 +1397,7 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
 
       result.push({
         type: 'summary',
-        content: `[RAG召回 楼层${s.floor} | 相关度${(item.score * 100).toFixed(0)}%] ${filteredContent}`,
+        content: `[RAG召回 ${formatSummaryFloorLabel(s)} | 相关度${(item.score * 100).toFixed(0)}%] ${filteredContent}`,
         isSummary: true,
         summaryType: 'rag'
       })
@@ -970,7 +1413,25 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
     })
   }
 
-  return { history: result, errors }
+  const mergedTraceErrors = (() => {
+    const combined = [...(getTrace(traceId)?.errors || []), ...errors]
+    const seen = new Set()
+    return combined.filter(item => {
+      const key = `${item.stage}:${item.message}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  })()
+
+  gameStore.finishRagTrace(traceId, {
+    totalMs: Date.now() - traceStartedAt,
+    status: mergedTraceErrors.length > 0 ? 'warning' : 'success',
+    errors: mergedTraceErrors,
+    finalSummaries: ragSummaries.slice(0, TRACE_CANDIDATE_LIMIT).map(item => buildTraceCandidate(item))
+  })
+
+  return { history: result, errors, traceId }
 }
 
 /**

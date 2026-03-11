@@ -26,6 +26,7 @@ import { electiveActions } from './actions/electiveActions'
 import { yearProgressionActions } from './actions/yearProgressionActions'
 import { academicActions } from './actions/academicActions'
 import { schoolRuleActions } from './actions/schoolRuleActions'
+import { ragDiagnosticsActions } from './actions/ragDiagnosticsActions'
 
 // 重新导出类型，保持对外接口兼容
 export type { CommandEntry, ChatMessage }
@@ -74,6 +75,9 @@ export const useGameStore = defineStore('game', {
     ...academicActions,
 
     // ==================== 校规系统相关 ====================
-    ...schoolRuleActions
+    ...schoolRuleActions,
+
+    // ==================== RAG 运行态诊断 ====================
+    ...ragDiagnosticsActions
   }
 })

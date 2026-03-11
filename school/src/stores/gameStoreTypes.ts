@@ -170,7 +170,97 @@ export interface SummaryData {
   gameDate?: string  // 'YYYY-MM-DD' 格式，diary 必填，minor 建议填
   keywords?: string[]        // 提取的关键词（人物名、地点名）
   embedding?: number[]       // 向量（RAG 模式使用）
+  embeddingMeta?: {
+    model: string
+    dims: number
+    contentHash: string
+    updatedAt: number
+  }
   completedTodos?: number[]  // 已完成的待办事项索引列表
+}
+
+export interface RagTraceCandidate {
+  summaryKey: string
+  floor: number
+  minFloor: number
+  maxFloor: number
+  coveredFloors: number[]
+  type: SummaryData['type']
+  score?: number
+  rawScore?: number
+  sourceQuery?: string
+  sourceKind?: 'main' | 'proactive' | 'enhanced'
+  preview: string
+}
+
+export interface RagTraceStep {
+  id: string
+  stage: string
+  title: string
+  status: 'info' | 'success' | 'warning' | 'error'
+  detail?: string
+  data?: any
+  timestamp: number
+}
+
+export interface RagTraceHistoryMessage {
+  role: 'user' | 'assistant' | 'system'
+  content: string
+}
+
+export interface RagTraceEntry {
+  id: string
+  createdAt: number
+  floor: number
+  userInput: string
+  cacheHit: boolean
+  status: 'running' | 'success' | 'warning' | 'error'
+  totalMs?: number
+  errors: Array<{ stage: string; message: string }>
+  originalQuery?: string
+  contextualQuery?: string
+  mainQuery?: string
+  proactiveQueries?: string[]
+  enhancedQueries?: string[]
+  rewritePrompt?: {
+    system: string
+    user: string
+  }
+  rewriteResponse?: string
+  searchQueries?: Array<{
+    query: string
+    kind: 'main' | 'proactive' | 'enhanced'
+    weight: number
+  }>
+  perQueryCandidates?: Array<{
+    query: string
+    kind: 'main' | 'proactive' | 'enhanced'
+    candidates: RagTraceCandidate[]
+  }>
+  fusedCandidates?: RagTraceCandidate[]
+  rerankRequest?: {
+    query: string
+    topN: number
+    documentsPreview: string[]
+  }
+  rerankResponse?: Array<{ index: number; relevance_score: number }>
+  analyzerPrompt?: {
+    system: string
+    user: string
+  }
+  analyzerResponse?: string
+  pruneIndexes?: number[]
+  finalSummaries?: RagTraceCandidate[]
+  memoryPacket?: string
+  customHistoryPreview?: RagTraceHistoryMessage[]
+  finalUserPrompt?: string
+  steps: RagTraceStep[]
+}
+
+export interface RagDiagnosticsState {
+  traces: RagTraceEntry[]
+  activeTraceId: string | null
+  maxEntries: number
 }
 
 /** RAG 记忆检索系统设置 */
@@ -763,6 +853,11 @@ export interface GameState {
   weeklyPreviewData: any
   showWeeklyPreview: boolean
   lastWeeklyPreviewWeek: number
+  // 待办事项管理
+  completedTodoMarkers: CompletedTodoMarker[]
+  todoMatchingMode: 'keyword' | 'index'
+  todoMatchingStats: TodoMatchingStats
+  ragDiagnostics: RagDiagnosticsState
   worldbookLoadResults: {
     classData: boolean | null
     clubData: boolean | null

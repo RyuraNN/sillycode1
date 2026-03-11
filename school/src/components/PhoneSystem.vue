@@ -21,6 +21,7 @@ import PartTimeJobApp from './PartTimeJobApp.vue'
 import RosterApp from './RosterApp.vue'
 import OriginApp from './OriginApp.vue'
 import SchoolRuleApp from './SchoolRuleApp.vue'
+import RagDiagnosticsPanel from './RagDiagnosticsPanel.vue'
 
 const emit = defineEmits(['close', 'open-app', 'variable-modified'])
 const gameStore = useGameStore()
@@ -988,6 +989,8 @@ const handleHomeClick = () => {
                           <button class="action-btn" style="width: 100%; margin-top: 8px;" @click="showMemoryGraph = true">
                             🕸️ 记忆图谱
                           </button>
+
+                          <RagDiagnosticsPanel />
                         </div>
                       </div>
                     </div>
