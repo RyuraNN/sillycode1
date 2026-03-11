@@ -334,60 +334,21 @@ function weightedReciprocalRankFusion(queryBuckets, topK) {
 
 // ==================== Query 改写 ====================
 
-function normalizeRewriteResponse(result) {
-  if (!result) return ''
-
-  let normalized = result.trim()
-
-  normalized = normalized.replace(/^```(?:xml)?\s*/i, '').replace(/\s*```$/i, '').trim()
-  normalized = normalized.replace(/[＜＜]/g, '<').replace(/[＞＞]/g, '>')
-  normalized = normalized.replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
-
-  return normalized
-}
-
-function extractXmlTagContent(text, tagName) {
-  if (!text) return []
-
-  const matches = []
-  const pairedTagRegex = new RegExp(`<${tagName}(?:\s+[^>]*)?>([\\s\\S]*?)<\/${tagName}>`, 'gi')
-  for (const match of text.matchAll(pairedTagRegex)) {
-    const value = match[1].trim()
-    if (value) matches.push(value)
-  }
-
-  if (matches.length > 0) return matches
-
-  const selfClosingRegex = new RegExp(`<${tagName}(?:\s+[^>]*)?\s*\/?>`, 'i')
-  if (selfClosingRegex.test(text)) {
-    return ['']
-  }
-
-  return []
-}
-
 function parseRewriteXmlResult(result, userInput) {
-  const normalized = normalizeRewriteResponse(result)
-  const mainMatches = extractXmlTagContent(normalized, 'main')
+  const mainMatch = result.match(/<main>([\s\S]*?)<\/main>/i)
   const additionalQueries = []
-  const additionalMatches = extractXmlTagContent(normalized, 'additional')
+  const additionalMatches = result.matchAll(/<additional>([\s\S]*?)<\/additional>/gi)
 
-  for (const query of additionalMatches) {
+  for (const match of additionalMatches) {
+    const query = match[1].trim()
     if (query && additionalQueries.length < 2) {
-      additionalQueries.push(query.trim())
+      additionalQueries.push(query)
     }
   }
 
-  const fallbackMainMatch = normalized.match(/(?:^|\n)\s*main\s*[:：]\s*(.+)$/im)
-  const fallbackMain = fallbackMainMatch ? fallbackMainMatch[1].trim() : ''
-
-  const inferredMainQuery = mainMatches.length > 0
-    ? mainMatches[0].trim()
-    : fallbackMain
-
   return {
-    isValid: Boolean(inferredMainQuery),
-    mainQuery: inferredMainQuery || userInput,
+    isValid: Boolean(mainMatch),
+    mainQuery: mainMatch ? mainMatch[1].trim() : userInput,
     additionalQueries
   }
 }
@@ -479,7 +440,7 @@ export async function rewriteQueryWithAI(userInput, gameTime, lastRound, options
 </queries>
 
 示例：
-<queries><main>花翎回应平泽唯的轻音部邀请，准备悄悄进入2年B班教室就座</main></queries>`
+<queries><main>玩家回应平泽唯的轻音部邀请，准备悄悄进入2年B班教室就座</main></queries>`
   } else {
     systemPrompt += `
 6. 直接输出改写后的文本，不要解释
@@ -554,14 +515,7 @@ ${contextBlock}${npcContextBlock}
     }
 
     if (!parsed.isValid) {
-      console.warn('[RAG] Query rewrite returned invalid XML, fallback to original input')
-      if (traceId) {
-        appendTraceStep(traceId, 'queryRewrite', '查询改写格式无效，回退原始输入', 'warning', {
-          fallbackQuery: userInput,
-          invalidResponsePreview: result.slice(0, 120)
-        })
-      }
-      return { mainQuery: userInput, additionalQueries: [] }
+      throw new Error(`Query rewrite 返回了不完整 XML: ${result.slice(0, 120)}`)
     }
 
     if (traceId) {
