@@ -53,6 +53,24 @@ function clonePlayerForSnapshot(player: any) {
   return stripEmbeddingData(playerCopy)
 }
 
+async function rehydratePlayerSummaryEmbeddings(store: any) {
+  if (!store?.player?.summaries || store.player.summaries.length === 0) return
+
+  try {
+    const { rehydrateSummaryEmbeddings } = await import('../../utils/ragService')
+    const result = await rehydrateSummaryEmbeddings({
+      runId: store.currentRunId,
+      summaries: store.player.summaries
+    })
+
+    if (result?.restored > 0) {
+      console.log(`[snapshotActions] Rehydrated ${result.restored} summary embeddings for run ${store.currentRunId}`)
+    }
+  } catch (e) {
+    console.warn('[snapshotActions] Failed to rehydrate summary embeddings:', e)
+  }
+}
+
 export const snapshotActions = {
   /**
    * 创建存档快照
@@ -391,6 +409,8 @@ export const snapshotActions = {
 
     this.currentRunId = state.currentRunId || Date.now().toString(36)
     this.currentFloor = state.currentFloor || 0
+
+    await rehydratePlayerSummaryEmbeddings(this)
 
     this.saveToStorage(true)
 
@@ -929,5 +949,7 @@ export const snapshotActions = {
     if (data.currentRunId !== undefined && data.currentRunId !== null) this.currentRunId = data.currentRunId
     // @ts-ignore
     if (data.currentFloor !== undefined && data.currentFloor !== null) this.currentFloor = data.currentFloor
+
+    await rehydratePlayerSummaryEmbeddings(this)
   }
 }

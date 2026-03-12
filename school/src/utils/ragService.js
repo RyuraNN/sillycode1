@@ -3,6 +3,7 @@ import { cleanImageTags, removeThinking } from './summaryManager'
 import { getNpcsAtLocation } from './npcScheduleSystem.js'
 import { validateAssistantAIConfig } from './assistantAI'
 import { getErrorMessage } from './errorUtils'
+import { loadSummaryEmbeddings, saveSummaryEmbedding } from './indexedDB'
 
 /**
  * RAG 记忆检索服务
@@ -171,7 +172,7 @@ function getSummaryAnchorFloor(summary) {
   return getSummaryMaxFloor(summary)
 }
 
-function getSummaryCoverageKey(summary) {
+export function getSummaryCoverageKey(summary) {
   const floors = getSummaryCoveredFloors(summary)
   return `${summary?.type || 'minor'}:${floors.join(',')}`
 }
@@ -559,6 +560,21 @@ export async function embedSummary(summary) {
         contentHash: hashText(embeddingText),
         updatedAt: Date.now()
       }
+
+      if (gameStore.currentRunId && gameStore.currentRunId !== 'temp_editing') {
+        try {
+          await saveSummaryEmbedding(gameStore.currentRunId, getSummaryCoverageKey(summary), {
+            embedding: [...embedding],
+            embeddingMeta: { ...summary.embeddingMeta },
+            floor: summary?.floor,
+            type: summary?.type,
+            updatedAt: Date.now()
+          })
+        } catch (persistError) {
+          console.warn('[RAG] Failed to persist summary embedding:', getErrorMessage(persistError))
+        }
+      }
+
       return true
     }
     return false
@@ -572,6 +588,55 @@ export async function embedSummary(summary) {
       embeddingText: clampTraceText(buildEmbeddingText(summary))
     }, getErrorMessage(e))
     return false
+  }
+}
+
+export async function rehydrateSummaryEmbeddings(options = {}) {
+  const gameStore = useGameStore()
+  const runId = options.runId || gameStore.currentRunId
+  const summaries = Array.isArray(options.summaries)
+    ? options.summaries
+    : (gameStore.player?.summaries || [])
+  const minorSummaries = summaries.filter(summary => summary?.type === 'minor')
+  const missingSummaries = minorSummaries.filter(summary => {
+    const embedding = Array.isArray(summary?.embedding) ? summary.embedding : []
+    return embedding.length === 0 || !summary?.embeddingMeta
+  })
+
+  if (!runId || runId === 'temp_editing' || minorSummaries.length === 0) {
+    return { restored: 0, total: minorSummaries.length, cacheSize: 0 }
+  }
+
+  if (!options.force && missingSummaries.length === 0) {
+    return { restored: 0, total: minorSummaries.length, cacheSize: 0, skipped: true }
+  }
+
+  const cache = await loadSummaryEmbeddings(runId)
+  if (!cache || cache.size === 0) {
+    return { restored: 0, total: minorSummaries.length, cacheSize: 0 }
+  }
+
+  let restored = 0
+  for (const summary of missingSummaries) {
+    const cached = cache.get(getSummaryCoverageKey(summary))
+    if (!cached?.embedding || !cached?.embeddingMeta) continue
+
+    summary.embedding = Array.isArray(cached.embedding) ? [...cached.embedding] : cached.embedding
+    summary.embeddingMeta = { ...cached.embeddingMeta }
+
+    if (summaryNeedsEmbeddingRefresh(summary)) {
+      delete summary.embedding
+      delete summary.embeddingMeta
+      continue
+    }
+
+    restored++
+  }
+
+  return {
+    restored,
+    total: minorSummaries.length,
+    cacheSize: cache.size
   }
 }
 
@@ -1116,6 +1181,16 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
       finalSummaries: []
     })
     return { history: chatLog, errors, traceId }
+  }
+
+  try {
+    const hydration = await rehydrateSummaryEmbeddings()
+    if (hydration.restored > 0) {
+      appendTraceStep(traceId, 'embeddingHydrate', '恢复本地 RAG 向量缓存', 'success', hydration)
+    }
+  } catch (e) {
+    console.warn('[RAG] Failed to rehydrate cached embeddings:', getErrorMessage(e))
+    appendTraceError(traceId, 'embeddingHydrate', e)
   }
 
   const result = []

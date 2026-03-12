@@ -9,6 +9,7 @@ const DB_VERSION = 3 // Incremented version for snapshot store
 const STORE_NAME = 'backups' // Keep for roster backup
 const DATA_STORE_NAME = 'game_data' // For general game data
 const SNAPSHOT_STORE_NAME = 'snapshot_data' // New store for heavy snapshot data
+const SUMMARY_EMBEDDING_PREFIX = 'rag_embedding:'
 
 let dbInstance = null
 
@@ -159,6 +160,100 @@ export async function removeItem(key, storeName = DATA_STORE_NAME) {
     console.error(`[IndexedDB] Error removing item from ${storeName}:`, e)
     throw e
   }
+}
+
+async function getEntriesByPrefix(prefix, storeName = DATA_STORE_NAME) {
+  try {
+    const db = await openDB()
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([storeName], 'readonly')
+      const store = transaction.objectStore(storeName)
+      const request = store.openCursor()
+      const results = []
+
+      request.onsuccess = (event) => {
+        const cursor = event.target.result
+        if (!cursor) {
+          resolve(results)
+          return
+        }
+
+        if (typeof cursor.key === 'string' && cursor.key.startsWith(prefix)) {
+          results.push({ key: cursor.key, value: cursor.value })
+        }
+        cursor.continue()
+      }
+
+      request.onerror = (event) => reject(event.target.error)
+    })
+  } catch (e) {
+    console.error(`[IndexedDB] Error scanning items by prefix from ${storeName}:`, e)
+    throw e
+  }
+}
+
+async function removeItemsByPrefix(prefix, storeName = DATA_STORE_NAME) {
+  try {
+    const db = await openDB()
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([storeName], 'readwrite')
+      const store = transaction.objectStore(storeName)
+      const request = store.openCursor()
+
+      request.onsuccess = (event) => {
+        const cursor = event.target.result
+        if (!cursor) {
+          resolve()
+          return
+        }
+
+        if (typeof cursor.key === 'string' && cursor.key.startsWith(prefix)) {
+          cursor.delete()
+        }
+        cursor.continue()
+      }
+
+      request.onerror = (event) => reject(event.target.error)
+    })
+  } catch (e) {
+    console.error(`[IndexedDB] Error removing items by prefix from ${storeName}:`, e)
+    throw e
+  }
+}
+
+function getSummaryEmbeddingStorageKey(runId, summaryKey) {
+  return `${SUMMARY_EMBEDDING_PREFIX}${runId}:${summaryKey}`
+}
+
+export async function saveSummaryEmbedding(runId, summaryKey, data) {
+  if (!runId || !summaryKey) return
+  return setItem(getSummaryEmbeddingStorageKey(runId, summaryKey), data, DATA_STORE_NAME)
+}
+
+export async function loadSummaryEmbeddings(runId) {
+  if (!runId) return new Map()
+
+  const prefix = `${SUMMARY_EMBEDDING_PREFIX}${runId}:`
+  const entries = await getEntriesByPrefix(prefix, DATA_STORE_NAME)
+  const result = new Map()
+
+  for (const entry of entries) {
+    const summaryKey = entry.key.slice(prefix.length)
+    result.set(summaryKey, entry.value)
+  }
+
+  return result
+}
+
+export async function removeSummaryEmbedding(runId, summaryKey) {
+  if (!runId || !summaryKey) return
+  return removeItem(getSummaryEmbeddingStorageKey(runId, summaryKey), DATA_STORE_NAME)
+}
+
+export async function clearSummaryEmbeddings(runId) {
+  if (!runId) return
+  const prefix = `${SUMMARY_EMBEDDING_PREFIX}${runId}:`
+  return removeItemsByPrefix(prefix, DATA_STORE_NAME)
 }
 
 // Specialized helpers for Roster Backup
@@ -533,4 +628,3 @@ export async function getAllSnapshotIds() {
     return []
   }
 }
-

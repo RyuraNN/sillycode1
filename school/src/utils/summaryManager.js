@@ -265,9 +265,9 @@ export async function generateMinorSummary(content, floor, useAssistant = true, 
       timestamp: Date.now(),
       gameDate
     }
-    addSummary(summary)
+    const storedSummary = addSummary(summary)
     console.log(`[SummaryManager] Using pre-generated minor summary for floor ${floor}`)
-    return { success: true, summary }
+    return { success: true, summary: storedSummary }
   }
 
   // 如果没有预生成总结，且辅助AI未开启，则不再单独调用主AI（根据新需求）
@@ -316,10 +316,10 @@ export async function generateMinorSummary(content, floor, useAssistant = true, 
     }
 
     // 保存到store
-    addSummary(summary)
+    const storedSummary = addSummary(summary)
 
     console.log(`[SummaryManager] Generated minor summary for floor ${floor}`)
-    return { success: true, summary }
+    return { success: true, summary: storedSummary }
   } catch (e) {
     console.error('[SummaryManager] Error generating minor summary:', e)
     return { success: false, error: getErrorMessage(e, '生成小总结时发生错误') }
@@ -385,10 +385,10 @@ export async function generateMajorSummary(floors) {
     }
 
     // 保存到store
-    addSummary(summary)
+    const storedSummary = addSummary(summary)
 
     console.log(`[SummaryManager] Generated major summary covering floors ${floors.join(', ')}`)
-    return { success: true, summary }
+    return { success: true, summary: storedSummary }
   } catch (e) {
     console.error('[SummaryManager] Error generating major summary:', e)
     return { success: false, error: getErrorMessage(e) }
@@ -414,11 +414,13 @@ function addSummary(summary) {
   )
   
   if (existingIndex >= 0) {
-    // 替换现有的
-    gameStore.player.summaries[existingIndex] = normalizedSummary
+    // 更新现有的，并保留原对象引用
+    Object.assign(gameStore.player.summaries[existingIndex], normalizedSummary)
+    return gameStore.player.summaries[existingIndex]
   } else {
     // 添加新的
     gameStore.player.summaries.push(normalizedSummary)
+    return normalizedSummary
   }
 }
 
@@ -560,9 +562,9 @@ export async function generateDiary(gameDate, options = {}) {
       return { success: true, content: diaryContent, summary }
     }
 
-    addSummary(summary)
+    const storedSummary = addSummary(summary)
     console.log(`[SummaryManager] Generated diary for ${gameDate}, covering floors: ${coveredFloors.join(',')}`)
-    return { success: true, summary }
+    return { success: true, summary: storedSummary }
   } catch (e) {
     console.error(`[SummaryManager] Error generating diary for ${gameDate}:`, e)
     return { success: false, error: getErrorMessage(e) }
@@ -1092,10 +1094,10 @@ ${mergedContent}`
             timestamp: Date.now(),
             ...(gameDate && { gameDate })
           }
-          addSummary(summary)
+          const storedSummary = addSummary(summary)
           // 自动计算向量
           if (options.autoEmbed) {
-            await embedSummary(summary)
+            await embedSummary(storedSummary)
           }
           console.log(`[SummaryManager] Merged minor summary for floors: ${coveredGroupFloors.join(',')}`)
         } else {
