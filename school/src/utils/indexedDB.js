@@ -296,19 +296,62 @@ export async function getRosterPresets() {
 }
 
 // Snapshot Data Helpers
+// 大型累积字段单独存储，避免单次写入过大导致 QuotaExceededError
+const BULKY_FIELD_SUFFIXES = ['_summaries', '_persistentFacts']
+
 export async function saveSnapshotData(id, data) {
-  // console.log(`[IndexedDB] Saving snapshot data for ${id}...`)
   assertSerializableInDev(data, `snapshot:${id}`)
+
+  // 从 gameState 中提取大型累积字段，单独存储
+  const gameState = data?.gameState
+  if (gameState?.player) {
+    const player = gameState.player
+    for (const suffix of BULKY_FIELD_SUFFIXES) {
+      const field = suffix.slice(1) // 去掉前缀 '_'
+      if (Array.isArray(player[field]) && player[field].length > 0) {
+        const fieldData = player[field]
+        player[field] = [] // 主体中置空
+        player[`${suffix}Count`] = fieldData.length // 记录条目数用于校验
+        // 异步写入独立 key
+        await setItem(`${id}${suffix}`, fieldData, SNAPSHOT_STORE_NAME)
+      }
+    }
+  }
+
   return setItem(id, data, SNAPSHOT_STORE_NAME)
 }
 
 export async function getSnapshotData(id) {
-  // console.log(`[IndexedDB] Loading snapshot data for ${id}...`)
-  return getItem(id, SNAPSHOT_STORE_NAME)
+  const data = await getItem(id, SNAPSHOT_STORE_NAME)
+  if (!data?.gameState?.player) return data
+
+  // 重新组装大型累积字段
+  const player = data.gameState.player
+  for (const suffix of BULKY_FIELD_SUFFIXES) {
+    const field = suffix.slice(1)
+    const countKey = `${suffix}Count`
+    if (player[countKey] > 0 || (Array.isArray(player[field]) && player[field].length === 0)) {
+      const fieldData = await getItem(`${id}${suffix}`, SNAPSHOT_STORE_NAME)
+      if (fieldData) {
+        player[field] = fieldData
+      }
+      delete player[countKey]
+    }
+  }
+
+  return data
 }
 
 export async function removeSnapshotData(id) {
   console.log(`[IndexedDB] Removing snapshot data for ${id}...`)
+  // 同时删除分片存储的大型字段
+  for (const suffix of BULKY_FIELD_SUFFIXES) {
+    try {
+      await removeItem(`${id}${suffix}`, SNAPSHOT_STORE_NAME)
+    } catch (e) {
+      // 忽略不存在的 key
+    }
+  }
   return removeItem(id, SNAPSHOT_STORE_NAME)
 }
 

@@ -14,6 +14,7 @@ import {
   createLightSnapshot,
   fastClone,
   stripEmbeddingData,
+  stripBulkyFields,
   type DeltaSnapshot
 } from '../../utils/snapshotUtils'
 import { detectCardEdition, GAME_VERSION } from '../../utils/editionDetector'
@@ -33,9 +34,10 @@ function createLightChatLogEntry(log: ChatLogEntry): ChatLogEntry {
   }
 
   // 深拷贝 snapshot，使用 fastClone 移除 Proxy 和不可克隆对象
+  // 同时剥离大型累积字段（summaries, persistentFacts），这些数据在 gameState 存档中独立保存
   if (log.snapshot) {
     try {
-      lightLog.snapshot = stripEmbeddingData(fastClone(log.snapshot))
+      lightLog.snapshot = stripBulkyFields(stripEmbeddingData(fastClone(log.snapshot)))
     } catch (e) {
       console.warn('[createLightChatLogEntry] Failed to serialize snapshot:', e)
       // 如果序列化失败，跳过该 snapshot
@@ -167,6 +169,25 @@ export const snapshotActions = {
    */
   async createAutoSave(this: any, chatLog: ChatLogEntry[], messageIndex: number, options: { rewriteFromIndex?: number } = {}) {
     try {
+      // 存档前检查存储空间
+      try {
+        const { getStorageEstimate } = await import('../../utils/indexedDB')
+        const estimate = await getStorageEstimate()
+        if (estimate.usagePercent > 90) {
+          console.warn(`[createAutoSave] 存储空间紧张: ${estimate.usageMB}MB / ${estimate.quotaMB}MB (${estimate.usagePercent}%)`)
+          this.saveError = `存储空间不足 (${Math.round(estimate.usagePercent)}%)，建议清理旧存档`
+          // 尝试自动清理旧存档
+          if (this.autoCleanupSnapshots) {
+            await this.autoCleanupSnapshots()
+          }
+        } else if (estimate.usagePercent > 80) {
+          console.warn(`[createAutoSave] 存储空间预警: ${estimate.usageMB}MB / ${estimate.quotaMB}MB (${estimate.usagePercent}%)`)
+        }
+      } catch (e) {
+        // 存储检查失败不阻塞存档
+        console.warn('[createAutoSave] Storage estimate check failed:', e)
+      }
+
       const playerCopy = clonePlayerForSnapshot(this.player)
       const gameState: GameStateData = fastClone({
         player: playerCopy,
@@ -605,7 +626,8 @@ export const snapshotActions = {
    */
   createMessageSnapshot(this: any, previousSnapshot: any, floor: number, chatLog?: any[]): any {
     // 统一使用增量模式
-    const currentState = this.getGameState()
+    // 获取精简版 gameState（不含 summaries/persistentFacts），用于内联快照
+    const currentState = stripBulkyFields(this.getGameState())
 
     // 如果没有上一个快照，必须创建基准快照
     if (!previousSnapshot) {
@@ -827,7 +849,8 @@ export const snapshotActions = {
    * @returns 更新后的快照
    */
   updateMessageSnapshot(this: any, existingSnapshot: any, chatLog?: any[]): any {
-    const currentState = this.getGameState()
+    // 获取精简版 gameState（不含 summaries/persistentFacts），用于内联快照
+    const currentState = stripBulkyFields(this.getGameState())
 
     // 如果没有现有快照，创建完整快照
     if (!existingSnapshot) {
@@ -872,6 +895,20 @@ export const snapshotActions = {
    */
   async restoreGameState(this: any, state: GameStateData) {
     const data = fastClone(state)
+
+    // 【修复】如果内联快照中 summaries/persistentFacts 被剥离（空数组），
+    // 保留当前 store 中的数据（这些累积数据在 gameState 存档中独立维护）
+    if (data.player) {
+      if (Array.isArray(data.player.summaries) && data.player.summaries.length === 0 && (data.player as any)._summariesCount > 0) {
+        // 快照中的 summaries 被剥离过，保留 store 中的当前数据
+        data.player.summaries = this.player?.summaries || []
+        delete (data.player as any)._summariesCount
+      }
+      if (Array.isArray(data.player.persistentFacts) && data.player.persistentFacts.length === 0 && (data.player as any)._persistentFactsCount > 0) {
+        data.player.persistentFacts = this.player?.persistentFacts || []
+        delete (data.player as any)._persistentFactsCount
+      }
+    }
 
     // 【修复】状态合并
     const defaultPlayer = createInitialState().player

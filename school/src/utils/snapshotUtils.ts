@@ -109,6 +109,33 @@ export const fastClone = <T>(obj: T): T => {
   }
 }
 
+/**
+ * 需要从内联快照中剥离的大型累积字段路径
+ * 这些字段随游戏轮次线性增长，不应存储在每条消息的快照中
+ * 它们在 gameState 存档中独立保存，恢复时会被重新组装
+ */
+const BULKY_PLAYER_FIELDS = ['summaries', 'persistentFacts'] as const
+
+/**
+ * 从快照中剥离大型累积字段（summaries, persistentFacts）
+ * 用于减少内联快照的存储开销
+ * @param snapshot 游戏状态快照（会被就地修改）
+ * @returns 修改后的快照
+ */
+export function stripBulkyFields<T>(snapshot: T): T {
+  if (!snapshot || typeof snapshot !== 'object') return snapshot
+  const player = (snapshot as any).player
+  if (!player) return snapshot
+  for (const field of BULKY_PLAYER_FIELDS) {
+    if (Array.isArray(player[field]) && player[field].length > 0) {
+      // 保留条目数量标记，方便调试和回滚校验
+      player[`_${field}Count`] = player[field].length
+      player[field] = []
+    }
+  }
+  return snapshot
+}
+
 export function stripEmbeddingData<T>(value: T, seen = new WeakSet<object>()): T {
   if (!value || typeof value !== 'object') return value
 
@@ -333,11 +360,10 @@ function compareNpcArray(
  */
 function shouldSkipField(key: string): boolean {
   // 跳过一些不需要记录差异的大型字段或内部字段
-  const skipFields = [
-    '_internal',   // 内部字段
-    '_cache'       // 缓存字段
-  ]
-  return skipFields.includes(key)
+  if (key === '_internal' || key === '_cache') return true
+  // 跳过 stripBulkyFields 生成的计数标记
+  if (key === '_summariesCount' || key === '_persistentFactsCount') return true
+  return false
 }
 
 /**
