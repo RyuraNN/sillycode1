@@ -3,7 +3,11 @@ import { cleanImageTags, removeThinking } from './summaryManager'
 import { getNpcsAtLocation } from './npcScheduleSystem.js'
 import { validateAssistantAIConfig } from './assistantAI'
 import { getErrorMessage } from './errorUtils'
-import { loadSummaryEmbeddings, saveSummaryEmbedding } from './indexedDB'
+import { loadSummaryEmbeddings, saveSummaryEmbedding, persistMemoryPoolState, retrieveMemoryPoolState } from './indexedDB'
+import { buildEntityLookup, insertIntoEntityLookup, queryEntityLookup, serializeEntityLookup, deserializeEntityLookup } from './memoryEntityIndex'
+import { resolveQueryAnchors, spreadAssociationSignal, signalToCandidates } from './memoryGraphActivation'
+import { createMemoryHolder, progressTurn, exportHolderSnapshot, importHolderSnapshot, extractSalienceMap } from './activeMemoryPool'
+import { queryRelevantFacts, formatFactsAsContext } from './persistentFactStore'
 
 /**
  * RAG 记忆检索服务
@@ -131,6 +135,339 @@ const TRACE_TEXT_LIMIT = 6000
 const TRACE_CANDIDATE_LIMIT = 10
 const TRACE_DOC_LIMIT = 10
 const RRF_K = 20
+
+// Phase 0 常量
+const ENTITY_MATCH_BOOST = 0.05
+const TEMPORAL_WINDOW_RADIUS = 1
+const NEIGHBOR_SCORE_RATIO = 0.6
+const RECALL_BONUS_FACTOR = 0.02
+
+// ==================== Phase 0: 快速收益函数 ====================
+
+/**
+ * Phase 0.1: 检测用户输入中提及的已知实体（NPC 名、地点）
+ * @param {string} inputText 用户输入文本
+ * @param {string[]} knownNpcNames 已知 NPC 名字列表
+ * @returns {string[]} 命中的实体名数组
+ */
+export function detectMentionedEntities(inputText, knownNpcNames) {
+  if (!inputText || !Array.isArray(knownNpcNames)) return []
+  const mentioned = []
+  for (const name of knownNpcNames) {
+    if (name && inputText.includes(name)) {
+      mentioned.push(name)
+    }
+  }
+  return mentioned
+}
+
+/**
+ * Phase 0.3: 计算召回频次奖励分
+ * @param {number} score 基础分数
+ * @param {number} hitCount 召回命中次数
+ * @returns {number} 叠加奖励后的分数
+ */
+export function computeRecallBonus(score, hitCount) {
+  return score + Math.log(1 + (hitCount || 0)) * RECALL_BONUS_FACTOR
+}
+
+/**
+ * Phase 0.2: 时序上下文窗口扩展
+ * 对命中的 summary 拉取楼层 ±windowRadius 的相邻 minor summary
+ * @param {Array<{summary: object, score: number}>} retrievedItems 已检索到的结果
+ * @param {Array} allMinors 所有 minor summary
+ * @param {number} windowRadius 窗口半径（默认1）
+ * @returns {Array<{summary: object, score: number}>} 扩展后的结果
+ */
+export function expandTemporalContext(retrievedItems, allMinors, windowRadius = TEMPORAL_WINDOW_RADIUS) {
+  if (!retrievedItems || retrievedItems.length === 0 || !allMinors || allMinors.length === 0) {
+    return retrievedItems || []
+  }
+
+  const existingKeys = new Set(retrievedItems.map(item => getSummaryCoverageKey(item.summary)))
+  const expanded = [...retrievedItems]
+
+  for (const item of retrievedItems) {
+    const anchorFloor = getSummaryAnchorFloor(item.summary)
+    if (!Number.isFinite(anchorFloor)) continue
+
+    for (let offset = -windowRadius; offset <= windowRadius; offset++) {
+      if (offset === 0) continue
+      const targetFloor = anchorFloor + offset
+
+      for (const candidate of allMinors) {
+        const candidateKey = getSummaryCoverageKey(candidate)
+        if (existingKeys.has(candidateKey)) continue
+
+        const coveredFloors = getSummaryCoveredFloors(candidate)
+        if (coveredFloors.includes(targetFloor)) {
+          existingKeys.add(candidateKey)
+          expanded.push({
+            summary: candidate,
+            score: item.score * NEIGHBOR_SCORE_RATIO,
+            rawScore: (item.rawScore ?? item.score) * NEIGHBOR_SCORE_RATIO
+          })
+        }
+      }
+    }
+  }
+
+  return expanded.sort((a, b) => b.score - a.score)
+}
+
+// ==================== Phase 1: 多路融合检索 ====================
+
+// 模块级缓存：实体索引
+let _cachedEntityLookup = null
+let _cachedEntityLookupVersion = 0
+
+/**
+ * 获取或懒构建实体倒排索引（带缓存）
+ * @returns {{ npcIndex: Map, locationIndex: Map, coPresenceGraph: Map }}
+ */
+export function getOrBuildEntityLookup() {
+  const gameStore = useGameStore()
+  const summaries = gameStore.player?.summaries || []
+  const minorCount = summaries.filter(s => s.type === 'minor').length
+
+  if (_cachedEntityLookup && _cachedEntityLookupVersion === minorCount) {
+    return _cachedEntityLookup
+  }
+
+  _cachedEntityLookup = buildEntityLookup(summaries)
+  _cachedEntityLookupVersion = minorCount
+  return _cachedEntityLookup
+}
+
+/**
+ * 增量更新实体索引（新 summary 生成后调用）
+ * @param {object} summary 新增的 SummaryData
+ */
+export function updateEntityLookupIncremental(summary) {
+  if (!_cachedEntityLookup || summary?.type !== 'minor') return
+  insertIntoEntityLookup(_cachedEntityLookup, summary)
+  _cachedEntityLookupVersion++
+}
+
+/**
+ * 强制重建实体索引（rollback 等场景）
+ */
+export function invalidateEntityLookup() {
+  _cachedEntityLookup = null
+  _cachedEntityLookupVersion = 0
+}
+
+// 模块级缓存：记忆保持器
+let _memoryHolder = null
+
+/**
+ * 获取或初始化记忆保持器
+ */
+async function getOrInitHolder() {
+  if (_memoryHolder) return _memoryHolder
+
+  const gameStore = useGameStore()
+  const runId = gameStore.currentRunId
+  if (runId && runId !== 'temp_editing') {
+    try {
+      const saved = await retrieveMemoryPoolState(runId)
+      if (saved) {
+        _memoryHolder = importHolderSnapshot(saved)
+        return _memoryHolder
+      }
+    } catch (e) {
+      console.warn('[RAG] Failed to restore memory holder:', getErrorMessage(e))
+    }
+  }
+
+  _memoryHolder = createMemoryHolder()
+  return _memoryHolder
+}
+
+/**
+ * 异步持久化记忆保持器（非阻塞）
+ */
+function persistHolderAsync(holder) {
+  const gameStore = useGameStore()
+  const runId = gameStore.currentRunId
+  if (!runId || runId === 'temp_editing') return
+
+  persistMemoryPoolState(runId, exportHolderSnapshot(holder)).catch(e => {
+    console.warn('[RAG] Failed to persist memory holder:', getErrorMessage(e))
+  })
+}
+
+/**
+ * 重置记忆保持器（rollback 等场景）
+ */
+export function invalidateMemoryHolder() {
+  _memoryHolder = null
+}
+
+/**
+ * Phase 1.3: 精确关键词匹配路径
+ * @param {string} query 查询文本
+ * @param {Array} summaries 可搜索的 minor summaries
+ * @param {string[]} knownEntities 已知实体名列表
+ * @returns {Array<{ summary: object, score: number }>}
+ */
+function preciseKeywordMatch(query, summaries, knownEntities) {
+  if (!query || !summaries || summaries.length === 0) return []
+
+  // 从 query 中提取提及的已知实体
+  const mentionedInQuery = new Set()
+  for (const entity of knownEntities) {
+    if (entity && query.includes(entity)) {
+      mentionedInQuery.add(entity)
+    }
+  }
+
+  if (mentionedInQuery.size === 0) return []
+
+  const results = []
+  for (const summary of summaries) {
+    const keywords = Array.isArray(summary.keywords) ? summary.keywords : extractKeywordsFromSummary(summary.content)
+    const matchCount = keywords.filter(kw => mentionedInQuery.has(kw)).length
+    if (matchCount > 0) {
+      // 分数：匹配实体数 / 查询实体数，归一化到 0-1
+      const score = matchCount / mentionedInQuery.size
+      results.push({ summary, score })
+    }
+  }
+
+  return results.sort((a, b) => b.score - a.score)
+}
+
+/**
+ * Phase 1.3: 三路融合检索编排
+ * @param {string} mainQuery 主查询
+ * @param {string[]} entityTerms 实体关键词
+ * @param {{ npcIndex: Map, locationIndex: Map, coPresenceGraph: Map }} entityLookup
+ * @param {object} options 配置
+ * @returns {Promise<Array<{ summary: object, score: number }>>}
+ */
+async function orchestrateMultiPathSearch(mainQuery, entityTerms, entityLookup, options = {}) {
+  const {
+    topK = 50,
+    currentFloor = null,
+    excludeFloors = new Set(),
+    minVectorScore = 0,
+    recencyBias = 0,
+    recencyHalfLife = 60,
+    traceId = null,
+    additionalQueries = [],
+    vectorPathWeight = 0.45,
+    graphPathWeight = 0.30,
+    keywordPathWeight = 0.25
+  } = options
+
+  const gameStore = useGameStore()
+  const minorSummaries = gameStore.player.summaries.filter(
+    s => s.type === 'minor' && !summaryIntersectsFloors(s, excludeFloors)
+  )
+  const embeddedSummaries = minorSummaries.filter(s => !summaryNeedsEmbeddingRefresh(s))
+
+  // 构建 summaryKey → summary 映射（用于图谱路径）
+  const summaryKeyMap = new Map()
+  for (const s of minorSummaries) {
+    summaryKeyMap.set(getSummaryCoverageKey(s), s)
+  }
+
+  const allBuckets = []
+
+  // 路径 A (向量): 现有 searchSimilarSummaries
+  if (embeddedSummaries.length > 0) {
+    const seenQueries = new Set()
+    const querySpecs = [
+      { query: mainQuery, kind: 'main', weight: 1.0 },
+      ...additionalQueries.map(q => ({ query: q, kind: 'proactive', weight: 0.75 }))
+    ]
+
+    for (const spec of querySpecs) {
+      const normalizedQuery = (spec.query || '').trim()
+      if (!normalizedQuery || seenQueries.has(normalizedQuery)) continue
+      seenQueries.add(normalizedQuery)
+
+      const candidates = await searchSimilarSummaries(spec.query, Math.min(topK, embeddedSummaries.length), {
+        currentFloor,
+        excludeFloors,
+        minVectorScore,
+        recencyBias,
+        recencyHalfLife,
+        entityBoostTerms: entityTerms,
+        traceMeta: { traceId, kind: spec.kind }
+      })
+
+      if (candidates.length > 0) {
+        allBuckets.push({
+          query: spec.query,
+          kind: spec.kind,
+          weight: spec.weight * vectorPathWeight,
+          candidates,
+          path: 'vector'
+        })
+      }
+    }
+  }
+
+  // 路径 B (图谱): 共现关联扩散
+  if (entityTerms.length > 0 && entityLookup?.coPresenceGraph?.size > 0) {
+    const signalMap = spreadAssociationSignal(entityLookup, entityTerms, {
+      maxSteps: 2,
+      attenuationPerStep: 0.55,
+      maxReachableNodes: 50
+    })
+
+    if (signalMap.size > 0) {
+      const graphCandidates = signalToCandidates(signalMap, entityLookup, summaryKeyMap)
+        .filter(item => !summaryIntersectsFloors(item.summary, excludeFloors))
+
+      if (graphCandidates.length > 0) {
+        allBuckets.push({
+          query: entityTerms.join(' '),
+          kind: 'graph',
+          weight: graphPathWeight,
+          candidates: graphCandidates,
+          path: 'graph'
+        })
+      }
+    }
+  }
+
+  // 路径 C (关键词精确匹配)
+  const allKnownEntities = [
+    ...(gameStore.npcs || []).filter(n => n.isAlive).map(n => n.name),
+    ...(entityLookup?.locationIndex ? [...entityLookup.locationIndex.keys()] : [])
+  ]
+  const keywordCandidates = preciseKeywordMatch(mainQuery, minorSummaries, allKnownEntities)
+    .filter(item => !summaryIntersectsFloors(item.summary, excludeFloors))
+
+  if (keywordCandidates.length > 0) {
+    allBuckets.push({
+      query: mainQuery,
+      kind: 'keyword',
+      weight: keywordPathWeight,
+      candidates: keywordCandidates,
+      path: 'keyword'
+    })
+  }
+
+  if (allBuckets.length === 0) return []
+
+  if (traceId) {
+    appendTraceStep(traceId, 'multiPathSearch', '三路融合检索', 'success', {
+      paths: allBuckets.map(b => ({
+        path: b.path,
+        kind: b.kind,
+        weight: b.weight,
+        candidateCount: b.candidates.length
+      }))
+    })
+  }
+
+  // 融合
+  return weightedReciprocalRankFusion(allBuckets, topK)
+}
 
 function clampTraceText(text, max = TRACE_TEXT_LIMIT) {
   if (text === null || text === undefined) return ''
@@ -548,6 +885,8 @@ ${contextBlock}${npcContextBlock}
  * @returns {Promise<boolean>} 是否成功
  */
 export async function embedSummary(summary) {
+  // 类型守卫：只允许 minor 类型的总结生成向量
+  if (summary?.type !== 'minor') return false
   const gameStore = useGameStore()
   try {
     const embeddingText = buildEmbeddingText(summary)
@@ -746,16 +1085,34 @@ export async function searchSimilarSummaries(query, topK, options = {}) {
     minVectorScore = 0,
     recencyBias = 0,
     recencyHalfLife = 60,
-    traceMeta = null
+    traceMeta = null,
+    entityBoostTerms = []
   } = options
   const queryEmbedding = await callEmbeddingAPI(query)
   if (!queryEmbedding || queryEmbedding.length === 0) return []
+
+  const entityBoostSet = new Set(entityBoostTerms)
 
   const candidates = gameStore.player.summaries
     .filter(s => s.type === 'minor' && !summaryNeedsEmbeddingRefresh(s) && !summaryIntersectsFloors(s, excludeFloors))
     .map(s => {
       const rawScore = cosineSimilarity(queryEmbedding, s.embedding)
-      const score = adjustScoreByRecency(rawScore, getSummaryAnchorFloor(s), currentFloor, recencyBias, recencyHalfLife)
+      let score = adjustScoreByRecency(rawScore, getSummaryAnchorFloor(s), currentFloor, recencyBias, recencyHalfLife)
+
+      // Phase 0.1: 实体关键词 boost
+      if (entityBoostSet.size > 0 && Array.isArray(s.keywords)) {
+        const entityHits = s.keywords.filter(kw => entityBoostSet.has(kw)).length
+        score += entityHits * ENTITY_MATCH_BOOST
+      }
+
+      // Phase 0.1: isConsolidated 降权
+      if (s.isConsolidated) {
+        score *= 0.5
+      }
+
+      // Phase 0.3: 召回频次奖励
+      score = computeRecallBonus(score, s.recallHitCount)
+
       return {
         summary: s,
         score,
@@ -1368,85 +1725,86 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
     bridgeSummaryCount: bridgeSummaries.length
   })
 
-  // 4. RAG 检索（排除原文层和桥接层楼层的总结）
+  // Phase 0.1: 检测用户输入中提到的实体名
+  const knownNpcNames = (gameStore.npcs || []).filter(n => n.isAlive).map(n => n.name)
+  const mentionedEntities = detectMentionedEntities(userInput, knownNpcNames)
+
+  // Phase 1.1: 懒构建实体索引
+  const entityLookup = getOrBuildEntityLookup()
+
+  // 4. RAG 检索（三路融合：向量 + 图谱 + 关键词）
   let ragSummaries = []
   const ragCandidateCount = olderFloors.length - bridgeFloors.length
   if (ragCandidateCount > 0 && userInput) {
     try {
       const { topK, topN, minVectorScore, minRerankScore, recencyBias, recencyHalfLife } = getEffectiveRAGParams()
 
-      const embeddedSummaries = minorSummaries.filter(
-        s => !summaryNeedsEmbeddingRefresh(s) && !summaryIntersectsFloors(s, excludeSet)
-      )
+      // Phase 1.3: 三路融合检索
+      const fusedCandidates = await orchestrateMultiPathSearch(mainQuery, mentionedEntities, entityLookup, {
+        topK,
+        currentFloor,
+        excludeFloors: excludeSet,
+        minVectorScore,
+        recencyBias,
+        recencyHalfLife,
+        traceId,
+        additionalQueries
+      })
 
-      if (embeddedSummaries.length === 0) {
-        appendTraceStep(traceId, 'embeddingSearch', '无可用向量候选', 'warning', {
-          excludedFloors: [...excludeSet]
-        })
-      } else {
-        const seenQueries = new Set()
-        const querySpecs = []
-        for (const spec of [
-          { query: mainQuery, kind: 'main', weight: 1.0 },
-          ...additionalQueries.map(query => ({ query, kind: 'proactive', weight: 0.75 }))
-        ]) {
-          const normalizedQuery = (spec.query || '').trim()
-          if (!normalizedQuery || seenQueries.has(normalizedQuery)) continue
-          seenQueries.add(normalizedQuery)
-          querySpecs.push({ ...spec, query: normalizedQuery })
-        }
-
+      if (fusedCandidates.length > 0) {
         gameStore.updateRagTrace(traceId, {
-          searchQueries: querySpecs
+          fusedCandidates: fusedCandidates.slice(0, TRACE_CANDIDATE_LIMIT).map(item => buildTraceCandidate(item))
+        })
+        appendTraceStep(traceId, 'queryFusion', '三路融合完成', 'success', {
+          fusedCount: fusedCandidates.length,
+          topCandidates: fusedCandidates.slice(0, TRACE_CANDIDATE_LIMIT).map(item => buildTraceCandidate(item))
         })
 
-        const queryBuckets = []
-        for (const spec of querySpecs) {
-          const candidates = await searchSimilarSummaries(spec.query, Math.min(topK, embeddedSummaries.length), {
-            currentFloor,
-            excludeFloors: excludeSet,
-            minVectorScore,
-            recencyBias,
-            recencyHalfLife,
-            traceMeta: {
-              traceId,
-              kind: spec.kind
-            }
-          })
-          if (candidates.length > 0) {
-            queryBuckets.push({
-              ...spec,
-              candidates
-            })
+        ragSummaries = await rerankSummaries(mainQuery, fusedCandidates, Math.min(topN, fusedCandidates.length), {
+          currentFloor,
+          minRerankScore,
+          recencyBias,
+          recencyHalfLife,
+          traceMeta: {
+            traceId,
+            kind: 'main'
           }
-        }
+        })
 
-        if (queryBuckets.length > 0) {
-          const fusedCandidates = weightedReciprocalRankFusion(queryBuckets, Math.min(topK, embeddedSummaries.length))
-          gameStore.updateRagTrace(traceId, {
-            fusedCandidates: fusedCandidates.slice(0, TRACE_CANDIDATE_LIMIT).map(item => buildTraceCandidate(item))
-          })
-          appendTraceStep(traceId, 'queryFusion', '候选融合完成', 'success', {
-            fusedCount: fusedCandidates.length,
-            topCandidates: fusedCandidates.slice(0, TRACE_CANDIDATE_LIMIT).map(item => buildTraceCandidate(item))
-          })
+        // Phase 0.2: 时序上下文窗口扩展
+        ragSummaries = expandTemporalContext(ragSummaries, minorSummaries)
 
-          ragSummaries = await rerankSummaries(mainQuery, fusedCandidates, Math.min(topN, fusedCandidates.length), {
-            currentFloor,
-            minRerankScore,
-            recencyBias,
-            recencyHalfLife,
-            traceMeta: {
-              traceId,
-              kind: 'main'
+        // 记忆保持器轮次推进
+        try {
+          const holder = await getOrInitHolder()
+          const { holder: nextHolder, rankedEntries } = progressTurn(holder, ragSummaries, currentFloor)
+          _memoryHolder = nextHolder
+
+          // 保持器中的记忆获得额外显著度加成
+          const salienceMap = extractSalienceMap(nextHolder)
+          ragSummaries = ragSummaries.map(item => {
+            const key = getSummaryCoverageKey(item.summary)
+            const sal = salienceMap.get(key)
+            if (sal && sal > 0) {
+              return { ...item, score: item.score + sal * 0.1 }
             }
+            return item
+          }).sort((a, b) => b.score - a.score)
+
+          // 异步持久化
+          persistHolderAsync(nextHolder)
+
+          appendTraceStep(traceId, 'memoryHolder', '记忆保持器推进', 'success', {
+            holderSize: nextHolder.entries.size,
+            topEntries: rankedEntries.slice(0, 5)
           })
-          console.log('[RAG] Retrieved summaries:', ragSummaries.length)
-        } else {
-          appendTraceStep(traceId, 'embeddingSearch', '所有 Query 都未命中候选', 'warning', {
-            queries: querySpecs.map(item => item.query)
-          })
+        } catch (e) {
+          console.warn('[RAG] Memory holder advance failed:', getErrorMessage(e))
         }
+
+        console.log('[RAG] Retrieved summaries (after temporal + holder):', ragSummaries.length)
+      } else {
+        appendTraceStep(traceId, 'multiPathSearch', '所有检索路径均未命中候选', 'warning')
       }
     } catch (e) {
       console.warn('[RAG] retrieval failed:', getErrorMessage(e))
@@ -1514,7 +1872,46 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
     }
   }
 
-  // 5. 组装结果：[RAG召回] → [桥接总结] → [最近原文]
+  // Phase 0.3: 更新召回命中计数（不可变模式：替换 summaries 数组中的对象）
+  if (ragSummaries.length > 0) {
+    const recalledKeys = new Set(ragSummaries.map(item => getSummaryCoverageKey(item.summary)))
+    const updatedSummaries = gameStore.player.summaries.map(s => {
+      const key = getSummaryCoverageKey(s)
+      if (recalledKeys.has(key)) {
+        return {
+          ...s,
+          recallHitCount: (s.recallHitCount || 0) + 1,
+          lastRecalledAtFloor: currentFloor
+        }
+      }
+      return s
+    })
+    gameStore.player.summaries = updatedSummaries
+  }
+
+  // Phase 3.2: 注入持久事实作为常驻上下文
+  const persistentFactsContext = (() => {
+    try {
+      const factStore = gameStore.player?.persistentFacts || []
+      if (factStore.length === 0 || mentionedEntities.length === 0) return ''
+      const relevantFacts = queryRelevantFacts(mentionedEntities, factStore)
+      return formatFactsAsContext(relevantFacts)
+    } catch (e) {
+      console.warn('[RAG] Persistent facts injection failed:', getErrorMessage(e))
+      return ''
+    }
+  })()
+
+  // 5. 组装结果：[持久事实] → [RAG召回] → [桥接总结] → [最近原文]
+
+  if (persistentFactsContext) {
+    result.push({
+      type: 'summary',
+      content: persistentFactsContext,
+      isSummary: true,
+      summaryType: 'facts'
+    })
+  }
 
   if (ragSummaries.length > 0) {
     const sorted = [...ragSummaries].sort((a, b) => getSummaryAnchorFloor(a.summary) - getSummaryAnchorFloor(b.summary))

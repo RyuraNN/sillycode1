@@ -1,9 +1,11 @@
 import { useGameStore } from '../stores/gameStore'
 import { callAssistantAI } from './assistantAI'
-import { extractKeywordsFromSummary, embedSummary, buildRAGHistory, isRAGReady, summaryNeedsEmbeddingRefresh } from './ragService'
+import { extractKeywordsFromSummary, embedSummary, buildRAGHistory, isRAGReady, summaryNeedsEmbeddingRefresh, updateEntityLookupIncremental } from './ragService'
 import { filterCompletedTodos } from './todoManager'
 import { getErrorMessage } from './errorUtils'
 import { toTOON } from './toonSerializer'
+import { runThematicAggregation } from './thematicSummaryEngine'
+import { extractPersistentFacts, mergePersistentFacts } from './persistentFactStore'
 
 /**
  * 总结系统管理器
@@ -726,6 +728,21 @@ export async function processPostReply(content, floor, preGeneratedMinorSummary 
         }
       }).catch(() => {})
     }
+
+    // Phase 1.1: 增量更新实体索引
+    updateEntityLookupIncremental(minorResult.summary)
+
+    // Phase 3.2: 提取持久事实
+    try {
+      const newFacts = extractPersistentFacts(minorResult.summary.content, floor)
+      if (newFacts.length > 0) {
+        const existingFacts = gameStore.player.persistentFacts || []
+        gameStore.player.persistentFacts = mergePersistentFacts(newFacts, existingFacts)
+        console.log(`[SummaryManager] Extracted ${newFacts.length} persistent facts from floor ${floor}`)
+      }
+    } catch (e) {
+      console.warn('[SummaryManager] Fact extraction failed:', getErrorMessage(e))
+    }
   }
   
   // 2. 异步检查是否有需要生成日记的历史日期（兜底）
@@ -742,6 +759,13 @@ export async function processPostReply(content, floor, preGeneratedMinorSummary 
         }
       } catch (e) {
         console.error('[SummaryManager] Error in background diary generation:', e)
+      }
+
+      // Phase 3.1: 每 30 楼触发主题聚合
+      try {
+        await runThematicAggregation({ currentFloor: floor })
+      } catch (e) {
+        console.error('[SummaryManager] Error in thematic aggregation:', getErrorMessage(e))
       }
     }, 0)
   }

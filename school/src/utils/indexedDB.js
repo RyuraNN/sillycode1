@@ -628,3 +628,48 @@ export async function getAllSnapshotIds() {
     return []
   }
 }
+
+// ==================== Phase 2: 记忆池 & 实体索引持久化 ====================
+
+const MEMORY_POOL_PREFIX = 'mem_pool:'
+const ENTITY_LOOKUP_PREFIX = 'entity_lookup:'
+
+/**
+ * 持久化记忆池状态
+ * @param {string} runId 当前运行 ID
+ * @param {object} poolData 序列化后的池数据
+ */
+export async function persistMemoryPoolState(runId, poolData) {
+  if (!runId || !poolData) return
+  return setItem(`${MEMORY_POOL_PREFIX}${runId}`, poolData, DATA_STORE_NAME)
+}
+
+/**
+ * 读取记忆池状态
+ * @param {string} runId 当前运行 ID
+ * @returns {Promise<object|null>}
+ */
+export async function retrieveMemoryPoolState(runId) {
+  if (!runId) return null
+  return getItem(`${MEMORY_POOL_PREFIX}${runId}`, DATA_STORE_NAME)
+}
+
+/**
+ * 持久化实体索引数据
+ * @param {string} runId 当前运行 ID
+ * @param {object} lookupData 序列化后的索引数据
+ */
+export async function persistEntityLookupData(runId, lookupData) {
+  if (!runId || !lookupData) return
+  return setItem(`${ENTITY_LOOKUP_PREFIX}${runId}`, lookupData, DATA_STORE_NAME)
+}
+
+/**
+ * 读取实体索引数据
+ * @param {string} runId 当前运行 ID
+ * @returns {Promise<object|null>}
+ */
+export async function retrieveEntityLookupData(runId) {
+  if (!runId) return null
+  return getItem(`${ENTITY_LOOKUP_PREFIX}${runId}`, DATA_STORE_NAME)
+}

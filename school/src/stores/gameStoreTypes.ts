@@ -163,7 +163,7 @@ export interface ProductStock {
 /** 总结数据 */
 export interface SummaryData {
   floor: number
-  type: 'minor' | 'major' | 'super' | 'diary'  // diary: 每日日记，保留 major/super 兼容旧数据
+  type: 'minor' | 'major' | 'super' | 'diary' | 'thematic'  // diary: 每日日记，保留 major/super 兼容旧数据
   content: string
   coveredFloors: number[]
   timestamp: number
@@ -177,6 +177,10 @@ export interface SummaryData {
     updatedAt: number
   }
   completedTodos?: number[]  // 已完成的待办事项索引列表
+  recallHitCount?: number       // RAG 召回次数
+  lastRecalledAtFloor?: number  // 上次被召回时的楼层
+  isConsolidated?: boolean      // 已被整合进 thematic 总结的 minor
+  thematicSubject?: string      // thematic 类型的主题实体名
 }
 
 export interface RagTraceCandidate {
@@ -261,6 +265,16 @@ export interface RagDiagnosticsState {
   traces: RagTraceEntry[]
   activeTraceId: string | null
   maxEntries: number
+}
+
+/** 持久事实条目 */
+export interface PersistentFact {
+  entity: string
+  factCategory: 'trait' | 'relationship' | 'commitment'
+  content: string
+  sourceFloor: number
+  extractedAt: number
+  isActive: boolean  // commitment 可标记为已完成
 }
 
 /** RAG 记忆检索系统设置 */
@@ -427,6 +441,7 @@ export interface PlayerStats {
   activeEffects: ActiveEffect[]
   productStock: ProductStock
   summaries: SummaryData[]
+  persistentFacts?: PersistentFact[]
   partTimeJob: {
     currentJob: string | null
     isWorking: boolean
