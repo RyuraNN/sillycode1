@@ -28,7 +28,9 @@
       "Bash(sort:*)",
       "WebFetch(domain:docs.sillytavern.app)",
       "Bash(wc:*)",
-      "Bash(git:*)"
+      "Bash(git:*)",
+      "WebFetch(domain:toonformat.dev)",
+      "Bash(cd school:*)"
     ]
   }
 }

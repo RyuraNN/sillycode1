@@ -3,86 +3,100 @@ import { callAssistantAI } from './assistantAI'
 import { extractKeywordsFromSummary, embedSummary, buildRAGHistory, isRAGReady, summaryNeedsEmbeddingRefresh } from './ragService'
 import { filterCompletedTodos } from './todoManager'
 import { getErrorMessage } from './errorUtils'
-import { toTOON } from './toonSerializer'
 
 /**
  * 总结系统管理器
  * 负责生成、存储和管理大小总结
  */
 
-// 总结生成提示词模板 - 结构化数据
-
+// 总结生成提示词模板
 // 纯总结模式的 System Prompt (用于大/超级总结)
-const SUMMARY_AI_SYSTEM_DATA = {
-  role: '专业的剧情总结助手',
-  task: '阅读给定的剧情片段或多个小总结，整合成连贯精简的大总结',
-  rules: [
-    '总结内容严格包裹在用户要求的XML标签中（如<major_summary>或<super_summary>）',
-    '绝对不要输出任何标签之外的内容（无前言、解释、思考过程）',
-    '专注于剧情脉络、关键转折和角色关系变化'
-  ]
-}
+const SUMMARY_AI_SYSTEM_PROMPT = `你是一个专业的剧情总结助手。你的任务是阅读给定的剧情片段或多个小总结，并将其整合成一个连贯、精简的大总结。
+请务必将总结内容严格包裹在用户要求的 XML 标签中（例如 <major_summary> 或 <super_summary>）。
+绝对不要输出任何标签之外的内容（如前言、解释、思考过程等）。专注于剧情脉络、关键转折和角色关系变化。`
 
-const SUMMARY_AI_SYSTEM_PROMPT = toTOON(SUMMARY_AI_SYSTEM_DATA)
+const MINOR_SUMMARY_PROMPT = `[任务：生成本轮剧情小总结]
+请阅读以下正文内容，生成一个详细的剧情总结。
 
-const MINOR_SUMMARY_DATA = {
-  task: '生成本轮剧情小总结',
-  requirements: [
-    '保留关键剧情发展、角色行动、对话要点',
-    '保留重要的情感变化和关系进展',
-    '字数控制在100-200字',
-    '直接输出总结内容，不要添加任何前言或解释'
-  ],
-  format_fields: [
-    '日期|年月日时分',
-    '标题|20字左右的标题',
-    '地点|当前位置',
-    '人物|当前场景内的角色',
-    '描述|正文的摘要总结',
-    '人物关系|人物关系的变化',
-    '重要信息|正文中的重要信息',
-    '角色意图|各角色接下来想要做的事情或目标',
-    '互动内容|与玩家的关键互动（请求、邀约、约定、承诺等）',
-    '待办事项|尚未完成的约定或任务（如有，没有则写"无"）'
-  ],
-  input: '{content}',
-  output_format: '<minor_summary>总结内容</minor_summary>'
-}
+总结要求：
+1. 保留关键剧情发展、角色行动、对话要点
+2. 保留重要的情感变化和关系进展
+3. 字数控制在100-200字
+4. 直接输出总结内容，不要添加任何前言或解释
+5. 遵循以下格式：
+    日期|年月日时分
+    标题|给这次总结的内容起一个20字左右的标题
+    地点|当前位置
+    人物|当前场景内的角色
+    描述|这次正文的摘要总结
+    人物关系|这次正文中人物关系的变化
+    重要信息|这次正文中的重要信息
+    角色意图|场景中各角色接下来想要做的事情或目标
+    互动内容|与玩家的关键互动（请求、邀约、约定、承诺等）
+    待办事项|尚未完成的约定或任务（如有，没有则写"无"）
 
-const MINOR_SUMMARY_PROMPT = toTOON(MINOR_SUMMARY_DATA)
+正文内容：
+{content}
 
-const MAJOR_SUMMARY_DATA = {
-  task: '合并小总结',
-  requirements: [
-    '保留核心剧情脉络',
-    '合并重复信息',
-    '删除次要细节',
-    '字数控制在300字以内',
-    '直接输出总结内容，不要添加任何前言或解释',
-    '保持格式不变'
-  ],
-  input: '{summaries}',
-  output_format: '<major_summary>你的合并总结</major_summary>'
-}
+请用以下格式输出（必须严格遵循格式）：
+<minor_summary>总结内容</minor_summary>`
 
-const MAJOR_SUMMARY_PROMPT = toTOON(MAJOR_SUMMARY_DATA)
+const MAJOR_SUMMARY_PROMPT = `[任务：合并小总结]
+请将以下多个小总结合并为一个精简版本。
 
-const DIARY_DATA = {
-  task: '生成每日日记',
-  description: '将某一天内的所有剧情小总结整理成结构化的每日日记',
-  requirements: [
-    '按事件组织内容（而非按楼层顺序），属于同一事件的内容合并为一段',
-    '每个事件块包含：时间段、地点、涉及人物、事件经过、关系变化（如有）、角色意图、互动与约定',
-    '事件按时间顺序排列',
-    '记录所有关键剧情转折、情感变化、重要对话要点，不要遗漏',
-    '合并重复信息，删除无意义的过渡描述',
-    '直接输出日记内容，不要添加任何前言或解释'
-  ],
-  input: { date: '{date}', summaries: '{summaries}' },
-  output_template: '<diary>\n{date}\n\n## [事件标题1]\n时间：[具体时间段]\n地点：[地点]\n人物：[涉及角色]\n经过：[事件描述]\n关系变化：[如有变化则记录]\n角色意图：[各角色接下来的计划或目标]\n互动与约定：[与玩家的关键互动、约定、承诺]\n\n## [事件标题2]\n...\n\n## 当日要点\n- [当天最重要的信息/转折/关系变化]\n\n## 未完成事项\n- [跨日的约定、待办、承诺等（如有，没有则写"无"）]\n</diary>'
-}
+要求：
+1. 保留核心剧情脉络
+2. 合并重复信息
+3. 删除次要细节
+4. 字数控制在300字以内
+5. 直接输出总结内容，不要添加任何前言或解释
+6. 保持格式不变。
 
-const DIARY_PROMPT = toTOON(DIARY_DATA)
+待合并的小总结：
+{summaries}
+
+请用以下格式输出（必须严格遵循格式）：
+<major_summary>你的合并总结</major_summary>`
+
+
+const DIARY_PROMPT = `[任务：生成每日日记]
+请将以下某一天内的所有剧情小总结，整理成一篇结构化的每日日记。
+
+要求：
+1. 按事件组织内容（而非按楼层顺序），将属于同一事件的内容合并为一段
+2. 每个事件块包含：时间段、地点、涉及人物、事件经过、关系变化（如有）、角色意图、互动与约定
+3. 事件按时间顺序排列
+4. 记录所有关键剧情转折、情感变化、重要对话要点，不要遗漏
+5. 合并重复信息，删除无意义的过渡描述
+6. 直接输出日记内容，不要添加任何前言或解释
+
+日期：{date}
+
+该日的剧情小总结（按时间顺序）：
+{summaries}
+
+请用以下格式输出（必须严格遵循格式）：
+<diary>
+{date}
+
+## [事件标题1]
+时间：[具体时间段]
+地点：[地点]
+人物：[涉及角色]
+经过：[事件描述]
+关系变化：[如有变化则记录]
+角色意图：[各角色接下来的计划或目标]
+互动与约定：[与玩家的关键互动、约定、承诺]
+
+## [事件标题2]
+...
+
+## 当日要点
+- [当天最重要的信息/转折/关系变化]
+
+## 未完成事项
+- [跨日的约定、待办、承诺等（如有，没有则写"无"）]
+</diary>`
 
 /**
  * 清理内容中的图片相关标签（用于发送给AI处理）

@@ -5,7 +5,6 @@ import { DEFAULT_TEMPLATES } from '../utils/npcScheduleSystem'
 import { BASE_RANGES, POTENTIAL_MAP, SUBJECT_TRAITS } from '../data/academicData'
 import { removeThinking } from '../utils/summaryManager'
 import { getErrorMessage } from '../utils/errorUtils'
-import { toTOON } from '../utils/toonSerializer'
 
 export function useAIImport() {
   const aiImportLoading = ref(false)
@@ -49,30 +48,44 @@ export function useAIImport() {
       charEntries.forEach(e => { querySection += `- 作品：${e.work}，角色：${e.character}\n` })
     }
 
-    const promptObj = {
-      role: '角色数据库查询助手',
-      task: '根据用户提供的动漫/游戏/小说作品名和角色名，返回知识库中已知的角色信息',
-      rules: [
-        '绝对不允许编造角色。不认识某个作品或角色必须标记found="false"',
-        '模糊听过但不确定也标记为found="false"。宁可漏报也不能错报',
-        '只返回结构化的XML指令，不要输出任何叙事文本、解释或<content>标签',
-        `性格四维轴：order(秩序感,-100混乱~100守序), altruism(利他性,-100利己~100利他), tradition(传统性,-100革新~100传统), peace(和平性,-100好斗~100温和)`,
-        `选课倾向可选值：${prefKeys}`,
-        `日程模板可选值：${templateKeys}`,
-        '关系数值范围：intimacy(亲密度,0~100), trust(信赖度,0~100), passion(激情度,0~100), hostility(敌意度,0~100)',
-        '角色分类建议：根据原作年龄/职业/身份给出role_suggestion(student/teacher/staff/external/uncertain)和role_reason。external=不属于学校的角色',
-        `学力评估：level(${academicLevelKeys}), potential(${academicPotentialKeys}), traits(${traitKeys})`
-      ],
-      output_formats: {
-        character_found: '<roster_character name="角色名" work="作品名" found="true" gender="male或female" role_suggestion="student/teacher/staff/external/uncertain" role_reason="理由" workplace_suggestion="工作地点建议" staff_title="职务头衔">\n  <personality order="数值" altruism="数值" tradition="数值" peace="数值" />\n  <academic level="等级" potential="潜力" traits="特长标签,逗号分隔" />\n  <elective_preference>类型</elective_preference>\n  <schedule_tag>模板ID</schedule_tag>\n  <relationships>\n    <rel target="同作品关系角色名" intimacy="数值" trust="数值" passion="数值" hostility="数值" tags="印象标签,逗号分隔" />\n  </relationships>\n</roster_character>',
-        character_not_found: '<roster_character name="角色名" work="作品名" found="false" reason="未找到原因" />',
-        work_found: '<roster_work work="作品名" found="true">\n  <char name="角色名1" gender="male或female" />\n</roster_work>',
-        work_not_found: '<roster_work work="作品名" found="false" reason="未找到原因" />'
-      },
-      query: querySection
-    }
+    return `你是一个角色数据库查询助手。你的唯一任务是根据用户提供的动漫/游戏/小说作品名和角色名，返回你知识库中已知的角色信息。
 
-    return toTOON(promptObj)
+核心规则：
+1. 绝对不允许编造角色。如果你不认识某个作品或角色，必须明确标记 found="false"。
+2. 如果你只是模糊听过但不确定，也标记为 found="false"。宁可漏报也不能错报。
+3. 只返回结构化的XML指令，不要输出任何叙事文本、解释或<content>标签。
+4. 性格四维轴说明：order(秩序感,-100混乱~100守序), altruism(利他性,-100利己~100利他), tradition(传统性,-100革新~100传统), peace(和平性,-100好斗~100温和)
+5. 选课倾向可选值：${prefKeys}
+6. 日程模板可选值：${templateKeys}
+7. 关系中的数值范围：intimacy(亲密度,0~100), trust(信赖度,0~100), passion(激情度,0~100), hostility(敌意度,0~100)
+8. 角色分类建议：请根据角色在原作中的年龄、职业和身份，给出 role_suggestion (student/teacher/staff/external/uncertain) 和 role_reason (理由)。
+   - external: 不属于学校的角色（如商店店员、邻居等）
+9. 学力评估：level(${academicLevelKeys}), potential(${academicPotentialKeys}), traits(${traitKeys})
+
+[返回格式 - 查询特定角色]
+<roster_character name="角色名" work="作品名" found="true" gender="male或female" role_suggestion="student/teacher/staff/external/uncertain" role_reason="理由" workplace_suggestion="工作地点建议" staff_title="职务头衔">
+  <personality order="数值" altruism="数值" tradition="数值" peace="数值" />
+  <academic level="等级" potential="潜力" traits="特长标签,逗号分隔" />
+  <elective_preference>类型</elective_preference>
+  <schedule_tag>模板ID</schedule_tag>
+  <relationships>
+    <rel target="同作品关系角色名" intimacy="数值" trust="数值" passion="数值" hostility="数值" tags="印象标签,逗号分隔" />
+  </relationships>
+</roster_character>
+
+如果角色未找到：
+<roster_character name="角色名" work="作品名" found="false" reason="未找到原因" />
+
+[返回格式 - 查询作品中的所有角色]
+<roster_work work="作品名" found="true">
+  <char name="角色名1" gender="male或female" />
+  <char name="角色名2" gender="male或female" />
+</roster_work>
+
+如果作品未找到：
+<roster_work work="作品名" found="false" reason="未找到原因" />
+
+${querySection}`
   }
 
   // 解析AI返回的响应

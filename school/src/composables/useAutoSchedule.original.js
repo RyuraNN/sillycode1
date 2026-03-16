@@ -7,7 +7,6 @@ import { removeThinking } from '../utils/summaryManager'
 import { ELECTIVE_PREFERENCES, getGradeFromClassId } from '../data/coursePoolData'
 import { mapData, getItem } from '../data/mapData'
 import { getErrorMessage } from '../utils/errorUtils'
-import { toTOON } from '../utils/toonSerializer'
 
 const CHUNK_SIZE = 15
 
@@ -114,37 +113,54 @@ export function useAutoSchedule() {
       return parts.join(' ')
     }).join('\n')
 
-    const promptObj = {
-      role: '学校排班助手',
-      task: '根据角色列表和现有班级信息，生成两种排班方案',
-      ...(totalBatches > 1 ? { batch_info: `第${batchIndex + 1}/${totalBatches}批` } : {}),
-      existing_classes: classSummary,
-      course_pool: courseSummary,
-      elective_preference_tags: prefKeys,
-      characters_to_schedule: charList,
-      rules: [
-        '同作品角色尽量分到同一班级',
-        '每班学生数控制在25-35人',
-        '教师可担任多个班级的班主任和多个科目的科任老师',
-        '科任老师是班级的责任教师，不一定亲自上课',
-        '如果教师适合授课，可额外分配选修课/必修课的授课任务',
-        '为新课程指定选课偏好标签(preference)',
-        '如果现有班级不够，可建议创建新班级(需提供班级ID和名称)',
-        '班级ID格式: "年级-字母"，如 "1-A", "2-B", "3-C"',
-        `选修课的location必须使用以下地点ID之一: ${locationList}`,
-        '职工(staff)和校外人员(external)不分配班级，而是分配工作地点(workplace)',
-        '为职工/校外人员建议合理的工作地点名称(workplace_name)和地点ID(workplace_id)',
-        `workplace_id优先使用已有地点ID: ${locationList}，如无合适可建议新地点名称`
-      ],
-      plans: {
-        suitable: '逻辑合理、平衡、符合原作设定',
-        interesting: '创意性、意想不到但有趣的组合'
-      },
-      output_format: '<schedule_result>\n  <plan type="suitable">\n    <new_class id="班级ID" name="显示名称" />\n    <assignment name="角色名" role="student" class="班级ID" reason="排班理由" />\n    <assignment name="角色名" role="headTeacher" class="班级ID" reason="排班理由" />\n    <assignment name="角色名" role="subjectTeacher" class="班级ID" subject="科目" reason="排班理由" />\n    <teaching name="角色名" course_name="课程名" course_type="elective" grade="1" preference="选课偏好标签" location="教室ID" reason="授课理由" />\n    <workplace_assignment name="角色名" role="staff|external" workplace_id="地点ID" workplace_name="地点显示名" staff_title="职务" reason="理由" />\n  </plan>\n  <plan type="interesting">...同上格式...</plan>\n</schedule_result>',
-      output_rule: '只返回XML格式数据，不要输出其他内容。每个角色必须在两个方案中都有assignment。'
-    }
+    return `你是一个学校排班助手。请根据角色列表和现有班级信息，生成两种排班方案。
+${totalBatches > 1 ? `\n[批次信息] 第${batchIndex + 1}/${totalBatches}批\n` : ''}
+[现有班级信息]
+${classSummary}
 
-    return toTOON(promptObj)
+[现有课程池概要]
+${courseSummary}
+
+[可用选课偏好标签]
+${prefKeys}
+
+[待排班角色]
+${charList}
+
+[排班规则]
+1. 同作品角色尽量分到同一班级
+2. 每班学生数控制在25-35人
+3. 教师可担任多个班级的班主任和多个科目的科任老师
+4. 科任老师是班级的责任教师，不一定亲自上课
+5. 如果教师适合授课，可额外分配选修课/必修课的授课任务
+6. 为新课程指定选课偏好标签(preference)
+7. 如果现有班级不够，可建议创建新班级(需提供班级ID和名称)
+8. 班级ID格式: "年级-字母"，如 "1-A", "2-B", "3-C"
+9. 选修课的 location 必须使用以下地点ID之一: ${locationList}
+10. 职工(staff)和校外人员(external)不分配班级，而是分配工作地点(workplace)
+11. 为职工/校外人员建议一个合理的工作地点名称(workplace_name)和地点ID(workplace_id)
+12. workplace_id 优先使用已有地点ID: ${locationList}，如果没有合适的，可以建议新地点名称
+
+[返回两种方案]
+方案A(更合适): 逻辑合理、平衡、符合原作设定
+方案B(更有趣): 创意性、意想不到但有趣的组合
+
+返回格式:
+<schedule_result>
+  <plan type="suitable">
+    <new_class id="班级ID" name="显示名称" />
+    <assignment name="角色名" role="student" class="班级ID" reason="排班理由" />
+    <assignment name="角色名" role="headTeacher" class="班级ID" reason="排班理由" />
+    <assignment name="角色名" role="subjectTeacher" class="班级ID" subject="科目" reason="排班理由" />
+    <teaching name="角色名" course_name="课程名" course_type="elective" grade="1" preference="选课偏好标签" location="教室ID" reason="授课理由" />
+    <workplace_assignment name="角色名" role="staff|external" workplace_id="地点ID" workplace_name="地点显示名" staff_title="职务" reason="理由" />
+  </plan>
+  <plan type="interesting">
+    ...同上格式...
+  </plan>
+</schedule_result>
+
+注意：只返回XML格式数据，不要输出其他内容。每个角色必须在两个方案中都有assignment。`
   }
 
   /**

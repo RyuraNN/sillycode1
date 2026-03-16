@@ -31,6 +31,12 @@ const resetImageSystemPrompt = () => {
   }
 }
 
+// 加载默认文本到生图系统提示词
+const loadImageDefaultText = () => {
+  gameStore.settings.customImageAnalysisPrompt = IMAGE_ANALYSIS_PROMPT
+  gameStore.saveToStorage()
+}
+
 // 角色外貌锚定
 const newAnchorName = ref('')
 const newAnchorTags = ref('')
@@ -931,7 +937,10 @@ const loadRerankModels = async () => {
                 <div class="input-group">
                   <div style="display: flex; justify-content: space-between; align-items: center;">
                     <label class="input-label">生图系统指令 (高级)</label>
-                    <button class="text-btn" @click="resetImageSystemPrompt" v-if="gameStore.settings.customImageAnalysisPrompt">恢复默认</button>
+                    <div style="display: flex; gap: 8px;">
+                      <button class="text-btn" @click="loadImageDefaultText">加载默认文本</button>
+                      <button class="text-btn" @click="resetImageSystemPrompt" v-if="gameStore.settings.customImageAnalysisPrompt">恢复默认</button>
+                    </div>
                   </div>
                   <textarea 
                     v-model="gameStore.settings.customImageAnalysisPrompt" 

@@ -697,7 +697,7 @@ const sendMessage = async () => {
             if (closeIndex !== -1) {
               const tagContent = streamBuffer.substring(0, closeIndex)
               
-              if (currentSystemTag.toLowerCase() === 'image') {
+              if (currentSystemTag.toLowerCase() === 'image' && !gameStore.settings.independentImageGeneration) {
                 let prompt = tagContent.trim()
                 const externalMatch = /###([\s\S]*?)###/.exec(prompt)
                 if (externalMatch) {
@@ -1877,6 +1877,7 @@ const handleEditSubmit = (content) => {
     // 清理系统标签
     let cleanedContent = cleanSystemTags(contentToShow)
     cleanedContent = cleanedContent.replace(/<suggested_replies>[\s\S]*?<\/suggested_replies>/gi, '')
+    cleanedContent = cleanedContent.replace(/<image>[\s\S]*?<\/image>/gi, '')
 
     log.content = cleanedContent
 

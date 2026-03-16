@@ -5,7 +5,6 @@
 import { ref } from 'vue'
 import { removeThinking } from '../utils/summaryManager'
 import { getErrorMessage } from '../utils/errorUtils'
-import { toTOON } from '../utils/toonSerializer'
 
 export function useAutoClubGenerate() {
   const generating = ref(false)
@@ -78,28 +77,42 @@ export function useAutoClubGenerate() {
       filterHint = `\n[筛选范围] 仅为作品「${options.filterWork}」的角色生成社团`
     }
 
-    const promptObj = {
-      role: '社团生成助手',
-      task: '根据角色列表生成社团',
-      mode: modeDesc,
-      ...(filterHint ? { filter: filterHint.trim() } : {}),
-      existing_clubs: existingList,
-      characters: charList,
-      available_teachers: teacherList,
-      rules: [
-        '社团可以有指导老师(advisor)也可以没有。原作社团没有指导老师则留空。如需指导老师优先从可用教师中选择',
-        '社团ID格式: 原作向用"auto_作品缩写_社团缩写"，原创向用"creative_关键词"',
-        '不要与现有社团重复（如重复则用add_to_existing只列出需要添加的新成员）',
-        '每个社团3-8名成员为宜',
-        '活动日从monday/tuesday/wednesday/thursday/friday中选择',
-        '角色可同时加入多个社团，注意已加入社团信息，避免安排过多',
-        '如需指导老师但可用教师不足，可创建新教师，必须提供完整全名和来源作品(origin)。新教师用new_advisor标签声明'
-      ],
-      output_format: '<club_result>\n  <new_advisor name="完整全名" origin="来源作品" gender="male或female" />\n  <club name="社团名" id="club_id" description="描述"\n    advisor="指导老师" president="部长" vice_president="副部长"\n    core_skill="核心技能" activity_day="活动日" location="地点">\n    <member name="成员名" />\n  </club>\n  <add_to_existing club_id="已有社团ID">\n    <member name="新成员名" />\n  </add_to_existing>\n</club_result>',
-      output_rule: '只返回XML格式数据，不要输出其他内容。'
-    }
+    return `你是社团生成助手。根据角色列表生成社团。
 
-    return toTOON(promptObj)
+模式: ${modeDesc}${filterHint}
+
+[现有社团]
+${existingList}
+
+[角色列表]
+${charList}
+
+[可用教师]
+${teacherList}
+
+[规则]
+1. 社团可以有指导老师(advisor)，也可以没有。如果原作社团没有指导老师则留空。如需指导老师，优先从[可用教师]中选择
+2. 社团ID格式: 原作向用 "auto_作品缩写_社团缩写"，原创向用 "creative_关键词"
+3. 不要与现有社团重复（如重复则用add_to_existing只列出需要添加的新成员）
+4. 每个社团3-8名成员为宜
+5. 活动日从 monday/tuesday/wednesday/thursday/friday 中选择
+6. 角色可以同时加入多个社团，但请注意已加入社团的信息，避免安排过多社团
+7. 如果确实需要指导老师但可用教师不足，可以创建新教师，但必须提供完整的全名（姓+名，不要缩写或加"老师"后缀）和来源作品(origin)。新教师用 new_advisor 标签声明
+
+返回格式:
+<club_result>
+  <new_advisor name="完整全名" origin="来源作品" gender="male或female" />
+  <club name="社团名" id="club_id" description="描述"
+    advisor="指导老师" president="部长" vice_president="副部长"
+    core_skill="核心技能" activity_day="活动日" location="地点">
+    <member name="成员名" />
+  </club>
+  <add_to_existing club_id="已有社团ID">
+    <member name="新成员名" />
+  </add_to_existing>
+</club_result>
+
+注意：只返回XML格式数据，不要输出其他内容。`
   }
 
   /**

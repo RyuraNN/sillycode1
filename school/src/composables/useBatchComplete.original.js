@@ -4,7 +4,6 @@ import { BASE_RANGES, POTENTIAL_MAP, SUBJECT_TRAITS } from '../data/academicData
 import { setRelationship, getRelationship } from '../utils/relationshipManager'
 import { removeThinking } from '../utils/summaryManager'
 import { getErrorMessage } from '../utils/errorUtils'
-import { toTOON } from '../utils/toonSerializer'
 
 export function useBatchComplete() {
   const batchProcessing = ref(false)
@@ -89,22 +88,31 @@ export function useBatchComplete() {
       return `- ${c.name} (${c.origin || '未知作品'}) [身份: ${roleLabel}${extra}]`
     }).join('\n')
 
-    const promptObj = {
-      role: '角色数据补全助手',
-      task: '根据提供的角色列表，基于其原作设定补充完整的详细属性',
-      objectives: requestDesc,
-      characters: charListStr,
-      rules: [
-        '只返回结构化的XML指令，不要输出任何叙事文本',
-        '即使角色信息不全，也请根据名字和原作进行合理推断',
-        `性格四维轴：order(秩序感,-100混乱~100守序), altruism(利他性,-100利己~100利他), tradition(传统性,-100革新~100传统), peace(和平性,-100好斗~100温和)`,
-        `学力评估：level(${academicLevelKeys}), potential(${academicPotentialKeys}), traits(${traitKeys}，可多选)`,
-        '关系：仅列出与列表中角色或知名原作角色尽可能多的全部关系（有直接关系才列出，交集很少不要强行加上）'
-      ],
-      output_format: '<roster_update>\n  <char name="角色名">\n    <personality order="数值" altruism="数值" tradition="数值" peace="数值" />\n    <academic level="等级" potential="潜力" traits="特长1,特长2" />\n    <relationships>\n      <rel target="对象名" intimacy="0-100" trust="0-100" />\n    </relationships>\n  </char>\n</roster_update>'
-    }
+    return `你是一个角色数据补全助手。请根据提供的角色列表，基于其原作设定补充完整的详细属性。
 
-    return toTOON(promptObj)
+任务目标：
+${requestDesc}
+
+角色列表：
+${charListStr}
+
+核心规则：
+1. 只返回结构化的XML指令，不要输出任何叙事文本。
+2. 即使角色信息不全，也请根据名字和原作进行合理推断。
+3. 性格四维轴：order(秩序感,-100混乱~100守序), altruism(利他性,-100利己~100利他), tradition(传统性,-100革新~100传统), peace(和平性,-100好斗~100温和)
+4. 学力评估：level(${academicLevelKeys}), potential(${academicPotentialKeys}), traits(${traitKeys}，可多选)
+5. 关系：仅列出与列表中角色或知名原作角色尽可能多的全部关系（如果有关系的话，如果角色间没有直接关系或者交集很少的话也不要强行加上。）
+
+返回格式：
+<roster_update>
+  <char name="角色名">
+    <personality order="数值" altruism="数值" tradition="数值" peace="数值" />
+    <academic level="等级" potential="潜力" traits="特长1,特长2" />
+    <relationships>
+      <rel target="对象名" intimacy="0-100" trust="0-100" />
+    </relationships>
+  </char>
+</roster_update>`
   }
 
   // 解析批量补全响应

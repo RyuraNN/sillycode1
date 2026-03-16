@@ -29,12 +29,11 @@ export const cleanSystemTags = (text) => {
     'ul', 'ol', 'li', 'table', 'tr', 'td', 'th', 'thead', 'tbody', 'img', 'a', 'hr', 'small', 'big',
     'ruby', 'rt', 'rp', 'htmlcontent'
   ]
-  const keepTags = ['generate_image', ...contentTags, ...htmlTags]
+  const keepTags = ['generate_image', 'image', ...contentTags, ...htmlTags]
   const keepPattern = keepTags.join('|')
 
   // 1. 移除已知系统标签
   const knownSystemTags = [
-    /<image>[\s\S]*?<\/image>/gi,
     /<image_think>[\s\S]*?<\/image_think>/gi,
     /<imgthink[\s\S]*?<\/imgthink>/g,
     /<imgthink\s*\/?>/g,
