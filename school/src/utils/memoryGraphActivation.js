@@ -18,17 +18,16 @@ export function resolveQueryAnchors(userInput, npcNameList) {
 
   const matched = []
   for (const name of npcNameList) {
-    if (!name) continue
+    // 跳过单字名以避免 "小" 匹配 "小美"/"小李" 等误匹配
+    if (!name || name.length < 2) continue
     if (userInput.includes(name)) {
       matched.push(name)
       continue
     }
     // 两字及以上名字去掉首字（姓）后尝试匹配
-    if (name.length >= 2) {
-      const givenName = name.slice(1)
-      if (givenName.length >= 2 && userInput.includes(givenName)) {
-        matched.push(name)
-      }
+    const givenName = name.slice(1)
+    if (givenName.length >= 2 && userInput.includes(givenName)) {
+      matched.push(name)
     }
   }
 

@@ -132,8 +132,20 @@ export function mergePersistentFacts(newFacts, existing) {
 }
 
 /**
- * 简单的内容相似度判断
- * 如果两段内容有超过 60% 的字符重叠，视为相似
+ * 提取文本的 bigram 集合（相邻两字符对）
+ * 比单字符集更能区分语序不同的句子，如 "小美喜欢画画" vs "小美讨厌画画"
+ */
+function extractBigrams(text) {
+  const bigrams = new Set()
+  for (let i = 0; i < text.length - 1; i++) {
+    bigrams.add(text[i] + text[i + 1])
+  }
+  return bigrams
+}
+
+/**
+ * 内容相似度判断（bigram Jaccard）
+ * 使用相邻字符对而非单字符集，能更好地区分语序和语义差异
  */
 function isSimilarContent(a, b) {
   if (!a || !b) return false
@@ -145,11 +157,17 @@ function isSimilarContent(a, b) {
   // 短文本直接包含检查
   if (longer.includes(shorter)) return true
 
-  // 计算字符集重叠率
-  const setA = new Set(a)
-  const setB = new Set(b)
-  const intersection = [...setA].filter(c => setB.has(c)).length
-  const union = new Set([...setA, ...setB]).size
+  // 文本过短时退化为直接比较
+  if (shorter.length < 3) return false
+
+  // 使用 bigram Jaccard 相似度
+  const bigramsA = extractBigrams(a)
+  const bigramsB = extractBigrams(b)
+  let intersection = 0
+  for (const bg of bigramsA) {
+    if (bigramsB.has(bg)) intersection++
+  }
+  const union = bigramsA.size + bigramsB.size - intersection
   const jaccard = union > 0 ? intersection / union : 0
 
   return jaccard > 0.6

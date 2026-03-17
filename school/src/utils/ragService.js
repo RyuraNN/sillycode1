@@ -154,7 +154,9 @@ export function detectMentionedEntities(inputText, knownNpcNames) {
   if (!inputText || !Array.isArray(knownNpcNames)) return []
   const mentioned = []
   for (const name of knownNpcNames) {
-    if (name && inputText.includes(name)) {
+    // 跳过单字名以避免误匹配（如 "明" 匹配 "说明"）
+    if (!name || name.length < 2) continue
+    if (inputText.includes(name)) {
       mentioned.push(name)
     }
   }
@@ -184,6 +186,17 @@ export function expandTemporalContext(retrievedItems, allMinors, windowRadius = 
     return retrievedItems || []
   }
 
+  // 预构建 floor → summary[] 索引，将邻居查找从 O(allMinors) 降到 O(1)
+  const floorToSummaries = new Map()
+  for (const candidate of allMinors) {
+    for (const floor of getSummaryCoveredFloors(candidate)) {
+      if (!floorToSummaries.has(floor)) {
+        floorToSummaries.set(floor, [])
+      }
+      floorToSummaries.get(floor).push(candidate)
+    }
+  }
+
   const existingKeys = new Set(retrievedItems.map(item => getSummaryCoverageKey(item.summary)))
   const expanded = [...retrievedItems]
 
@@ -194,20 +207,19 @@ export function expandTemporalContext(retrievedItems, allMinors, windowRadius = 
     for (let offset = -windowRadius; offset <= windowRadius; offset++) {
       if (offset === 0) continue
       const targetFloor = anchorFloor + offset
+      const candidates = floorToSummaries.get(targetFloor)
+      if (!candidates) continue
 
-      for (const candidate of allMinors) {
+      for (const candidate of candidates) {
         const candidateKey = getSummaryCoverageKey(candidate)
         if (existingKeys.has(candidateKey)) continue
 
-        const coveredFloors = getSummaryCoveredFloors(candidate)
-        if (coveredFloors.includes(targetFloor)) {
-          existingKeys.add(candidateKey)
-          expanded.push({
-            summary: candidate,
-            score: item.score * NEIGHBOR_SCORE_RATIO,
-            rawScore: (item.rawScore ?? item.score) * NEIGHBOR_SCORE_RATIO
-          })
-        }
+        existingKeys.add(candidateKey)
+        expanded.push({
+          summary: candidate,
+          score: item.score * NEIGHBOR_SCORE_RATIO,
+          rawScore: (item.rawScore ?? item.score) * NEIGHBOR_SCORE_RATIO
+        })
       }
     }
   }
@@ -217,25 +229,25 @@ export function expandTemporalContext(retrievedItems, allMinors, windowRadius = 
 
 // ==================== Phase 1: 多路融合检索 ====================
 
-// 模块级缓存：实体索引
+// 模块级缓存：实体索引（使用递增版本号避免删除+新增数量不变时的竞态）
 let _cachedEntityLookup = null
 let _cachedEntityLookupVersion = 0
+let _entityLookupDirty = true  // 标记索引是否需要重建
 
 /**
  * 获取或懒构建实体倒排索引（带缓存）
  * @returns {{ npcIndex: Map, locationIndex: Map, coPresenceGraph: Map }}
  */
 export function getOrBuildEntityLookup() {
-  const gameStore = useGameStore()
-  const summaries = gameStore.player?.summaries || []
-  const minorCount = summaries.filter(s => s.type === 'minor').length
-
-  if (_cachedEntityLookup && _cachedEntityLookupVersion === minorCount) {
+  if (_cachedEntityLookup && !_entityLookupDirty) {
     return _cachedEntityLookup
   }
 
+  const gameStore = useGameStore()
+  const summaries = gameStore.player?.summaries || []
   _cachedEntityLookup = buildEntityLookup(summaries)
-  _cachedEntityLookupVersion = minorCount
+  _cachedEntityLookupVersion++
+  _entityLookupDirty = false
   return _cachedEntityLookup
 }
 
@@ -250,11 +262,12 @@ export function updateEntityLookupIncremental(summary) {
 }
 
 /**
- * 强制重建实体索引（rollback 等场景）
+ * 强制重建实体索引（rollback、删除 summary 等场景）
  */
 export function invalidateEntityLookup() {
   _cachedEntityLookup = null
   _cachedEntityLookupVersion = 0
+  _entityLookupDirty = true
 }
 
 // 模块级缓存：记忆保持器
@@ -691,24 +704,34 @@ function parseRewriteXmlResult(result, userInput) {
   }
 }
 
+const RAG_AI_TIMEOUT_MS = 8000 // AI 辅助调用超时（query rewrite / enhanced recall）
+
 async function requestRewriteCompletion(endpoint, apiKey, model, systemPrompt, userPrompt, enableProactiveQuery) {
   const temperature = model && model.toLowerCase().includes('gpt') ? 1 : 0
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
-      temperature,
-      max_tokens: enableProactiveQuery ? 500 : 300
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), RAG_AI_TIMEOUT_MS)
+  let res
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature,
+        max_tokens: enableProactiveQuery ? 500 : 300
+      })
     })
-  })
+  } finally {
+    clearTimeout(timer)
+  }
 
   if (!res.ok) {
     const errText = await res.text().catch(() => res.statusText)
@@ -1097,7 +1120,8 @@ export async function searchSimilarSummaries(query, topK, options = {}) {
     .filter(s => s.type === 'minor' && !summaryNeedsEmbeddingRefresh(s) && !summaryIntersectsFloors(s, excludeFloors))
     .map(s => {
       const rawScore = cosineSimilarity(queryEmbedding, s.embedding)
-      let score = adjustScoreByRecency(rawScore, getSummaryAnchorFloor(s), currentFloor, recencyBias, recencyHalfLife)
+      // 注意：recency decay 仅在 rerank 阶段应用，避免双重衰减
+      let score = rawScore
 
       // Phase 0.1: 实体关键词 boost
       if (entityBoostSet.size > 0 && Array.isArray(s.keywords)) {
@@ -1217,6 +1241,53 @@ export async function rerankSummaries(query, candidates, topN, options = {}) {
   }
 }
 
+// ==================== NPC 上下文收集 ====================
+
+/**
+ * 收集场景 NPC 上下文名称列表
+ * @param {object} gameStore Pinia store 实例
+ * @param {number} maxCount 最大收集数量（默认 5）
+ * @returns {string[]} NPC 名称数组
+ */
+function collectContextNpcs(gameStore, maxCount = 5) {
+  const contextNpcs = []
+
+  // 1. 获取当前场景的 NPC
+  try {
+    const locationNpcs = getNpcsAtLocation(gameStore.player.location, gameStore)
+      .filter(npc => npc.isAlive)
+      .slice(0, maxCount)
+    contextNpcs.push(...locationNpcs.map(npc => npc.name))
+  } catch (e) {
+    console.warn('[RAG] Failed to get location NPCs:', getErrorMessage(e))
+  }
+
+  // 2. 如果场景 NPC 不足，补充关系亲密的 NPC
+  if (contextNpcs.length < maxCount) {
+    try {
+      const closeNpcs = gameStore.npcs
+        .filter(npc => npc.isAlive && !contextNpcs.includes(npc.name))
+        .filter(npc => {
+          const rel = gameStore.npcRelationships?.[npc.name]?.relations?.[gameStore.player.name]
+          return rel && (rel.intimacy > 60 || rel.trust > 60)
+        })
+        .sort((a, b) => {
+          const relA = gameStore.npcRelationships?.[a.name]?.relations?.[gameStore.player.name]
+          const relB = gameStore.npcRelationships?.[b.name]?.relations?.[gameStore.player.name]
+          const scoreA = (relA?.intimacy || 0) + (relA?.trust || 0)
+          const scoreB = (relB?.intimacy || 0) + (relB?.trust || 0)
+          return scoreB - scoreA
+        })
+        .slice(0, maxCount - contextNpcs.length)
+      contextNpcs.push(...closeNpcs.map(npc => npc.name))
+    } catch (e) {
+      console.warn('[RAG] Failed to get close NPCs:', getErrorMessage(e))
+    }
+  }
+
+  return contextNpcs
+}
+
 // ==================== 增强召回模式 ====================
 
 /**
@@ -1238,43 +1309,10 @@ export async function analyzeRecalledSummaries(userInput, ragSummaries, gameTime
     return { pruneIndexes: [], additionalQueries: [] }
   }
 
-  // 收集场景NPC上下文
-  const contextNpcs = []
+  // 收集场景NPC上下文（复用工具函数 + 从召回总结中补充）
+  const contextNpcs = collectContextNpcs(gameStore, 5)
 
-  // 1. 获取当前场景的NPC（最多5个）
-  try {
-    const locationNpcs = getNpcsAtLocation(gameStore.player.location, gameStore)
-      .filter(npc => npc.isAlive)
-      .slice(0, 5)
-    contextNpcs.push(...locationNpcs.map(npc => npc.name))
-  } catch (e) {
-    console.warn('[Enhanced Recall] Failed to get location NPCs:', getErrorMessage(e))
-  }
-
-  // 2. 如果场景NPC不足5个，补充关系亲密的NPC
-  if (contextNpcs.length < 5) {
-    try {
-      const closeNpcs = gameStore.npcs
-        .filter(npc => npc.isAlive && !contextNpcs.includes(npc.name))
-        .filter(npc => {
-          const rel = gameStore.npcRelationships?.[npc.name]?.relations?.[gameStore.player.name]
-          return rel && (rel.intimacy > 60 || rel.trust > 60)
-        })
-        .sort((a, b) => {
-          const relA = gameStore.npcRelationships?.[a.name]?.relations?.[gameStore.player.name]
-          const relB = gameStore.npcRelationships?.[b.name]?.relations?.[gameStore.player.name]
-          const scoreA = (relA?.intimacy || 0) + (relA?.trust || 0)
-          const scoreB = (relB?.intimacy || 0) + (relB?.trust || 0)
-          return scoreB - scoreA
-        })
-        .slice(0, 5 - contextNpcs.length)
-      contextNpcs.push(...closeNpcs.map(npc => npc.name))
-    } catch (e) {
-      console.warn('[Enhanced Recall] Failed to get close NPCs:', getErrorMessage(e))
-    }
-  }
-
-  // 3. 从召回的总结中提取提到的人物（补充到8个）
+  // 从召回的总结中提取提到的人物（补充到8个）
   if (contextNpcs.length < 8) {
     try {
       const mentionedNpcs = new Set()
@@ -1364,22 +1402,30 @@ ${summariesText}
   }
 
   try {
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        temperature,
-        max_tokens: 800
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), RAG_AI_TIMEOUT_MS)
+    let res
+    try {
+      res = await fetch(endpoint, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ],
+          temperature,
+          max_tokens: 800
+        })
       })
-    })
+    } finally {
+      clearTimeout(timer)
+    }
 
     if (!res.ok) {
       const errText = await res.text().catch(() => res.statusText)
@@ -1519,6 +1565,8 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
   const gameStore = useGameStore()
   const settings = gameStore.settings.summarySystem
   const ragSettings = gameStore.settings.ragSystem
+  // 提前导入 todoManager，避免在循环中反复 dynamic import
+  const { filterCompletedTodos } = await import('./todoManager')
   const errors = [] // 收集各环节错误
   const traceId = gameStore.startRagTrace({
     floor: currentFloor,
@@ -1579,37 +1627,9 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
   })
 
   // 收集场景NPC上下文（用于主动查询生成）
-  const contextNpcs = []
-  if (ragSettings.proactiveQueryGeneration && gameStore.settings.assistantAI?.enabled) {
-    try {
-      // 1. 获取当前场景的NPC（最多5个）
-      const locationNpcs = getNpcsAtLocation(gameStore.player.location, gameStore)
-        .filter(npc => npc.isAlive)
-        .slice(0, 5)
-      contextNpcs.push(...locationNpcs.map(npc => npc.name))
-
-      // 2. 如果场景NPC不足5个，补充关系亲密的NPC
-      if (contextNpcs.length < 5) {
-        const closeNpcs = gameStore.npcs
-          .filter(npc => npc.isAlive && !contextNpcs.includes(npc.name))
-          .filter(npc => {
-            const rel = gameStore.npcRelationships?.[npc.name]?.relations?.[gameStore.player.name]
-            return rel && (rel.intimacy > 60 || rel.trust > 60)
-          })
-          .sort((a, b) => {
-            const relA = gameStore.npcRelationships?.[a.name]?.relations?.[gameStore.player.name]
-            const relB = gameStore.npcRelationships?.[b.name]?.relations?.[gameStore.player.name]
-            const scoreA = (relA?.intimacy || 0) + (relA?.trust || 0)
-            const scoreB = (relB?.intimacy || 0) + (relB?.trust || 0)
-            return scoreB - scoreA
-          })
-          .slice(0, 5 - contextNpcs.length)
-        contextNpcs.push(...closeNpcs.map(npc => npc.name))
-      }
-    } catch (e) {
-      console.warn('[RAG] Failed to collect NPC context:', getErrorMessage(e))
-    }
-  }
+  const contextNpcs = (ragSettings.proactiveQueryGeneration && gameStore.settings.assistantAI?.enabled)
+    ? collectContextNpcs(gameStore, 5)
+    : []
 
   // Query 改写：使用 assistantAI 解析相对时间/代词指代 + 主动查询生成
   let mainQuery = query
@@ -1707,7 +1727,6 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
       // 过滤已完成的待办事项
       let filteredContent = summary.content
       if (summary.completedTodos && summary.completedTodos.length > 0) {
-        const { filterCompletedTodos } = await import('./todoManager')
         filteredContent = filterCompletedTodos(summary.content, summary.completedTodos)
       }
 
