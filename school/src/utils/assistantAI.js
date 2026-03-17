@@ -4,7 +4,7 @@ import { getAllBookNames } from './worldbookHelper'
 import { getErrorMessage } from './errorUtils'
 import { isTodoCompleted, parseTodoItems } from './todoManager'
 import { toTOON } from './toonSerializer'
-import { SUMMARY_FORMAT_FIELDS } from './summaryManager'
+import { SUMMARY_FORMAT_FIELDS } from './summaryConstants'
 
 /**
  * 验证辅助AI配置是否完整

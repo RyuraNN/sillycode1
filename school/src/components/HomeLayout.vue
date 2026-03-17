@@ -1,5 +1,5 @@
 <script setup>
-import { ref, defineAsyncComponent } from 'vue'
+import { ref } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { switchSaveSlot, restoreWorldbookFromStore } from '../utils/socialWorldbook'
 import { clearAllData } from '../utils/indexedDB'
@@ -7,14 +7,16 @@ import { getAllBookNames } from '../utils/worldbookHelper'
 import { syncClubWorldbookState, syncClassWorldbookState, setPlayerClass } from '../utils/worldbookParser'
 import { getErrorMessage } from '../utils/errorUtils'
 
-// 使用异步组件以优化首屏加载性能
-const GameStart = defineAsyncComponent(() => import('./GameStart.vue'))
-const SavePanel = defineAsyncComponent(() => import('./SavePanel.vue'))
-const Settings = defineAsyncComponent(() => import('./Settings.vue'))
-const GameMain = defineAsyncComponent(() => import('./GameMain.vue'))
-const MapEditorPanel = defineAsyncComponent(() => import('./MapEditorPanel.vue'))
-const EventEditorPanel = defineAsyncComponent(() => import('./EventEditorPanel.vue'))
-const NpcScheduleEditorPanel = defineAsyncComponent(() => import('./NpcScheduleEditorPanel.vue'))
+// inlineDynamicImports: true 已将所有代码合并到单文件，动态 import 无代码分割效果
+// 且 Rollup 内联后会产生 TDZ 错误（Cannot access 'x' before initialization）
+// 因此改用静态导入
+import GameStart from './GameStart.vue'
+import SavePanel from './SavePanel.vue'
+import Settings from './Settings.vue'
+import GameMain from './GameMain.vue'
+import MapEditorPanel from './MapEditorPanel.vue'
+import EventEditorPanel from './EventEditorPanel.vue'
+import NpcScheduleEditorPanel from './NpcScheduleEditorPanel.vue'
 
 const gameStore = useGameStore()
 const currentView = ref('menu') // 'menu', 'start', 'load', 'settings', 'game'

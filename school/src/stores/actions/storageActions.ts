@@ -22,7 +22,6 @@ import { getErrorMessage, getErrorName } from '../../utils/errorUtils'
 import { DEFAULT_RELATIONSHIPS, DEFAULT_PERSONALITIES, DEFAULT_GOALS, DEFAULT_PRIORITIES } from '../../data/relationshipData'
 import { createInitialState } from '../gameStoreState'
 import { stripEmbeddingData, isDeltaSnapshot } from '../../utils/snapshotUtils'
-import { buildSaveExportData } from '../../utils/saveExportWorker'
 
 let saveTimer: any = null
 
@@ -700,6 +699,7 @@ export const storageActions = {
     }
 
     try {
+      const { buildSaveExportData } = await import('../../utils/saveExportWorker')
       return await buildSaveExportData(exportObj, {
         asText: !!options.asText,
         onProgress: options.onProgress

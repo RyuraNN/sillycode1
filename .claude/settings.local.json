@@ -30,7 +30,8 @@
       "Bash(wc:*)",
       "Bash(git:*)",
       "WebFetch(domain:toonformat.dev)",
-      "Bash(cd school:*)"
+      "Bash(cd school:*)",
+      "Bash(npm run:*)"
     ]
   }
 }

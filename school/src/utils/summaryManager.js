@@ -14,19 +14,9 @@ import { extractPersistentFacts, mergePersistentFacts } from './persistentFactSt
 
 // 总结生成提示词模板 - 结构化数据
 
-// 小总结格式字段（共享常量，assistantAI.js 和批量合并 prompt 也引用此定义）
-export const SUMMARY_FORMAT_FIELDS = [
-  '日期|年月日时分',
-  '标题|20字左右的标题',
-  '地点|当前位置',
-  '人物|当前场景内的角色',
-  '描述|正文的摘要总结',
-  '人物关系|人物关系的变化',
-  '重要信息|正文中的重要信息',
-  '角色意图|各角色接下来想要做的事情或目标',
-  '互动内容|与玩家的关键互动（请求、邀约、约定、承诺等）',
-  '待办事项|尚未完成的约定或任务（如有，没有则写"无"）'
-]
+// 小总结格式字段（从独立文件导入，避免与 assistantAI.js 的循环引用）
+import { SUMMARY_FORMAT_FIELDS } from './summaryConstants'
+export { SUMMARY_FORMAT_FIELDS }
 
 // 纯总结模式的 System Prompt (用于大/超级总结)
 const SUMMARY_AI_SYSTEM_DATA = {
