@@ -263,6 +263,15 @@ const closePreview = () => {
   previewSnapshot.value = null
 }
 
+const EXPORT_STAGE_TEXT = {
+  serializing: '整理存档...',
+  compacting: '精简历史...',
+  compressing: '压缩存档...',
+  finalizing: '封装文件...',
+  encoding: '生成文件...',
+  fallback: '压缩失败，改用原始导出...'
+}
+
 // 导出存档
 const handleExport = async () => {
   const btn = document.querySelector('.io-btn.export')
@@ -273,7 +282,14 @@ const handleExport = async () => {
   }
   
   try {
-    const data = await gameStore.getExportData()
+    const data = await gameStore.getExportData({
+      asText: isDebugMode.value,
+      onProgress: (stage) => {
+        if (!btn) return
+        const text = EXPORT_STAGE_TEXT[stage] || '导出中...'
+        btn.innerHTML = `<span class="io-icon">⌛</span> ${text}`
+      }
+    })
     
     // Debug 模式：显示文本框
     if (isDebugMode.value) {
@@ -281,8 +297,7 @@ const handleExport = async () => {
       showDebugExportPanel.value = true
     } else {
       // 正常模式：下载文件
-      const blob = new Blob([data], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
+      const url = URL.createObjectURL(data)
       const a = document.createElement('a')
       a.href = url
       a.download = `school_save_${new Date().toISOString().slice(0,10)}.json`
@@ -397,7 +412,7 @@ const closeDebugImportPanel = () => {
               v-for="(log, index) in previewSnapshot.chatLog.slice(-20).reverse()" 
               :key="index"
               class="chat-preview-item"
-              @click="restoreToChatIndex(previewSnapshot.chatLog.indexOf(log))"
+              @click="restoreToChatIndex(previewSnapshot.chatLog.length - 1 - index)"
             >
               <div class="chat-role-badge" :class="log.type">
                 {{ log.type === 'player' ? '玩家' : 'AI' }}

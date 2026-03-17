@@ -21,7 +21,8 @@ import {
 import { getErrorMessage, getErrorName } from '../../utils/errorUtils'
 import { DEFAULT_RELATIONSHIPS, DEFAULT_PERSONALITIES, DEFAULT_GOALS, DEFAULT_PRIORITIES } from '../../data/relationshipData'
 import { createInitialState } from '../gameStoreState'
-import { fastClone, stripEmbeddingData } from '../../utils/snapshotUtils'
+import { stripEmbeddingData, isDeltaSnapshot } from '../../utils/snapshotUtils'
+import { buildSaveExportData } from '../../utils/saveExportWorker'
 
 let saveTimer: any = null
 
@@ -186,10 +187,76 @@ function createPortableChatLogEntry(log: any) {
   }
 
   if (log.snapshot) {
-    portable.snapshot = stripEmbeddingData(fastClone(log.snapshot))
+    // structuredClone 避免 stripEmbeddingData 修改活对象的 embedding 字段
+    portable.snapshot = stripEmbeddingData(structuredClone(log.snapshot))
   }
 
   return portable
+}
+
+function createPortableGameState(gameState: any) {
+  if (!gameState || typeof gameState !== 'object') {
+    return gameState
+  }
+
+  // structuredClone 避免 stripEmbeddingData 修改活对象的 embedding 字段
+  return stripEmbeddingData(structuredClone(gameState))
+}
+
+function compactPortableChatLog(chatLog: any[], recentWindow = 20) {
+  if (!Array.isArray(chatLog) || chatLog.length === 0) {
+    return []
+  }
+
+  const portableLogs = chatLog.map((log: any) => createPortableChatLogEntry(log))
+  const shouldCompact = portableLogs.length > Math.max(recentWindow * 2, 200)
+
+  if (!shouldCompact) {
+    return portableLogs
+  }
+
+  const cutoffIndex = Math.max(0, portableLogs.length - recentWindow)
+
+  // 收集活跃窗口内依赖的所有基准快照楼层
+  // （与 snapshotActions.ts 的 trimmer 使用相同逻辑）
+  const activeBaseFloors = new Set<number>()
+  for (let i = cutoffIndex; i < portableLogs.length; i++) {
+    const snapshot = portableLogs[i]?.snapshot
+    if (!snapshot) continue
+
+    if (snapshot._isBase && typeof snapshot._floor === 'number') {
+      activeBaseFloors.add(snapshot._floor)
+    } else if (isDeltaSnapshot(snapshot)) {
+      activeBaseFloors.add(snapshot._baseFloor)
+    }
+  }
+
+  for (let i = 0; i < cutoffIndex; i++) {
+    const log = portableLogs[i]
+    const snapshot = log?.snapshot
+
+    if (snapshot) {
+      let shouldKeep = false
+      if (snapshot._isBase) {
+        const baseFloor = snapshot._floor
+        // 保留条件1：活跃窗口内有增量依赖此基准
+        // 保留条件2：这是最靠近活跃窗口的基准（安全 fallback）
+        // （与 snapshotActions.ts 的 trimmer 使用相同逻辑）
+        const isLatestBase = activeBaseFloors.size > 0 &&
+          !Array.from(activeBaseFloors).some(f => f > baseFloor)
+        shouldKeep = activeBaseFloors.has(baseFloor) || isLatestBase
+      }
+      if (!shouldKeep) {
+        delete log.snapshot
+      }
+    }
+
+    if (log.rawContent !== undefined) {
+      delete log.rawContent
+    }
+  }
+
+  return portableLogs
 }
 
 /**
@@ -240,9 +307,12 @@ async function cleanAndMigrateSnapshots(snapshots: any[]): Promise<{ cleaned: an
           s.location = s.gameState.player?.location
         }
 
+        if (Array.isArray(s.chatLog)) {
+          await saveChunkedChatLog(s.id, compactPortableChatLog(s.chatLog, 30))
+        }
+
         await saveSnapshotData(s.id, {
-          gameState: s.gameState,
-          chatLog: s.chatLog
+          gameState: createPortableGameState(s.gameState)
         })
         migrated = true
       } catch (e) {
@@ -545,7 +615,7 @@ export const storageActions = {
   /**
    * 导出存档数据
    */
-  async getExportData(this: any) {
+  async getExportData(this: any, options: { asText?: boolean, onProgress?: (stage: string) => void } = {}) {
     const fullSnapshots = []
     for (const snapshot of this.saveSnapshots) {
       let fullSnapshot = { ...snapshot }
@@ -574,10 +644,11 @@ export const storageActions = {
       // 基准快照每20层一个，1600层约 80个 × 250KB = 20MB
       // 总计约 36MB，相比之前的 375MB 已经大幅减少
       if (fullSnapshot.gameState) {
-        fullSnapshot.gameState = stripEmbeddingData(fastClone(fullSnapshot.gameState))
+        fullSnapshot.gameState = createPortableGameState(fullSnapshot.gameState)
       }
       if (fullSnapshot.chatLog && Array.isArray(fullSnapshot.chatLog)) {
-        fullSnapshot.chatLog = fullSnapshot.chatLog.map((log: any) => createPortableChatLogEntry(log))
+        const recentWindow = Math.max(this.settings?.snapshotLimit || 10, 20)
+        fullSnapshot.chatLog = compactPortableChatLog(fullSnapshot.chatLog, recentWindow)
       }
 
       fullSnapshots.push(fullSnapshot)
@@ -628,50 +699,16 @@ export const storageActions = {
       }
     }
 
-    // 分块序列化以避免 RangeError: Invalid string length
     try {
-      const jsonString = JSON.stringify(exportObj)
-      console.log(`[Export] Original: ${(jsonString.length/1024/1024).toFixed(2)} MB`)
-
-      // 尝试压缩
-      try {
-        const { compressData } = await import('../../utils/compressionUtils')
-        const compressed = compressData(jsonString)
-        console.log(`[Export] Compressed: ${(compressed.length/1024/1024).toFixed(2)} MB`)
-
-        return JSON.stringify({
-          version: 4,
-          compressed: true,
-          data: compressed,
-          timestamp: Date.now()
-        })
-      } catch (compressionError) {
-        console.warn('[Export] Compression failed, using uncompressed format:', compressionError)
-        return jsonString
-      }
+      return await buildSaveExportData(exportObj, {
+        asText: !!options.asText,
+        onProgress: options.onProgress
+      })
     } catch (e) {
       const errorMessage = getErrorMessage(e, '')
       const errorName = getErrorName(e)
       if (errorMessage.includes('Invalid string length') || errorName === 'RangeError') {
-        console.error('[Export] 存档数据过大，尝试压缩...')
-
-        // 如果存档过大，移除 chatLog 中的 snapshot 数据
-        for (const snap of fullSnapshots) {
-          if (snap.chatLog && Array.isArray(snap.chatLog)) {
-            snap.chatLog = snap.chatLog.map((log: any) => ({
-              type: log.type,
-              content: log.content
-              // 移除 rawContent 和 snapshot 以减小体积
-            }))
-          }
-        }
-
-        // 重新尝试序列化
-        try {
-          return JSON.stringify(exportObj)
-        } catch (e2) {
-          throw new Error('存档数据过大，无法导出。请尝试删除一些旧存档后再试。')
-        }
+        throw new Error('存档数据过大，无法导出。请尝试删除一些旧存档后再试。')
       }
       throw e
     }
@@ -789,13 +826,12 @@ export const storageActions = {
         
         if (snapshot.gameState || snapshot.chatLog) {
           if (Array.isArray(snapshot.chatLog)) {
-            await saveChunkedChatLog(snapshot.id, snapshot.chatLog, {
-              serializeEntry: createPortableChatLogEntry
-            })
+            const recentWindow = Math.max(this.settings?.snapshotLimit || 10, 20)
+            await saveChunkedChatLog(snapshot.id, compactPortableChatLog(snapshot.chatLog, recentWindow))
           }
 
           await saveSnapshotData(snapshot.id, {
-            gameState: snapshot.gameState ? stripEmbeddingData(fastClone(snapshot.gameState)) : snapshot.gameState
+            gameState: snapshot.gameState ? createPortableGameState(snapshot.gameState) : snapshot.gameState
           })
           
           delete snapshot.gameState
@@ -804,7 +840,7 @@ export const storageActions = {
         
         processedSnapshots.push(snapshot)
 
-        if (i % 1 === 0) {
+        if (i % 10 === 0) {
           await new Promise(resolve => setTimeout(resolve, 10))
         }
       }

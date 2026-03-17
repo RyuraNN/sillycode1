@@ -346,7 +346,9 @@ export const snapshotActions = {
       }
     }
 
-    const state = fastClone(fullSnapshot.gameState)
+    // 从 IndexedDB / 导入文件拿到的 gameState 已经是纯数据，
+    // 这里避免再对超大存档做一次深拷贝，否则高楼层会明显放大内存峰值。
+    const state = fullSnapshot.gameState
 
     // 【修复】状态合并：确保旧存档缺失的字段被默认值填充
     const defaultPlayer = createInitialState().player
