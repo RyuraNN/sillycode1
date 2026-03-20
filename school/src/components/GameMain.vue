@@ -15,7 +15,7 @@ import { deleteSocialMessage, deleteMomentFromWorldbook } from '../utils/socialW
 import { optimizeWorldbook, setVariableParsingWorldbookStatus, fetchMapDataFromWorldbook, syncClassWorldbookState, setupTeacherClassEntries } from '../utils/worldbookParser'
 import { callAssistantAI, callImageAnalysisAI } from '../utils/assistantAI'
 import { setMapData } from '../data/mapData'
-import { processPostReply, buildSummarizedHistory, extractSummary, removeThinking } from '../utils/summaryManager'
+import { processPostReply, buildSummarizedHistory, extractSummary, removeThinking, removeSummariesAfterFloor } from '../utils/summaryManager'
 import { getErrorMessage } from '../utils/errorUtils'
 
 // 工具函数
@@ -1625,6 +1625,15 @@ const handleRollbackToFloor = async (targetIndex) => {
 
   gameStore.currentFloor = gameLog.value.length
 
+  // 【修复】回溯后清理超出目标楼层的总结和持久事实，防止残留旧数据
+  const rollbackFloor = gameStore.currentFloor + 1 // removeSummariesAfterFloor 使用 < floor 比较
+  removeSummariesAfterFloor(rollbackFloor)
+  if (gameStore.player.persistentFacts?.length > 0) {
+    gameStore.player.persistentFacts = gameStore.player.persistentFacts.filter(
+      f => f.sourceFloor <= gameStore.currentFloor
+    )
+  }
+
   // 清理状态
   suggestedReplies.value = []
   lastRoundChanges.value = []
@@ -1662,10 +1671,23 @@ const handleAssistantReroll = async () => {
   // 保存重roll前的状态用于对比
   const preRerollSnapshot = lastLog.preVariableSnapshot || gameStore.getGameState()
   
+  // 【修复】保存当前楼层的小总结，防止 restoreGameState 覆盖后丢失
+  const currentFloor = gameStore.currentFloor
+  const savedFloorSummaries = gameStore.player.summaries.filter(
+    s => s.floor === currentFloor
+  )
+  
   // 如果有 preVariableSnapshot，先恢复到辅助AI执行前的状态
   if (lastLog.preVariableSnapshot) {
     await gameStore.restoreGameState(lastLog.preVariableSnapshot)
     await gameStore.syncWorldbook()
+    
+    // 【修复】恢复当前楼层的小总结（preVariableSnapshot 不含当前楼层总结）
+    for (const saved of savedFloorSummaries) {
+      if (!gameStore.player.summaries.some(s => s.floor === saved.floor && s.type === saved.type)) {
+        gameStore.player.summaries.push(saved)
+      }
+    }
   }
   
   // 获取原始内容

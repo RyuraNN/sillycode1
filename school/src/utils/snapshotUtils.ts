@@ -127,8 +127,9 @@ export function stripBulkyFields<T>(snapshot: T): T {
   const player = (snapshot as any).player
   if (!player) return snapshot
   for (const field of BULKY_PLAYER_FIELDS) {
-    if (Array.isArray(player[field]) && player[field].length > 0) {
+    if (Array.isArray(player[field])) {
       // 保留条目数量标记，方便调试和回滚校验
+      // 【修复】即使 length === 0 也设置标记，以区分"被剥离的快照"和"完整存档"
       player[`_${field}Count`] = player[field].length
       player[field] = []
     }

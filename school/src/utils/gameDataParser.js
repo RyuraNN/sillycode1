@@ -405,6 +405,8 @@ export const generateDetailedChanges = (oldState, newState) => {
     health: '健康',
     level: '等级',
     freePoints: '点数',
+    totalExp: '总经验',
+    gradeYear: '年级',
     location: '位置'
   }
 
@@ -470,6 +472,31 @@ export const generateDetailedChanges = (oldState, newState) => {
     }
   }
 
+  // 3.5 学科经验值（只对比存在的字段）
+  const subjectExpLabelMap = {
+    literature: '语文经验',
+    math: '数学经验',
+    english: '英语经验',
+    humanities: '人文经验',
+    sciences: '理科经验',
+    art: '艺术经验',
+    sports: '体育经验'
+  }
+
+  if (newState.player?.subjectExps || oldState.player?.subjectExps) {
+    for (const [key, label] of Object.entries(subjectExpLabelMap)) {
+      if (newState.player?.subjectExps?.[key] !== undefined ||
+          oldState.player?.subjectExps?.[key] !== undefined) {
+        const change = compareValue(
+          oldState.player?.subjectExps?.[key] || 0,
+          newState.player?.subjectExps?.[key] || 0,
+          label
+        )
+        if (change) changes.push(change)
+      }
+    }
+  }
+
   // 4. 技能（只对比存在的字段）
   const skillMap = {
     programming: '编程',
@@ -491,6 +518,34 @@ export const generateDetailedChanges = (oldState, newState) => {
         const change = compareValue(
           oldState.player?.skills?.[key] || 0,
           newState.player?.skills?.[key] || 0,
+          label
+        )
+        if (change) changes.push(change)
+      }
+    }
+  }
+
+  // 4.5 技能经验值（只对比存在的字段）
+  const skillExpLabelMap = {
+    programming: '编程经验',
+    painting: '绘画经验',
+    guitar: '吉他经验',
+    piano: '钢琴经验',
+    urbanLegend: '都市传说经验',
+    cooking: '烹饪经验',
+    hacking: '黑客经验',
+    socialMedia: '社交媒体经验',
+    photography: '摄影经验',
+    videoEditing: '视频剪辑经验'
+  }
+
+  if (newState.player?.skillExps || oldState.player?.skillExps) {
+    for (const [key, label] of Object.entries(skillExpLabelMap)) {
+      if (newState.player?.skillExps?.[key] !== undefined ||
+          oldState.player?.skillExps?.[key] !== undefined) {
+        const change = compareValue(
+          oldState.player?.skillExps?.[key] || 0,
+          newState.player?.skillExps?.[key] || 0,
           label
         )
         if (change) changes.push(change)

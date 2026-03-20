@@ -900,13 +900,14 @@ export const snapshotActions = {
 
     // 【修复】如果内联快照中 summaries/persistentFacts 被剥离（空数组），
     // 保留当前 store 中的数据（这些累积数据在 gameState 存档中独立维护）
+    // 通过 _summariesCount 标记区分"被 stripBulkyFields 剥离的快照"和"完整存档"
     if (data.player) {
-      if (Array.isArray(data.player.summaries) && data.player.summaries.length === 0 && (data.player as any)._summariesCount > 0) {
+      if (Array.isArray(data.player.summaries) && data.player.summaries.length === 0 && (data.player as any)._summariesCount !== undefined) {
         // 快照中的 summaries 被剥离过，保留 store 中的当前数据
         data.player.summaries = this.player?.summaries || []
         delete (data.player as any)._summariesCount
       }
-      if (Array.isArray(data.player.persistentFacts) && data.player.persistentFacts.length === 0 && (data.player as any)._persistentFactsCount > 0) {
+      if (Array.isArray(data.player.persistentFacts) && data.player.persistentFacts.length === 0 && (data.player as any)._persistentFactsCount !== undefined) {
         data.player.persistentFacts = this.player?.persistentFacts || []
         delete (data.player as any)._persistentFactsCount
       }
