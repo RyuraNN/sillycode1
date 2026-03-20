@@ -725,8 +725,7 @@ async function requestRewriteCompletion(endpoint, apiKey, model, systemPrompt, u
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
         ],
-        temperature,
-        max_tokens: enableProactiveQuery ? 500 : 300
+        temperature
       })
     })
   } finally {
@@ -1421,8 +1420,7 @@ ${summariesText}
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt }
           ],
-          temperature,
-          max_tokens: 800
+          temperature
         })
       })
     } finally {
