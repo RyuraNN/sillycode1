@@ -704,33 +704,25 @@ function parseRewriteXmlResult(result, userInput) {
   }
 }
 
-const RAG_AI_TIMEOUT_MS = 8000 // AI 辅助调用超时（query rewrite / enhanced recall）
+const RAG_AI_TIMEOUT_MS = 15000 // AI 辅助调用超时（enhanced recall）
 
 async function requestRewriteCompletion(endpoint, apiKey, model, systemPrompt, userPrompt, enableProactiveQuery) {
   const temperature = model && model.toLowerCase().includes('gpt') ? 1 : 0
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), RAG_AI_TIMEOUT_MS)
-  let res
-  try {
-    res = await fetch(endpoint, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        temperature
-      })
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      temperature
     })
-  } finally {
-    clearTimeout(timer)
-  }
+  })
 
   if (!res.ok) {
     const errText = await res.text().catch(() => res.statusText)
