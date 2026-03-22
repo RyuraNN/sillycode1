@@ -41,7 +41,9 @@ export const playerActions = {
    * 增加基础经验
    */
   addExp(this: any, amount: number) {
-    this.player.totalExp += amount
+    const globalMultiplier = this.settings?.expMultiplier ?? 1
+    const finalAmount = Math.round(amount * globalMultiplier)
+    this.player.totalExp += finalAmount
     while (this.player.totalExp >= 100) {
       this.player.totalExp -= 100
       this.player.level++
@@ -95,7 +97,8 @@ export const playerActions = {
   addSubjectExp(this: any, subject: string, amount: number) {
     if (this.player.subjectExps[subject] !== undefined) {
       const bonuses = this.getTalentBonuses()
-      const multiplier = 1 + (bonuses.expBonus.knowledge / 100) + (this.getExpMultiplier('knowledge') - 1)
+      const globalMultiplier = this.settings?.expMultiplier ?? 1
+      const multiplier = (1 + (bonuses.expBonus.knowledge / 100) + (this.getExpMultiplier('knowledge') - 1)) * globalMultiplier
       const finalAmount = Math.round(amount * multiplier)
       
       this.player.subjectExps[subject] += finalAmount
@@ -112,6 +115,7 @@ export const playerActions = {
   addSkillExp(this: any, skill: string, amount: number) {
     if (this.player.skillExps[skill] !== undefined) {
       const bonuses = this.getTalentBonuses()
+      const globalMultiplier = this.settings?.expMultiplier ?? 1
       let multiplier = 1 + (this.getExpMultiplier('skill') - 1)
       
       if (skill === 'painting') {
@@ -120,6 +124,7 @@ export const playerActions = {
         multiplier += bonuses.expBonus.skill.programming / 100
       }
       multiplier += bonuses.expBonus.skill.all / 100
+      multiplier *= globalMultiplier
       
       const finalAmount = Math.round(amount * multiplier)
       

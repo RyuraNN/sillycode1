@@ -74,7 +74,9 @@ const editData = reactive({
     weekday: 'Monday'
   },
   // 位置
-  location: ''
+  location: '',
+  // 经验倍率
+  expMultiplier: 1
 })
 
 // 是否有未保存的修改
@@ -84,6 +86,7 @@ const showSaveSuccess = ref(false)
 // 当前展开的分组
 const expandedGroups = reactive({
   basic: true,
+  expMultiplier: false,
   attributes: false,
   potentials: false,
   subjects: false,
@@ -185,6 +188,8 @@ const loadCurrentState = () => {
 
   editData.location = p.location
 
+  editData.expMultiplier = gameStore.settings?.expMultiplier ?? 1
+
   hasChanges.value = false
 }
 
@@ -274,6 +279,13 @@ const applyChanges = () => {
     p.location = editData.location
   }
 
+  // 经验倍率
+  const newExpMul = Number(editData.expMultiplier)
+  if (!isNaN(newExpMul) && newExpMul > 0 && newExpMul !== (gameStore.settings?.expMultiplier ?? 1)) {
+    changes.push({ label: '经验倍率', oldValue: gameStore.settings.expMultiplier, newValue: newExpMul })
+    gameStore.settings.expMultiplier = newExpMul
+  }
+
   if (changes.length === 0) {
     hasChanges.value = false
     return
@@ -316,6 +328,31 @@ const getWeekdayLabel = (value) => {
       <div class="info-card">
         <span class="info-icon">ℹ️</span>
         <span class="info-text">查看并修改当前状态变量。修改后点击底部确定按钮即时生效。</span>
+      </div>
+
+      <!-- ⚡ 经验倍率 -->
+      <div class="var-group">
+        <div class="group-header" @click="toggleGroup('expMultiplier')">
+          <span class="group-icon">⚡</span>
+          <span class="group-title">经验倍率</span>
+          <span class="group-arrow" :class="{ expanded: expandedGroups.expMultiplier }">▶</span>
+        </div>
+        <div v-if="expandedGroups.expMultiplier" class="group-body">
+          <div class="var-row">
+            <label class="var-label">经验倍率</label>
+            <input 
+              type="number" 
+              class="var-input" 
+              v-model.number="editData.expMultiplier"
+              step="0.1"
+              min="0.1"
+              @input="markChanged"
+            />
+          </div>
+          <div class="exp-multiplier-hint">
+            当前倍率: ×{{ editData.expMultiplier }}（影响所有经验获取）
+          </div>
+        </div>
       </div>
 
       <!-- 💰 基础属性 -->
@@ -685,6 +722,14 @@ const getWeekdayLabel = (value) => {
 
 .var-select:focus {
   border-color: #007aff;
+}
+
+/* 经验倍率提示 */
+.exp-multiplier-hint {
+  padding: 4px 14px 8px;
+  font-size: 12px;
+  color: #888;
+  line-height: 1.4;
 }
 
 /* 底部间距 */

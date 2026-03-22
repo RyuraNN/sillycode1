@@ -52,6 +52,7 @@ export interface GameStateData {
   }
   settings?: {
     difficulty: 'easy' | 'normal' | 'hard'
+    expMultiplier: number
     bgmVolume: number
     titleFont: string
     bodyFont: string
@@ -776,6 +777,7 @@ export interface GameState {
   }
   settings: {
     difficulty: 'easy' | 'normal' | 'hard'
+    expMultiplier: number
     bgmVolume: number
     titleFont: string
     bodyFont: string

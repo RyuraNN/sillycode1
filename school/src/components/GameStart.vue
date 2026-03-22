@@ -49,6 +49,7 @@ const formData = ref({
   gender: 'male',
   classId: '',
   gameMode: 'normal', // 默认普通模式
+  expDifficulty: 'normal', // 经验难度：easy/normal/hard
   familyBackground: 'f1', // 默认普通家庭
   childhood: ['', '', ''],
   elementary: ['', '', ''],
@@ -598,6 +599,13 @@ const familyOptions = {
   custom: { name: '自定义（50点）', cost: 50, desc: '完全自定义你的出身背景。' }
 }
 
+// 经验难度定义
+const expDifficultyOptions = {
+  easy: { label: '简单', multiplier: 2, desc: '经验获取×2，适合轻松体验' },
+  normal: { label: '普通', multiplier: 1, desc: '经验获取×1，标准体验' },
+  hard: { label: '困难', multiplier: 0.75, desc: '经验获取×0.75，更具挑战' }
+}
+
 // 游戏模式定义
 const gameModes = {
   dragon: { label: '天龙模式', points: 999 },
@@ -849,6 +857,11 @@ const confirmSignature = async () => {
   gameStore.player.newGameGuideTurns = 3 // 初始化新游戏引导回合数
   gameStore.player.role = playerRole.value // 保存角色类型
   gameStore.player.gameMode = formData.value.gameMode // 保存游戏模式
+
+  // 保存经验倍率设置
+  const selectedDifficulty = expDifficultyOptions[formData.value.expDifficulty] || expDifficultyOptions.normal
+  gameStore.settings.difficulty = formData.value.expDifficulty
+  gameStore.settings.expMultiplier = selectedDifficulty.multiplier
 
   // 教师模式数据保存
   if (playerRole.value === 'teacher') {
@@ -1249,6 +1262,15 @@ const confirmSignature = async () => {
             <select v-model="formData.gameMode" class="input-field">
               <option v-for="(mode, key) in gameModes" :key="key" :value="key">
                 {{ mode.label }} ({{ mode.points }}点)
+              </option>
+            </select>
+          </div>
+
+          <div class="form-row">
+            <label>经验难度：</label>
+            <select v-model="formData.expDifficulty" class="input-field">
+              <option v-for="(opt, key) in expDifficultyOptions" :key="key" :value="key">
+                {{ opt.label }} ({{ opt.desc }})
               </option>
             </select>
           </div>

@@ -167,6 +167,7 @@ export function createInitialState(): GameState {
     },
     settings: {
       difficulty: 'normal',
+      expMultiplier: 1,
       bgmVolume: 50,
       titleFont: "'Ma Shan Zheng', cursive",
       bodyFont: "'Arial', sans-serif",
