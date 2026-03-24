@@ -14,7 +14,7 @@ const selectedCharName = ref(null)
 
 // 辅助函数：获取角色的完整关系数据 (合并 Store 和 Default，并过滤被排除的角色)
 const getCharRelations = (charName) => {
-    const storeData = gameStore.npcRelationships[charName]?.relations || {}
+    const storeData = gameStore.world.npcRelationships[charName]?.relations || {}
     const defaultData = DEFAULT_RELATIONSHIPS[charName] || {}
     
     // 合并关系数据，Store 优先
@@ -29,7 +29,7 @@ const getCharRelations = (charName) => {
     rosterNames.add('Player')
     rosterNames.add('玩家')
     
-    for (const classInfo of Object.values(gameStore.allClassData || {})) {
+    for (const classInfo of Object.values(gameStore.world.allClassData || {})) {
         if (classInfo.headTeacher?.name) rosterNames.add(classInfo.headTeacher.name)
         if (Array.isArray(classInfo.teachers)) {
             classInfo.teachers.forEach(t => { if (t.name) rosterNames.add(t.name) })
@@ -61,7 +61,7 @@ const hasPlayerRelation = (charName) => {
 const charList = computed(() => {
   // 先按 name 去重（保留第一个出现的），防止底层数据有重复 NPC
   const seen = new Set()
-  const uniqueNpcs = gameStore.npcs.filter(npc => {
+  const uniqueNpcs = gameStore.world.npcs.filter(npc => {
     if (seen.has(npc.name)) return false
     seen.add(npc.name)
     return true
@@ -71,7 +71,7 @@ const charList = computed(() => {
     .filter(npc => hasPlayerRelation(npc.name))
     .map(npc => {
         // 尝试获取更多详细信息
-        const fullData = gameStore.npcRelationships[npc.name] || {}
+        const fullData = gameStore.world.npcRelationships[npc.name] || {}
         
         // 获取与玩家的关系数据
         const relations = getCharRelations(npc.name)
@@ -82,7 +82,7 @@ const charList = computed(() => {
         
         // Pass genders
         const playerGender = gameStore.player.gender || 'male'
-        const npcGender = gameStore.npcRelationships[npc.name]?.gender || npc.gender || 'female'
+        const npcGender = gameStore.world.npcRelationships[npc.name]?.gender || npc.gender || 'female'
         
         const emotion = getEmotionalState(playerRel, playerGender, npcGender)
         
@@ -158,7 +158,7 @@ const getDisplayEmotionalState = (relation) => {
     if (!currentChar.value) return getEmotionalState(relation)
     
     const playerGender = gameStore.player.gender || 'male'
-    const npcGender = gameStore.npcRelationships[currentChar.value.name]?.gender || currentChar.value.gender || 'female'
+    const npcGender = gameStore.world.npcRelationships[currentChar.value.name]?.gender || currentChar.value.gender || 'female'
     
     return getEmotionalState(relation, playerGender, npcGender)
 }
@@ -196,7 +196,7 @@ const MAX_VELOCITY = 8
 const getRosterNames = () => {
     const names = new Set()
     names.add(gameStore.player.name)
-    for (const classInfo of Object.values(gameStore.allClassData || {})) {
+    for (const classInfo of Object.values(gameStore.world.allClassData || {})) {
         if (classInfo.headTeacher?.name) names.add(classInfo.headTeacher.name)
         if (Array.isArray(classInfo.teachers)) classInfo.teachers.forEach(t => { if (t.name) names.add(t.name) })
         if (Array.isArray(classInfo.students)) classInfo.students.forEach(s => { if (s.name) names.add(s.name) })
@@ -260,7 +260,7 @@ const initNetworkData = () => {
         const r = SPRING_LEN * 1.2
         const rel = focusRelations[name] || getCharRelations(name)[focusName]
         const score = rel ? calculateRelationshipScore(rel) : 0
-        const npcGender = gameStore.npcRelationships[name]?.gender || 'unknown'
+        const npcGender = gameStore.world.npcRelationships[name]?.gender || 'unknown'
         const emotionText = rel ? getEmotionalState(rel, playerGender, npcGender).text : '陌生'
         const nodeRadius = Math.max(20, name.length * 7)
 
@@ -754,7 +754,7 @@ watch(selectedCharName, async (newVal) => {
 })
 
 // watch: 数据变化时重建图
-watch(() => gameStore.npcRelationships, () => {
+watch(() => gameStore.world.npcRelationships, () => {
     if (selectedCharName.value) {
         nextTick(() => {
             initNetworkData()
@@ -791,7 +791,7 @@ const availableCharacters = computed(() => {
   if (!currentChar.value) return []
   const names = new Set()
   names.add(gameStore.player.name)
-  for (const classInfo of Object.values(gameStore.allClassData || {})) {
+  for (const classInfo of Object.values(gameStore.world.allClassData || {})) {
     if (classInfo.headTeacher?.name) names.add(classInfo.headTeacher.name)
     if (Array.isArray(classInfo.teachers)) {
       classInfo.teachers.forEach(t => { if (t.name) names.add(t.name) })

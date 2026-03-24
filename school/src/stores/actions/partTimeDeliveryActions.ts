@@ -33,7 +33,7 @@ export const partTimeDeliveryActions = {
    * 检查订单是否送达（每次时间推进后调用）
    */
   checkDeliveries(this: any) {
-    const { year, month, day, hour } = this.gameTime
+    const { year, month, day, hour } = this.world.gameTime
     const deliveredOrders: PendingDelivery[] = []
     const currentTime = new Date(year, month - 1, day, hour, 0)
 
@@ -102,7 +102,7 @@ export const partTimeDeliveryActions = {
 
     this.player.partTimeJob.currentJob = locationId
     
-    const startDate = `${this.gameTime.year}年${this.gameTime.month}月${this.gameTime.day}日`
+    const startDate = `${this.world.gameTime.year}年${this.world.gameTime.month}月${this.world.gameTime.day}日`
     if (!this.player.partTimeJob.history) {
       this.player.partTimeJob.history = []
     }
@@ -116,7 +116,7 @@ export const partTimeDeliveryActions = {
 
     try {
       const { updatePartTimeWorldbookEntry } = await import('../../utils/partTimeWorldbook.js')
-      await updatePartTimeWorldbookEntry(this.currentRunId, this.player.partTimeJob.history, this.player.name)
+      await updatePartTimeWorldbookEntry(this.meta.currentRunId, this.player.partTimeJob.history, this.player.name)
     } catch (e) {
       console.error('[GameStore] Failed to update part-time worldbook entry:', e)
     }
@@ -142,12 +142,12 @@ export const partTimeDeliveryActions = {
     
     const currentHistory = this.player.partTimeJob.history.find((h: any) => h.endDate === null && h.locationId === jobId)
     if (currentHistory) {
-      currentHistory.endDate = `${this.gameTime.year}年${this.gameTime.month}月${this.gameTime.day}日`
+      currentHistory.endDate = `${this.world.gameTime.year}年${this.world.gameTime.month}月${this.world.gameTime.day}日`
     }
 
     try {
       const { updatePartTimeWorldbookEntry } = await import('../../utils/partTimeWorldbook.js')
-      await updatePartTimeWorldbookEntry(this.currentRunId, this.player.partTimeJob.history, this.player.name)
+      await updatePartTimeWorldbookEntry(this.meta.currentRunId, this.player.partTimeJob.history, this.player.name)
     } catch (e) {
       console.error('[GameStore] Failed to update part-time worldbook entry:', e)
     }
@@ -174,7 +174,7 @@ export const partTimeDeliveryActions = {
       return { success: false, message: '你不在兼职地点，无法开始工作' }
     }
 
-    const startTime = this.gameTime.hour * 60 + this.gameTime.minute
+    const startTime = this.world.gameTime.hour * 60 + this.world.gameTime.minute
     this.player.partTimeJob.isWorking = true
     this.player.partTimeJob.workStartTime = startTime
 
@@ -191,7 +191,7 @@ export const partTimeDeliveryActions = {
     }
 
     const startTime = this.player.partTimeJob.workStartTime || 0
-    const endTime = this.gameTime.hour * 60 + this.gameTime.minute
+    const endTime = this.world.gameTime.hour * 60 + this.world.gameTime.minute
     
     let duration = endTime - startTime
     if (duration < 0) {
@@ -249,7 +249,7 @@ export const partTimeDeliveryActions = {
     if (!this.player.partTimeJob.isWorking || this.player.partTimeJob.workStartTime === null) {
       return 0
     }
-    const currentTime = this.gameTime.hour * 60 + this.gameTime.minute
+    const currentTime = this.world.gameTime.hour * 60 + this.world.gameTime.minute
     let duration = currentTime - this.player.partTimeJob.workStartTime
     if (duration < 0) {
       duration += 24 * 60

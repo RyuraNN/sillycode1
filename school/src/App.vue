@@ -111,11 +111,11 @@ async function doInitialize() {
     // 加载自定义课程池 (需要 currentRunId)
     let courseLoaded = false
     try {
-      courseLoaded = await loadCoursePoolFromWorldbook(gameStore.currentRunId)
+      courseLoaded = await loadCoursePoolFromWorldbook(gameStore.meta.currentRunId)
     } catch (e) {
       console.warn('[App] loadCoursePoolFromWorldbook failed:', e)
     }
-    gameStore.worldbookLoadResults.courseData = !!courseLoaded
+    gameStore._ui.worldbookLoadResults.courseData = !!courseLoaded
 
     clearTimeout(initTimeoutTimer)
 
@@ -204,8 +204,8 @@ async function onSkipCacheAndContinue() {
   try {
     isInitializing.value = true
     // 尝试加载课程池
-    const courseLoaded = await loadCoursePoolFromWorldbook(gameStore.currentRunId)
-    gameStore.worldbookLoadResults.courseData = !!courseLoaded
+    const courseLoaded = await loadCoursePoolFromWorldbook(gameStore.meta.currentRunId)
+    gameStore._ui.worldbookLoadResults.courseData = !!courseLoaded
     await gameStore.rebuildWorldbookState()
     await gameStore.initializeNpcRelationships()
   } catch (e) {
@@ -315,7 +315,7 @@ watch(() => gameStore.settings.darkMode, (isDark) => {
     <!-- 开屏提示面板 -->
     <SplashScreen
       v-if="showSplashScreen"
-      :load-results="gameStore.worldbookLoadResults"
+      :load-results="gameStore._ui.worldbookLoadResults"
       @enter="onEnterGame"
     />
 

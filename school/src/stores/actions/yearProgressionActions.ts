@@ -79,7 +79,7 @@ export const yearProgressionActions = {
    * 触发条件：游戏时间进入4月1日（新学年开始）
    */
   checkYearProgression(this: any) {
-    const { year, month, day } = this.gameTime
+    const { year, month, day } = this.world.gameTime
 
     // 只在4月1日触发
     if (month !== 4 || day !== 1) return
@@ -88,14 +88,14 @@ export const yearProgressionActions = {
     // 学年标识 = 该学年的4月所在的年份
     const currentAcademicYearId = year
 
-    if (this.lastAcademicYear >= currentAcademicYearId) {
+    if (this.world.lastAcademicYear >= currentAcademicYearId) {
       // 已经处理过这个学年
       return
     }
 
     // 如果是游戏刚开始的第一年（lastAcademicYear === 0），跳过进级
-    if (this.lastAcademicYear === 0) {
-      this.lastAcademicYear = currentAcademicYearId
+    if (this.world.lastAcademicYear === 0) {
+      this.world.lastAcademicYear = currentAcademicYearId
       console.log('[YearProgression] First year, skipping progression')
       return
     }
@@ -107,7 +107,7 @@ export const yearProgressionActions = {
     }
 
     // 立即设置 lastAcademicYear，防止下次 advanceTime 再次触发
-    this.lastAcademicYear = currentAcademicYearId
+    this.world.lastAcademicYear = currentAcademicYearId
 
     console.log(`[YearProgression] New academic year detected: ${currentAcademicYearId}`)
 
@@ -164,7 +164,7 @@ export const yearProgressionActions = {
         // 尝试自动分配给新班级（如果之前的班级ID失效了）
         const newTeachingClasses = []
         for (const classId of this.player.teachingClasses) {
-           if (this.allClassData[classId]) {
+           if (this.world.allClassData[classId]) {
              newTeachingClasses.push(classId)
            } else {
              // 班级已毕业，尝试找对应的新班级（例如原1-A变成了2-A）
@@ -210,7 +210,7 @@ export const yearProgressionActions = {
         await this.regenerateSchedules()
 
         // 更新学年
-        this.player.academicYear = this.gameTime.year
+        this.player.academicYear = this.world.gameTime.year
 
         // 发送通知
         this.addCommand(`[系统] 🌸 新学年开始！全校继续当前年级学习。`)
@@ -280,7 +280,7 @@ export const yearProgressionActions = {
 
     const graduatedNames = new Set<string>()
     const freedTeachers: any[] = []
-    const allClassData = this.allClassData
+    const allClassData = this.world.allClassData
 
     if (!allClassData) {
       return { graduatedNames, graduatedCount: 0, freedTeachers }
@@ -316,15 +316,15 @@ export const yearProgressionActions = {
           gender: student.gender,
           origin: student.origin,
           classId: classId,
-          graduationYear: this.gameTime.year,
+          graduationYear: this.world.gameTime.year,
           clubsAtGraduation: this.getStudentClubIds(student.name)
         }
 
-        if (!this.graduatedNpcs) this.graduatedNpcs = []
-        this.graduatedNpcs.push(graduatedNpc)
+        if (!this.world.graduatedNpcs) this.world.graduatedNpcs = []
+        this.world.graduatedNpcs.push(graduatedNpc)
 
         // 更新NPC角色为 graduated，修改日程模板标签
-        const npc = this.npcs.find((n: NpcStats) => n.name === student.name)
+        const npc = this.world.npcs.find((n: NpcStats) => n.name === student.name)
         if (npc) {
           (npc as any).role = 'other'
           ;(npc as any).scheduleTag = 'graduated'
@@ -370,7 +370,7 @@ export const yearProgressionActions = {
    * 检查教师是否还在非指定班级列表的班级中任教
    */
   teacherHasOtherAssignments(this: any, teacherName: string, excludeClasses: string[]): boolean {
-    const allClassData = this.allClassData
+    const allClassData = this.world.allClassData
     if (!allClassData) return false
 
     const excludeSet = new Set(excludeClasses)
@@ -391,9 +391,9 @@ export const yearProgressionActions = {
    */
   getStudentClubIds(this: any, studentName: string): string[] {
     const clubIds: string[] = []
-    if (!this.allClubs) return clubIds
+    if (!this.world.allClubs) return clubIds
 
-    for (const [clubId, club] of Object.entries(this.allClubs) as any[]) {
+    for (const [clubId, club] of Object.entries(this.world.allClubs) as any[]) {
       const isMember = club.members?.includes(studentName) ||
         club.president === studentName ||
         club.vicePresident === studentName
@@ -411,11 +411,11 @@ export const yearProgressionActions = {
   processClubGraduationInMemory(this: any, graduatedNames: Set<string>) {
     console.log('[YearProgression] Step 2: Processing club graduation cleanup (memory only)...')
 
-    if (!this.allClubs || graduatedNames.size === 0) return
+    if (!this.world.allClubs || graduatedNames.size === 0) return
 
     const closedClubs: string[] = []
 
-    for (const [clubId, club] of Object.entries(this.allClubs) as [string, ClubData][]) {
+    for (const [clubId, club] of Object.entries(this.world.allClubs) as [string, ClubData][]) {
       // 移除毕业生会员
       if (club.members && Array.isArray(club.members)) {
         club.members = club.members.filter(m => !graduatedNames.has(m))
@@ -469,7 +469,7 @@ export const yearProgressionActions = {
 
     if (closedClubs.length > 0) {
       console.log(`[YearProgression] Closed ${closedClubs.length} clubs:`, closedClubs)
-      this.addCommand(`[系统] 📋 以下社团因全员毕业已暂时关闭：${closedClubs.map(id => this.allClubs[id]?.name || id).join('、')}`)
+      this.addCommand(`[系统] 📋 以下社团因全员毕业已暂时关闭：${closedClubs.map(id => this.world.allClubs[id]?.name || id).join('、')}`)
     }
   },
 
@@ -482,7 +482,7 @@ export const yearProgressionActions = {
   processGradeUpgrade(this: any) {
     console.log('[YearProgression] Step 3: Processing grade upgrade...')
 
-    const allClassData = this.allClassData
+    const allClassData = this.world.allClassData
     if (!allClassData) return
 
     // 收集各年级班级
@@ -604,7 +604,7 @@ export const yearProgressionActions = {
     }
 
     // 更新学年
-    this.player.academicYear = this.gameTime.year
+    this.player.academicYear = this.world.gameTime.year
 
     console.log(`[YearProgression] Grade upgrade complete. Classes:`, Object.keys(allClassData))
   },
@@ -615,7 +615,7 @@ export const yearProgressionActions = {
   updateNpcClassIds(this: any, students: any[], newClassId: string) {
     for (const student of students) {
       if (!student.name) continue
-      const npc = this.npcs.find((n: NpcStats) => n.name === student.name)
+      const npc = this.world.npcs.find((n: NpcStats) => n.name === student.name)
       if (npc) {
         (npc as any).classId = newClassId
       }
@@ -800,7 +800,7 @@ export const yearProgressionActions = {
 
     // 将新班级添加到 allClassData
     for (const [classId, classInfo] of Object.entries(newClasses)) {
-      this.allClassData[classId] = classInfo
+      this.world.allClassData[classId] = classInfo
     }
 
     // 更新角色池中的 grade 标记
@@ -828,8 +828,8 @@ export const yearProgressionActions = {
       const students = Array.isArray(classInfo.students) ? classInfo.students : []
       for (const student of students) {
         const charId = generateCharId(student.name)
-        if (!this.npcs.find((n: NpcStats) => n.id === charId)) {
-          this.npcs.push({
+        if (!this.world.npcs.find((n: NpcStats) => n.id === charId)) {
+          this.world.npcs.push({
             id: charId,
             name: student.name,
             relationship: 0,
@@ -861,7 +861,7 @@ export const yearProgressionActions = {
       return
     }
 
-    const allClassData = this.allClassData
+    const allClassData = this.world.allClassData
     if (!allClassData) return
 
     // 收集新1年级班级（没有班主任或教师不足的）
@@ -899,7 +899,7 @@ export const yearProgressionActions = {
 
         // 确保NPC存在
         const charId = generateCharId(teacher.name)
-        const existingNpc = this.npcs.find((n: NpcStats) => n.id === charId)
+        const existingNpc = this.world.npcs.find((n: NpcStats) => n.id === charId)
         if (existingNpc) {
           (existingNpc as any).classId = classId
         }
@@ -928,7 +928,7 @@ export const yearProgressionActions = {
 
       // 确保NPC存在
       const charId = generateCharId(teacher.name)
-      const existingNpc = this.npcs.find((n: NpcStats) => n.id === charId)
+      const existingNpc = this.world.npcs.find((n: NpcStats) => n.id === charId)
       if (existingNpc) {
         (existingNpc as any).classId = classId
       }
@@ -980,13 +980,13 @@ export const yearProgressionActions = {
           teachingElectives: this.player.teachingElectives,
           customCourses: this.player.customCourses || []
         },
-        { year: this.gameTime.year, month: this.gameTime.month, day: this.gameTime.day },
-        this.allClassData
+        { year: this.world.gameTime.year, month: this.world.gameTime.month, day: this.world.gameTime.day },
+        this.world.allClassData
       )
       console.log('[YearProgression] Regenerated teacher schedule')
     } else if (this.player.classId) {
       // 学生课表
-      const classInfo = this.allClassData[this.player.classId]
+      const classInfo = this.world.allClassData[this.player.classId]
       if (classInfo) {
         this.player.classRoster = classInfo
         this.player.schedule = generateWeeklySchedule(this.player.classId, classInfo, weekNumber)
@@ -1021,14 +1021,14 @@ export const yearProgressionActions = {
     if (this.player.role === 'teacher') {
       // 教师加入所有教授班级的群
       for (const classId of this.player.teachingClasses) {
-        const classInfo = this.allClassData[classId]
+        const classInfo = this.world.allClassData[classId]
         if (classInfo) {
           await this.joinClassGroup(classId, classInfo)
         }
       }
     } else if (this.player.classId) {
       // 学生加入自己班级的群
-      const classInfo = this.allClassData[this.player.classId]
+      const classInfo = this.world.allClassData[this.player.classId]
       if (classInfo) {
         await this.joinClassGroup(this.player.classId, classInfo)
       }
@@ -1047,12 +1047,12 @@ export const yearProgressionActions = {
     console.log('[YearProgression] Step 9: Syncing worldbook with runId isolation...')
 
     try {
-      const runId = this.currentRunId
+      const runId = this.meta.currentRunId
       const playerClassId = this.player.classId
 
       // 为所有当前班级创建带 runId 的世界书条目
       // 这会同时禁用对应的原始条目
-      for (const [classId, classInfo] of Object.entries(this.allClassData) as [string, any][]) {
+      for (const [classId, classInfo] of Object.entries(this.world.allClassData) as [string, any][]) {
         await createRunSpecificClassEntry(classId, classInfo, runId, playerClassId)
       }
 
@@ -1083,8 +1083,8 @@ export const yearProgressionActions = {
    */
   async forceYearProgression(this: any) {
     console.log('[YearProgression] Force triggering year progression...')
-    const academicYearId = this.gameTime.year
-    this.lastAcademicYear = academicYearId
+    const academicYearId = this.world.gameTime.year
+    this.world.lastAcademicYear = academicYearId
     await this.executeYearProgression(academicYearId)
   }
 }

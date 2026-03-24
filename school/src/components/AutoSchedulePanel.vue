@@ -117,7 +117,7 @@ function handleStep3Back() {
 async function handleGenerateClubs(mode) {
   const pool = props.characterPool || []
   const charsWithClass = pool.filter(c => userChoices.value[c.name])
-  const result = await generateClubs(charsWithClass, mode, props.gameStore.allClubs || {})
+  const result = await generateClubs(charsWithClass, mode, props.gameStore.world.allClubs || {})
   if (!result.success) {
     emit('show-message', `社团生成失败: ${result.message}`)
   }
@@ -141,7 +141,7 @@ async function handleConfirm({ clubMode }) {
       registerCustomCourse({
         ...course,
         origin: course.teacherOrigin || '',
-        runId: props.gameStore.currentRunId
+        runId: props.gameStore.meta.currentRunId
       })
     }
     if (newCourses.length > 0) {
@@ -162,7 +162,7 @@ async function handleConfirm({ clubMode }) {
         createClubInWorldbook,
         addNpcToClubInWorldbook
       )
-      await syncClubWorldbookState(props.gameStore.currentRunId, props.gameStore.settings?.useGeminiMode)
+      await syncClubWorldbookState(props.gameStore.meta.currentRunId, props.gameStore.settings?.useGeminiMode)
     }
 
     // 5. 触发保存（复用父组件的保存流程）

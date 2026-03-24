@@ -91,21 +91,21 @@ export const socialActions = {
   setPendingRestoreLog(this: any, log: ChatLogEntry[]) {
     // chatLog 从 IndexedDB 加载时已经是纯数据，直接浅拷贝即可
     // 避免 JSON.stringify 在大数据时抛出 RangeError: Invalid string length
-    this.pendingRestoreLog = [...log]
+    this._ui.pendingRestoreLog = [...log]
   },
 
   /**
    * 更新当前聊天记录（同步）
    */
   syncCurrentChatLog(this: any, log: ChatLogEntry[]) {
-    this.currentChatLog = log
+    this._ui.currentChatLog = log
   },
 
   /**
    * 清除待恢复的聊天记录
    */
   clearPendingRestoreLog(this: any) {
-    this.pendingRestoreLog = null
+    this._ui.pendingRestoreLog = null
   },
 
   /**

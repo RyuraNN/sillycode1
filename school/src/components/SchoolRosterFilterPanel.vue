@@ -199,10 +199,10 @@ const relationshipEditForm = ref({
 })
 
 const relationshipAvailableTargets = computed(() => {
-  if (!editingRelSource.value || !gameStore.npcRelationships) return []
-  const charData = gameStore.npcRelationships[editingRelSource.value]
+  if (!editingRelSource.value || !gameStore.world.npcRelationships) return []
+  const charData = gameStore.world.npcRelationships[editingRelSource.value]
   const existingTargets = new Set(Object.keys(charData?.relations || {}))
-  return Object.keys(gameStore.npcRelationships)
+  return Object.keys(gameStore.world.npcRelationships)
     .filter(n => n !== editingRelSource.value && !existingTargets.has(n))
     .sort((a, b) => a.localeCompare(b, 'zh'))
 })
@@ -290,12 +290,12 @@ const formatSnapshotTime = (snap) => {
 }
 
 const getSnapshotLabel = (id) => {
-  const snap = gameStore.saveSnapshots.find(s => s.id === id)
+  const snap = gameStore._ui.saveSnapshots.find(s => s.id === id)
   return snap?.label || id
 }
 
 // 从备份恢复运行时关系数据，并重新写入 IndexedDB
-const cloneRelationships = () => JSON.parse(JSON.stringify(gameStore.npcRelationships || {}))
+const cloneRelationships = () => JSON.parse(JSON.stringify(gameStore.world.npcRelationships || {}))
 
 const persistRuntimeRelationshipChanges = async (syncWorldbook = false) => {
   if (snapshotRelSource.value) {
@@ -311,7 +311,7 @@ const persistRuntimeRelationshipChanges = async (syncWorldbook = false) => {
 const restoreRuntimeRelationships = async () => {
   let restored = false
   if (runtimeRelBackup.value) {
-    gameStore.npcRelationships = JSON.parse(JSON.stringify(runtimeRelBackup.value))
+    gameStore.world.npcRelationships = JSON.parse(JSON.stringify(runtimeRelBackup.value))
     runtimeRelBackup.value = null
     restored = true
   }
@@ -338,10 +338,10 @@ const loadRelationshipsFromSnapshot = async (snapshotId) => {
       return
     }
     if (!snapshotRelSource.value && !runtimeRelBackup.value) {
-      runtimeRelBackup.value = JSON.parse(JSON.stringify(gameStore.npcRelationships))
+      runtimeRelBackup.value = JSON.parse(JSON.stringify(gameStore.world.npcRelationships))
     }
     snapshotRelData.value = details
-    gameStore.npcRelationships = JSON.parse(JSON.stringify(details.gameState.npcRelationships))
+    gameStore.world.npcRelationships = JSON.parse(JSON.stringify(details.gameState.npcRelationships))
     snapshotRelSource.value = snapshotId
     showMessage('已加载存档关系数据，编辑后点击「保存到存档」回写')
   } catch (e) {
@@ -390,7 +390,7 @@ const handleClose = async () => {
 
 // 将面板编辑的关系数据同步回 [Social_Data] 世界书
 async function syncRelationshipsToWorldbook() {
-  const rels = gameStore.npcRelationships
+  const rels = gameStore.world.npcRelationships
   if (!rels) return
   const worldbookData = {}
   for (const [name, charData] of Object.entries(rels)) {
@@ -413,8 +413,8 @@ onMounted(async () => {
 // ==================== 筛选逻辑 ====================
 const availableClubs = computed(() => {
   const clubs = new Set()
-  if (gameStore.allClubs) {
-    Object.values(gameStore.allClubs).forEach(club => {
+  if (gameStore.world.allClubs) {
+    Object.values(gameStore.world.allClubs).forEach(club => {
       if (club.name) clubs.add(club.name)
     })
   }
@@ -670,7 +670,7 @@ const handleSave = async () => {
 
     // 4. 同步到世界书
     for (const [classId, classInfo] of Object.entries(fullRosterSnapshot.value)) {
-      await updateClassDataInWorldbook(classId, classInfo, true, gameStore.currentRunId)
+      await updateClassDataInWorldbook(classId, classInfo, true, gameStore.meta.currentRunId)
     }
 
     // 5. 同步学力数据
@@ -695,7 +695,7 @@ const handleSave = async () => {
     await saveImpressionDataImmediate()
 
     // 8. 更新游戏store
-    gameStore.allClassData = deepClone(fullRosterSnapshot.value)
+    gameStore.world.allClassData = deepClone(fullRosterSnapshot.value)
 
     showMessage('保存成功！数据已同步到世界书。')
   } catch (e) {
@@ -874,8 +874,8 @@ const handleSaveCharacter = async () => {
           }
         }
       }
-      // 同步 gameStore.allClassData
-      const gcdOld = gameStore.allClassData?.[oldClassId]
+      // 同步 gameStore.world.allClassData
+      const gcdOld = gameStore.world.allClassData?.[oldClassId]
       if (gcdOld && Array.isArray(gcdOld.students)) {
         gcdOld.students = gcdOld.students.filter(s => s.name !== oldName)
       }
@@ -894,8 +894,8 @@ const handleSaveCharacter = async () => {
           newClass.students.push(studentData)
         }
       }
-      // 同步 gameStore.allClassData
-      const gcdNew = gameStore.allClassData?.[newClassId]
+      // 同步 gameStore.world.allClassData
+      const gcdNew = gameStore.world.allClassData?.[newClassId]
       if (gcdNew && form.role === 'student') {
         if (!Array.isArray(gcdNew.students)) gcdNew.students = []
         const gsIdx = gcdNew.students.findIndex(s => s.name === oldName || s.name === form.name)
@@ -949,9 +949,9 @@ const handleDeleteCharacter = async (char) => {
     }
   }
 
-  // 同步更新 gameStore.allClassData
-  if (char.classId && gameStore.allClassData?.[char.classId]) {
-    const gcd = gameStore.allClassData[char.classId]
+  // 同步更新 gameStore.world.allClassData
+  if (char.classId && gameStore.world.allClassData?.[char.classId]) {
+    const gcd = gameStore.world.allClassData[char.classId]
     if (char.role === 'student' && Array.isArray(gcd.students)) {
       gcd.students = gcd.students.filter(s => s.name !== char.name)
     }
@@ -1252,10 +1252,10 @@ const handleConfirmAIImport = async () => {
   }
 
   // 将新导入的角色初始化到 npcRelationships，使其在关系编辑器中可见
-  if (addedCount > 0 && gameStore.npcRelationships) {
+  if (addedCount > 0 && gameStore.world.npcRelationships) {
     for (const char of selected) {
-      if (!gameStore.npcRelationships[char.name]) {
-        gameStore.npcRelationships[char.name] = {
+      if (!gameStore.world.npcRelationships[char.name]) {
+        gameStore.world.npcRelationships[char.name] = {
           gender: char.gender || 'unknown',
           personality: char.personality || { order: 0, altruism: 0, tradition: 0, peace: 50 },
           goals: { immediate: '', shortTerm: '', longTerm: '' },
@@ -1633,7 +1633,7 @@ const handleSaveClub = async () => {
   if (editingClub.value) {
     // 编辑模式
     const clubId = editingClub.value.id
-    const club = gameStore.allClubs[clubId]
+    const club = gameStore.world.allClubs[clubId]
     if (club) {
       Object.assign(club, {
         name: form.name, description: form.description,
@@ -1651,12 +1651,12 @@ const handleSaveClub = async () => {
       } else {
         showMessage('社团已更新')
       }
-      await syncClubWorldbookState(gameStore.currentRunId, gameStore.settings?.useGeminiMode)
+      await syncClubWorldbookState(gameStore.meta.currentRunId, gameStore.settings?.useGeminiMode)
     }
   } else if (form.customId?.trim()) {
     // 自定义ID新建 — 直接写入 allClubs
     const clubId = form.customId.trim()
-    if (gameStore.allClubs[clubId]) {
+    if (gameStore.world.allClubs[clubId]) {
       showMessage(`社团ID「${clubId}」已存在`)
       return
     }
@@ -1670,12 +1670,12 @@ const handleSaveClub = async () => {
       members: [gameStore.player?.name || ''],
       mode: form.mode
     }
-    gameStore.allClubs[clubId] = newClub
+    gameStore.world.allClubs[clubId] = newClub
     if (!gameStore.player.joinedClubs.includes(clubId)) {
       gameStore.player.joinedClubs.push(clubId)
     }
     await ensureClubExistsInWorldbook(newClub, null, gameStore.settings?.useGeminiMode)
-    await syncClubWorldbookState(gameStore.currentRunId, gameStore.settings?.useGeminiMode)
+    await syncClubWorldbookState(gameStore.meta.currentRunId, gameStore.settings?.useGeminiMode)
     gameStore.saveToStorage(true)
     showMessage('社团已创建')
   } else {
@@ -1686,12 +1686,12 @@ const handleSaveClub = async () => {
       location: form.location, advisor: form.advisor
     })
     if (result?.clubId) {
-      const newClub = gameStore.allClubs[result.clubId]
+      const newClub = gameStore.world.allClubs[result.clubId]
       if (newClub) {
         newClub.mode = form.mode
         if (form.mode !== 'normal') {
           await ensureClubExistsInWorldbook(newClub, null, gameStore.settings?.useGeminiMode)
-          await syncClubWorldbookState(gameStore.currentRunId, gameStore.settings?.useGeminiMode)
+          await syncClubWorldbookState(gameStore.meta.currentRunId, gameStore.settings?.useGeminiMode)
         }
       }
     }
@@ -1701,14 +1701,14 @@ const handleSaveClub = async () => {
 }
 
 const handleDeleteClub = async (clubId) => {
-  const club = gameStore.allClubs[clubId]
+  const club = gameStore.world.allClubs[clubId]
   if (!club) return
   // 移入回收站
   deletedClubs.value.push({ id: clubId, name: club.name || clubId, data: { ...club } })
 
   // 使用 Vue 3 响应式方式删除属性（解构赋值）
-  const { [clubId]: removed, ...rest } = gameStore.allClubs
-  gameStore.allClubs = rest
+  const { [clubId]: removed, ...rest } = gameStore.world.allClubs
+  gameStore.world.allClubs = rest
 
   if (gameStore.player?.joinedClubs) {
     const idx = gameStore.player.joinedClubs.indexOf(clubId)
@@ -1727,9 +1727,9 @@ const handleRestoreClub = async (clubId) => {
   const idx = deletedClubs.value.findIndex(c => c.id === clubId)
   if (idx === -1) return
   const restored = deletedClubs.value.splice(idx, 1)[0]
-  if (!gameStore.allClubs) gameStore.allClubs = {}
-  gameStore.allClubs[clubId] = restored.data
-  await syncClubWorldbookState(gameStore.currentRunId, gameStore.settings?.useGeminiMode)
+  if (!gameStore.world.allClubs) gameStore.world.allClubs = {}
+  gameStore.world.allClubs[clubId] = restored.data
+  await syncClubWorldbookState(gameStore.meta.currentRunId, gameStore.settings?.useGeminiMode)
   gameStore.saveToStorage(true)
 }
 
@@ -1763,7 +1763,7 @@ async function handleAutoGenerateClubs(mode, options = {}) {
     return
   }
 
-  const result = await generateClubs(filteredPool, mode, gameStore.allClubs || {}, options)
+  const result = await generateClubs(filteredPool, mode, gameStore.world.allClubs || {}, options)
   if (!result.success) {
     showMessage(`社团生成失败: ${result.message}`)
   }
@@ -1771,7 +1771,7 @@ async function handleAutoGenerateClubs(mode, options = {}) {
 
 // 检测幽灵角色
 function handleDetectGhostMembers() {
-  const ghostMap = detectGhostMembers(gameStore.allClubs || {}, characterPool.value || [])
+  const ghostMap = detectGhostMembers(gameStore.world.allClubs || {}, characterPool.value || [])
 
   if (Object.keys(ghostMap).length === 0) {
     showMessage('✅ 未检测到幽灵角色')
@@ -1780,7 +1780,7 @@ function handleDetectGhostMembers() {
 
   let msg = '检测到以下社团中存在幽灵角色（不在全校名册中）：\n\n'
   for (const [clubId, ghosts] of Object.entries(ghostMap)) {
-    const club = gameStore.allClubs[clubId]
+    const club = gameStore.world.allClubs[clubId]
     const clubName = club?.name || clubId
     msg += `【${clubName}】: ${ghosts.join('、')}\n`
   }
@@ -1791,7 +1791,7 @@ function handleDetectGhostMembers() {
 
 // 手动去重
 async function handleDeduplicateMembers() {
-  const result = deduplicateClubMembers(gameStore.allClubs || {})
+  const result = deduplicateClubMembers(gameStore.world.allClubs || {})
 
   if (result.removed === 0) {
     showMessage('✅ 未发现重复成员')
@@ -1803,21 +1803,21 @@ async function handleDeduplicateMembers() {
     msg += `【${detail.clubName}】: 移除 ${detail.removed} 个重复\n`
   }
 
-  await syncClubWorldbookState(gameStore.currentRunId, gameStore.settings?.useGeminiMode)
+  await syncClubWorldbookState(gameStore.meta.currentRunId, gameStore.settings?.useGeminiMode)
   gameStore.saveToStorage(true)
   showMessage(msg)
 }
 
 // 一键清空所有成员
 async function handleClearAllMembers() {
-  const count = clearAllClubMembers(gameStore.allClubs || {})
+  const count = clearAllClubMembers(gameStore.world.allClubs || {})
 
   if (count === 0) {
     showMessage('所有社团已经是空的')
     return
   }
 
-  await syncClubWorldbookState(gameStore.currentRunId, gameStore.settings?.useGeminiMode)
+  await syncClubWorldbookState(gameStore.meta.currentRunId, gameStore.settings?.useGeminiMode)
   gameStore.saveToStorage(true)
   showMessage(`已清空所有社团成员，共 ${count} 人`)
 }
@@ -1859,7 +1859,7 @@ async function handleApplyGeneratedClubs() {
       addNpcToClubInWorldbook,
       null  // 游戏外管理，不创建 run-specific 副本
     )
-    await syncClubWorldbookState(gameStore.currentRunId, gameStore.settings?.useGeminiMode)
+    await syncClubWorldbookState(gameStore.meta.currentRunId, gameStore.settings?.useGeminiMode)
     gameStore.saveToStorage(true)
     resetGeneratedClubs()
     const parts = []
@@ -1947,12 +1947,12 @@ const handleBatchDeleteRelationships = async (pairs) => {
 
 const handleClearCharRelations = async (charName) => {
   if (!confirm(`确定清空「${charName}」的所有关系数据？\n（保留性格/目标，仅清除关系列表）`)) return
-  const charData = gameStore.npcRelationships[charName]
+  const charData = gameStore.world.npcRelationships[charName]
   if (charData) charData.relations = {}
   // 清除其他角色对该角色的关系
-  for (const otherName in gameStore.npcRelationships) {
+  for (const otherName in gameStore.world.npcRelationships) {
     if (otherName === charName) continue
-    const otherRels = gameStore.npcRelationships[otherName]?.relations
+    const otherRels = gameStore.world.npcRelationships[otherName]?.relations
     if (otherRels?.[charName]) delete otherRels[charName]
   }
   await persistRuntimeRelationshipChanges(true)
@@ -1963,8 +1963,8 @@ const handleClearCharRelations = async (charName) => {
 
 const handleClearCharImpressions = async (charName) => {
   if (!confirm(`确定清除所有角色对「${charName}」的印象标签？`)) return
-  for (const otherName in gameStore.npcRelationships) {
-    const rel = gameStore.npcRelationships[otherName]?.relations?.[charName]
+  for (const otherName in gameStore.world.npcRelationships) {
+    const rel = gameStore.world.npcRelationships[otherName]?.relations?.[charName]
     if (rel && rel.tags) rel.tags = []
   }
   await persistRuntimeRelationshipChanges(true)
@@ -2000,7 +2000,7 @@ const handleBatchDeleteCharacters = async (charNames) => {
 
 const handleClearAllRelationships = async () => {
   try {
-    for (const charData of Object.values(gameStore.npcRelationships || {})) {
+    for (const charData of Object.values(gameStore.world.npcRelationships || {})) {
       if (charData && typeof charData === 'object' && charData.relations) {
         charData.relations = {}
       }
@@ -2016,7 +2016,7 @@ const handleClearAllRelationships = async () => {
 
 const handleClearGhostReferences = async (charName) => {
   if (!confirm(`确定清除所有角色对幽灵角色「${charName}」的引用？`)) return
-  const rels = gameStore.npcRelationships
+  const rels = gameStore.world.npcRelationships
   if (!rels) return
   for (const otherName in rels) {
     const otherRels = rels[otherName]?.relations
@@ -2031,7 +2031,7 @@ const handleClearGhostReferences = async (charName) => {
 const handleClearAllGhosts = async () => {
   if (!confirm('⚠️ 确定要清除所有幽灵角色的引用吗？\n\n这将删除所有不在关系数据顶层但被其他角色引用的角色关系。')) return
 
-  const rels = gameStore.npcRelationships || {}
+  const rels = gameStore.world.npcRelationships || {}
   const topKeys = new Set(Object.keys(rels))
 
   // 收集所有幽灵角色
@@ -2270,7 +2270,7 @@ const handleSaveComposer = async () => {
           <!-- 标签页4：社团编辑器 -->
           <div v-if="activeTab === 'clubEditor'" class="tab-content">
             <ClubEditorPanel
-              :clubs="gameStore.allClubs || {}"
+              :clubs="gameStore.world.allClubs || {}"
               :generating="clubGenerating"
               :club-results="clubGenResults"
               :club-error="clubGenError"
@@ -2306,7 +2306,7 @@ const handleSaveComposer = async () => {
                 >
                   <option value="">当前运行时数据</option>
                   <option
-                    v-for="snap in gameStore.saveSnapshots"
+                    v-for="snap in gameStore._ui.saveSnapshots"
                     :key="snap.id"
                     :value="snap.id"
                   >{{ snap.label }} ({{ formatSnapshotTime(snap) }})</option>
@@ -2320,8 +2320,8 @@ const handleSaveComposer = async () => {
               </div>
             </div>
             <RelationshipEditorPanel
-              :npc-relationships="gameStore.npcRelationships"
-              :all-class-data="gameStore.allClassData"
+              :npc-relationships="gameStore.world.npcRelationships"
+              :all-class-data="gameStore.world.allClassData"
               :character-pool="characterPool"
               :current-roster-state="currentRosterState"
               @edit-relationship="handleEditRelationship"

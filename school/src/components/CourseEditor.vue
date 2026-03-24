@@ -43,7 +43,7 @@ onMounted(async () => {
 // 如果是从外部加载的，可能需要这一步？暂时先手动同步
 
 const availableClasses = computed(() => {
-  const allClasses = Object.keys(gameStore.allClassData || {}).sort()
+  const allClasses = Object.keys(gameStore.world.allClassData || {}).sort()
   return allClasses.filter(id => !customClasses.value.includes(id))
 })
 

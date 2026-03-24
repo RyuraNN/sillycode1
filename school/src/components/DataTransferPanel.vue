@@ -110,7 +110,7 @@ const handleExport = async () => {
     }
 
     if (exportSelection.value.roster) {
-      let roster = deepClone(gameStore.allClassData)
+      let roster = deepClone(gameStore.world.allClassData)
       // 如果内存中的 roster 为空，尝试从世界书加载
       if (!roster || Object.keys(roster).length === 0) {
         const { fetchClassDataFromWorldbook } = await import('../utils/worldbookParser')
@@ -138,25 +138,25 @@ const handleExport = async () => {
     if (exportSelection.value.events) {
       // eventLibrary 是 Map，需要转换为数组
       const eventArray = []
-      for (const [id, event] of gameStore.eventLibrary) {
+      for (const [id, event] of gameStore.events.library) {
         eventArray.push({ id, ...deepClone(event) })
       }
       exportData.modules.events = {
         library: eventArray,
-        triggers: deepClone(gameStore.eventTriggers),
+        triggers: deepClone(gameStore.events.triggers),
         calendar: deepClone(gameStore.player.customCalendarEvents || [])
       }
     }
 
     if (exportSelection.value.clubs) {
-      const clubs = deepClone(gameStore.allClubs || {})
+      const clubs = deepClone(gameStore.world.allClubs || {})
       if (Object.keys(clubs).length > 0) {
         exportData.modules.clubs = clubs
       }
     }
 
     if (exportSelection.value.relationships) {
-      const relationships = deepClone(gameStore.npcRelationships || {})
+      const relationships = deepClone(gameStore.world.npcRelationships || {})
       if (Object.keys(relationships).length > 0) {
         exportData.modules.relationships = relationships
       }
@@ -330,7 +330,7 @@ const handleImport = async () => {
       // 更新 gameStore
       const rosterClone = deepClone(data.roster)
       for (const [classId, classInfo] of Object.entries(rosterClone)) {
-        gameStore.allClassData[classId] = classInfo
+        gameStore.world.allClassData[classId] = classInfo
         // 如果开启同步，更新世界书
         if (syncToWorldbook.value) {
           await updateClassDataInWorldbook(classId, classInfo, true)
@@ -350,7 +350,7 @@ const handleImport = async () => {
     // 导入课程
     if (importSelection.value.course && data.course) {
       restoreCoursePoolState(data.course)
-      gameStore.customCoursePool = JSON.parse(JSON.stringify(data.course))
+      gameStore.academic.customCoursePool = JSON.parse(JSON.stringify(data.course))
       if (syncToWorldbook.value) {
         await saveCoursePoolToWorldbook()
       }
@@ -360,19 +360,19 @@ const handleImport = async () => {
     // 导入事件
     if (importSelection.value.events && data.events) {
       // 清空并重建 eventLibrary
-      gameStore.eventLibrary.clear()
+      gameStore.events.library.clear()
       if (data.events.library) {
         for (const event of data.events.library) {
           const id = event.id
           const eventData = { ...event }
           delete eventData.id // 移除多余的 id 字段
-          gameStore.eventLibrary.set(id, eventData)
+          gameStore.events.library.set(id, eventData)
         }
       }
 
       // 恢复触发器
       if (data.events.triggers) {
-        gameStore.eventTriggers = [...data.events.triggers]
+        gameStore.events.triggers = [...data.events.triggers]
       }
 
       // 恢复日历事件
@@ -385,19 +385,19 @@ const handleImport = async () => {
 
     // 导入社团数据
     if (importSelection.value.clubs && data.clubs && Object.keys(data.clubs).length > 0) {
-      gameStore.allClubs = deepClone(data.clubs)
+      gameStore.world.allClubs = deepClone(data.clubs)
       console.log('[DataTransfer] Imported clubs:', Object.keys(data.clubs).length)
       results.push('社团数据')
     }
 
     // 导入关系数据
     if (importSelection.value.relationships && data.relationships && Object.keys(data.relationships).length > 0) {
-      gameStore.npcRelationships = deepClone(data.relationships)
+      gameStore.world.npcRelationships = deepClone(data.relationships)
 
       // 保存到 IndexedDB
-      if (gameStore.currentRunId && gameStore.currentRunId !== 'temp_editing') {
+      if (gameStore.meta.currentRunId && gameStore.meta.currentRunId !== 'temp_editing') {
         const { saveNpcRelationships } = await import('../utils/indexedDB')
-        await saveNpcRelationships(gameStore.currentRunId, deepClone(data.relationships))
+        await saveNpcRelationships(gameStore.meta.currentRunId, deepClone(data.relationships))
       }
 
       // 同步到世界书

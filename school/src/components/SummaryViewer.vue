@@ -36,7 +36,7 @@ const summaries = computed(() => {
   // 生成占位符 (仅当查看全部或小总结时)
   const placeholders = []
   if (currentTab.value === 'all' || currentTab.value === 'minor') {
-    const chatLog = gameStore.currentChatLog || []
+    const chatLog = gameStore._ui.currentChatLog || []
     chatLog.forEach((log, index) => {
       const floor = index + 1
       // 只关注 AI 回复且未被覆盖的层
@@ -149,7 +149,7 @@ const stats = computed(() => {
     }
   })
   
-  const chatLog = gameStore.currentChatLog || []
+  const chatLog = gameStore._ui.currentChatLog || []
   let missingCount = 0
   chatLog.forEach((log, index) => {
     const floor = index + 1
@@ -315,7 +315,7 @@ const toggleTodoCompletion = (todo) => {
 
   if (todo.isCompleted) {
     // 取消完成标记
-    gameStore.completedTodoMarkers = gameStore.completedTodoMarkers?.filter(
+    gameStore.notifications.completedTodoMarkers = gameStore.notifications.completedTodoMarkers?.filter(
       m => !(m.todoIndex === todo.index && (m.floor === markerFloor || coveredFloors.includes(m.floor)))
     ) || []
 
@@ -324,13 +324,13 @@ const toggleTodoCompletion = (todo) => {
     }
   } else {
     // 标记为完成
-    if (!gameStore.completedTodoMarkers) {
-      gameStore.completedTodoMarkers = []
+    if (!gameStore.notifications.completedTodoMarkers) {
+      gameStore.notifications.completedTodoMarkers = []
     }
-    gameStore.completedTodoMarkers.push({
+    gameStore.notifications.completedTodoMarkers.push({
       floor: markerFloor,
       todoIndex: todo.index,
-      completedAt: gameStore.currentFloor,
+      completedAt: gameStore.meta.currentFloor,
       completedTimestamp: Date.now(),
       matchedBy: 'manual'
     })

@@ -126,7 +126,7 @@ const submitPost = async () => {
     content: newPost.value.content.trim(),
     replies: [],
     timestamp: Date.now(),
-    floor: gameStore.currentFloor,
+    floor: gameStore.meta.currentFloor,
     likes: []
   }
   
@@ -136,7 +136,7 @@ const submitPost = async () => {
   // 2. 更新世界书
   await saveForumToWorldbook(
     gameStore.player.forum.posts, 
-    gameStore.currentRunId, 
+    gameStore.meta.currentRunId, 
     gameStore.settings.forumWorldbookLimit
   )
   
@@ -185,7 +185,7 @@ const submitReply = async () => {
     // 2. 更新世界书
     await saveForumToWorldbook(
       gameStore.player.forum.posts, 
-      gameStore.currentRunId, 
+      gameStore.meta.currentRunId, 
       gameStore.settings.forumWorldbookLimit
     )
     

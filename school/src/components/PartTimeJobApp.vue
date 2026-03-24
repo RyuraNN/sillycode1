@@ -49,12 +49,12 @@ const currentJobInfo = computed(() => {
 // 检查是否在工作时间内
 const isInWorkTime = computed(() => {
   if (!currentJobInfo.value) return false
-  return checkWorkTime(currentJobInfo.value, gameStore.gameTime)
+  return checkWorkTime(currentJobInfo.value, gameStore.world.gameTime)
 })
 
 // 检查兼职申请资格
 const checkEligibility = (jobData) => {
-  return checkPartTimeJobEligibility(jobData, gameStore.player, gameStore.gameTime)
+  return checkPartTimeJobEligibility(jobData, gameStore.player, gameStore.world.gameTime)
 }
 
 // 申请兼职

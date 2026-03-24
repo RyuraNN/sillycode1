@@ -6,7 +6,7 @@ const gameStore = useGameStore()
 const collapsed = ref(true)
 const expandedTraceId = ref(null)
 
-const traces = computed(() => gameStore.ragDiagnostics?.traces || [])
+const traces = computed(() => gameStore._ui.ragDiagnostics?.traces || [])
 
 const toggleTrace = (traceId) => {
   expandedTraceId.value = expandedTraceId.value === traceId ? null : traceId

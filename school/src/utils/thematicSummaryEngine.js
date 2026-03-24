@@ -107,7 +107,7 @@ ${summaryTexts}`
       return null
     }
 
-    const { year, month, day } = gameStore.gameTime
+    const { year, month, day } = gameStore.world.gameTime
     const gameDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 
     return {
@@ -136,14 +136,14 @@ ${summaryTexts}`
  */
 export async function runThematicAggregation(options = {}) {
   const gameStore = useGameStore()
-  const { currentFloor = gameStore.currentFloor || 0 } = options
+  const { currentFloor = gameStore.meta.currentFloor || 0 } = options
 
   // 检查是否到达反思间隔
   if (currentFloor % THEMATIC_AGGREGATION_INTERVAL !== 0) {
     return { generated: 0, errors: 0 }
   }
 
-  const summaries = gameStore.player?.summaries || []
+  const summaries = gameStore.player.summaries || []
   const entityGroups = groupSummariesByEntity(summaries)
 
   let generated = 0

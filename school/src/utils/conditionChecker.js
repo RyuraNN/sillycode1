@@ -147,7 +147,7 @@ export function checkUnlockCondition(conditionStr, player, itemId = null) {
 function checkSelfAccess(item, gameStore) {
   // 1. 检查开放时间
   if (item.openTime) {
-    const isOpen = checkOpenTime(item.openTime, gameStore.gameTime)
+    const isOpen = checkOpenTime(item.openTime, gameStore.world.gameTime)
     if (!isOpen) {
       return { allowed: false, reason: `当前时间未开放 (${item.openTime})` }
     }

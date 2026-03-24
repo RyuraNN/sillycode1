@@ -151,7 +151,7 @@ const scrollLeft = ref(0)
 // 初始化天气数据
 onMounted(() => {
   // 确保天气数据已初始化
-  if (gameStore.worldState.weather.forecast.length === 0) {
+  if (gameStore.world.worldState.weather.forecast.length === 0) {
     gameStore.updateWeatherForecast()
   }
   // 更新当前时刻天气
@@ -160,18 +160,18 @@ onMounted(() => {
 
 // 当前天气
 const currentWeather = computed(() => {
-  return gameStore.worldState.weather.current
+  return gameStore.world.worldState.weather.current
 })
 
 // 7天预报
 const forecast = computed(() => {
-  return gameStore.worldState.weather.forecast
+  return gameStore.world.worldState.weather.forecast
 })
 
 // 合并的逐时预报（从当前时间开始，隐藏过去的，接续后面的天数）
 const combinedHourlyForecast = computed(() => {
   const result = []
-  const currentHour = gameStore.gameTime.hour
+  const currentHour = gameStore.world.gameTime.hour
   const currentTimePoint = Math.floor(currentHour / 2) * 2
   
   // 处理今天剩余的时间段
@@ -256,11 +256,11 @@ const selectedDayLabel = computed(() => {
 
 // 当前季节
 const seasonClass = computed(() => {
-  return gameStore.worldState.weather.season || 'spring'
+  return gameStore.world.worldState.weather.season || 'spring'
 })
 
 const seasonName = computed(() => {
-  const season = gameStore.worldState.weather.season
+  const season = gameStore.world.worldState.weather.season
   const seasonData = SEASONS[season]
   return seasonData?.name || '春季'
 })
@@ -311,7 +311,7 @@ function isCurrentHourInDetail(timeStr) {
   if (selectedDayIndex.value !== 0) return false
   if (!timeStr) return false
   const hour = parseInt(timeStr.split(':')[0])
-  const currentHour = gameStore.gameTime.hour
+  const currentHour = gameStore.world.gameTime.hour
   const timePoint = Math.floor(currentHour / 2) * 2
   return hour === timePoint
 }

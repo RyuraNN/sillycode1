@@ -249,8 +249,8 @@ export const applyGameData = (data) => {
   }
 
   // Reset all NPCs to absent by default for each turn
-  if (gameStore.npcs.length > 0) {
-    gameStore.npcs.forEach(npc => {
+  if (gameStore.world.npcs.length > 0) {
+    gameStore.world.npcs.forEach(npc => {
       // 减少存活时间计数
       if (npc.aliveRemaining !== undefined && npc.aliveRemaining > 0) {
         npc.aliveRemaining--
@@ -303,13 +303,13 @@ export const applyGameData = (data) => {
  */
 function processNpcMoveUpdate(moveData, gameStore) {
   const updates = Array.isArray(moveData) ? moveData : [moveData]
-  const currentTotalHours = calculateTotalHours(gameStore.gameTime)
+  const currentTotalHours = calculateTotalHours(gameStore.world.gameTime)
   
   updates.forEach(update => {
     const { name, location, duration } = update
     if (!name || !location || !duration) return
     
-    const npc = gameStore.npcs.find(n => n.name === name)
+    const npc = gameStore.world.npcs.find(n => n.name === name)
     if (npc) {
       npc.forcedLocation = {
         locationId: location,
@@ -344,7 +344,7 @@ function processOutfitUpdate(outfitData, gameStore) {
   // NPC衣着
   if (outfitData.npcs && typeof outfitData.npcs === 'object') {
     for (const [npcName, description] of Object.entries(outfitData.npcs)) {
-      const npc = gameStore.npcs.find(n => n.name === npcName)
+      const npc = gameStore.world.npcs.find(n => n.name === npcName)
       if (npc) {
         if (typeof description === 'object') {
           if (!npc.outfitSlots) npc.outfitSlots = {}

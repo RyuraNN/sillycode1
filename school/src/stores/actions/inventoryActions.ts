@@ -199,7 +199,7 @@ export const inventoryActions = {
    */
   applyEffectsWithTracking(this: any, effects: Array<{ attribute: string; value: number; isPercentage: boolean }>, sourceId: string, sourceType: 'item' | 'equipment' | 'event', duration?: number) {
     const actualDuration = duration === undefined ? -1 : duration
-    const { year, month, day, hour } = this.gameTime
+    const { year, month, day, hour } = this.world.gameTime
     
     const activeIds: string[] = []
     const instantChanges: Record<string, number> = {}

@@ -23,10 +23,10 @@ export const classClubActions = {
     const worldbookData = await fetchClassDataFromWorldbook()
     if (worldbookData) {
       console.log('[GameStore] Loaded class data from Worldbook', worldbookData)
-      this.allClassData = worldbookData
+      this.world.allClassData = worldbookData
     } else {
       console.warn('[GameStore] Failed to load class data from Worldbook')
-      this.allClassData = {}
+      this.world.allClassData = {}
     }
     
     // 初始化所有班级的 NPC 数据
@@ -38,12 +38,12 @@ export const classClubActions = {
    * 将所有班级数据中的学生和老师添加到全局 NPC 列表中，确保他们能被日程系统调度
    */
   initializeAllClassNpcs(this: any) {
-    if (!this.allClassData) return
+    if (!this.world.allClassData) return
     
     console.log('[GameStore] Initializing all class NPCs...')
     let count = 0
     
-    for (const [classId, classInfo] of Object.entries(this.allClassData)) {
+    for (const [classId, classInfo] of Object.entries(this.world.allClassData)) {
       const info = classInfo as any
       
       const addNpc = (name: string, role: 'student' | 'teacher' = 'student') => {
@@ -51,9 +51,9 @@ export const classClubActions = {
         const charId = generateCharId(name)
         
         // 检查是否存在
-        const existingNpc = this.npcs.find((n: NpcStats) => n.id === charId)
+        const existingNpc = this.world.npcs.find((n: NpcStats) => n.id === charId)
         if (!existingNpc) {
-          this.npcs.push({
+          this.world.npcs.push({
             id: charId,
             name: name,
             relationship: 0,
@@ -91,7 +91,7 @@ export const classClubActions = {
       }
     }
     
-    console.log(`[GameStore] Initialized ${count} new NPCs from class data. Total NPCs: ${this.npcs.length}`)
+    console.log(`[GameStore] Initialized ${count} new NPCs from class data. Total NPCs: ${this.world.npcs.length}`)
   },
 
   /**
@@ -102,19 +102,19 @@ export const classClubActions = {
    * 因为内存中的数据包含完整的运行时属性（如 _bookName）和最新的成员信息。
    */
   async loadClubData(this: any) {
-    console.log('[GameStore] Loading club data for run:', this.currentRunId)
+    console.log('[GameStore] Loading club data for run:', this.meta.currentRunId)
     
     // 保存内存中已有的所有社团（包括运行时属性）
     const existingClubs: Record<string, ClubData> = {}
-    if (this.allClubs) {
-      for (const [clubId, club] of Object.entries(this.allClubs)) {
+    if (this.world.allClubs) {
+      for (const [clubId, club] of Object.entries(this.world.allClubs)) {
         existingClubs[clubId] = club as ClubData
       }
     }
     const existingClubCount = Object.keys(existingClubs).length
     
     // 传入 currentRunId 确保只加载当前存档的社团数据
-    const clubData = await fetchClubDataFromWorldbook(this.currentRunId)
+    const clubData = await fetchClubDataFromWorldbook(this.meta.currentRunId)
     if (clubData) {
       console.log('[GameStore] Loaded club data from Worldbook', clubData)
       
@@ -126,10 +126,10 @@ export const classClubActions = {
       // 以内存数据为主，用世界书数据补充缺失的 _bookName 等属性
       if (existingClubCount > 0 && worldbookClubCount === 0) {
         console.warn('[GameStore] Worldbook returned 0 clubs but memory has', existingClubCount, '- keeping memory data')
-        this.allClubs = existingClubs
+        this.world.allClubs = existingClubs
       } else {
         // 正常合并：世界书数据作为基础，内存中的社团覆盖（保留运行时属性）
-        this.allClubs = {
+        this.world.allClubs = {
           ...worldbookClubs,       // 世界书中的社团作为基础
           ...existingClubs         // 内存中的社团覆盖（保留运行时属性）
         }
@@ -139,7 +139,7 @@ export const classClubActions = {
       const defaultBookName = getCurrentBookName()
       
       if (defaultBookName) {
-        for (const [clubId, club] of Object.entries(this.allClubs)) {
+        for (const [clubId, club] of Object.entries(this.world.allClubs)) {
           if (!(club as any)._bookName) {
             console.log(`[GameStore] Setting missing _bookName for ${clubId}`)
             ;(club as any)._bookName = defaultBookName
@@ -149,20 +149,20 @@ export const classClubActions = {
     } else {
       console.warn('[GameStore] Failed to load club data from Worldbook')
       // 保留内存中已有的社团
-      this.allClubs = existingClubs
+      this.world.allClubs = existingClubs
     }
 
     // 确保系统社团（学生会）存在
     await this.ensureSystemClubs()
     
-    console.log('[GameStore] Final club count:', Object.keys(this.allClubs).length, 'clubs:', Object.keys(this.allClubs))
+    console.log('[GameStore] Final club count:', Object.keys(this.world.allClubs).length, 'clubs:', Object.keys(this.world.allClubs))
   },
 
   /**
    * 确保系统社团（如学生会）存在
    */
   async ensureSystemClubs(this: any) {
-    if (!this.allClubs['student_council']) {
+    if (!this.world.allClubs['student_council']) {
       const studentCouncil: ClubData = {
         id: 'student_council',
         name: '学生会',
@@ -174,7 +174,7 @@ export const classClubActions = {
         president: '学生会长',
         members: []
       }
-      this.allClubs['student_council'] = studentCouncil
+      this.world.allClubs['student_council'] = studentCouncil
       
       // 确保在世界书中创建（通用绿灯策略）
       // 学生会初始状态不带 runId，作为通用条目存在。
@@ -195,7 +195,7 @@ export const classClubActions = {
       this.player.gradeYear = grade
     }
     
-    const classInfo = this.allClassData[classId]
+    const classInfo = this.world.allClassData[classId]
     if (classInfo) {
       this.player.classRoster = classInfo
       const weekNumber = this.getWeekNumber()
@@ -205,7 +205,7 @@ export const classClubActions = {
       // 如果是教师，加入所有执教班级的群聊
       if (this.player.role === 'teacher' && this.player.teachingClasses && this.player.teachingClasses.length > 0) {
         for (const teachingClassId of this.player.teachingClasses) {
-          const teachingClassInfo = this.allClassData[teachingClassId]
+          const teachingClassInfo = this.world.allClassData[teachingClassId]
           if (teachingClassInfo) {
             await this.joinClassGroup(teachingClassId, teachingClassInfo)
           }
@@ -241,8 +241,8 @@ export const classClubActions = {
 
       members.push(charId)
       
-      if (!this.npcs.find((n: NpcStats) => n.id === charId)) {
-        this.npcs.push({
+      if (!this.world.npcs.find((n: NpcStats) => n.id === charId)) {
+        this.world.npcs.push({
           id: charId,
           name: name,
           relationship: 0,
@@ -291,9 +291,9 @@ export const classClubActions = {
         unreadCount: 0
       }, members.map((memberId: string) => {
         if (memberId === 'player') return this.player.name
-        const npc = this.npcs.find((n: NpcStats) => n.id === memberId)
+        const npc = this.world.npcs.find((n: NpcStats) => n.id === memberId)
         return npc ? npc.name : null
-      }).filter((n: any) => n), this.currentFloor)
+      }).filter((n: any) => n), this.meta.currentFloor)
       
       console.log('[GameStore] Class group worldbook entry created')
       await saveSocialRelationshipOverview()
@@ -327,7 +327,7 @@ export const classClubActions = {
    * 获取社团详情
    */
   getClubById(this: any, clubId: string): ClubData | undefined {
-    return this.allClubs[clubId]
+    return this.world.allClubs[clubId]
   },
 
   /**
@@ -342,7 +342,7 @@ export const classClubActions = {
    */
   getJoinedClubs(this: any): ClubData[] {
     return this.player.joinedClubs
-      .map((id: string) => this.allClubs[id])
+      .map((id: string) => this.world.allClubs[id])
       .filter((club: any) => club !== undefined) as ClubData[]
   },
 
@@ -350,13 +350,13 @@ export const classClubActions = {
    * 通过邀请加入社团
    */
   async joinClubByInvitation(this: any, clubId: string) {
-    const club = this.allClubs[clubId]
+    const club = this.world.allClubs[clubId]
     if (!club) return
     
     if (!this.player.joinedClubs.includes(clubId)) {
       this.player.joinedClubs.push(clubId)
       
-      await addPlayerToClubInWorldbook(clubId, this.player.name, club, this.currentRunId)
+      await addPlayerToClubInWorldbook(clubId, this.player.name, club, this.meta.currentRunId)
       
       this.addCommand(`[系统提示] 你已加入${club.name}`)
     }
@@ -370,9 +370,9 @@ export const classClubActions = {
     if (index > -1) {
       this.player.joinedClubs.splice(index, 1)
       
-      const club = this.allClubs[clubId]
+      const club = this.world.allClubs[clubId]
       if (club) {
-        await removePlayerFromClubInWorldbook(clubId, this.player.name, club, this.currentRunId)
+        await removePlayerFromClubInWorldbook(clubId, this.player.name, club, this.meta.currentRunId)
       }
       this.addCommand(`[系统提示] 你已退出${club ? club.name : clubId}`)
     }
@@ -382,12 +382,12 @@ export const classClubActions = {
    * 申请加入社团
    */
   async applyToJoinClub(this: any, clubId: string) {
-    const club = this.allClubs[clubId]
+    const club = this.world.allClubs[clubId]
     if (!club) {
       return { success: false, message: '社团不存在' }
     }
 
-    this.clubApplication = {
+    this.events.clubApplication = {
       clubId: clubId,
       clubName: club.name,
       remainingTurns: 3
@@ -402,7 +402,7 @@ export const classClubActions = {
    * 教师成为社团顾问
    */
   async becomeClubAdvisor(this: any, clubId: string) {
-    const club = this.allClubs[clubId]
+    const club = this.world.allClubs[clubId]
     if (!club) {
       return { success: false, message: '社团不存在' }
     }
@@ -435,7 +435,7 @@ export const classClubActions = {
     this.saveToStorage(true)
     
     // 尝试同步世界书 (复用 createClubInWorldbook 的更新逻辑或者 syncClubWorldbookState)
-    await syncClubWorldbookState(this.currentRunId, this.settings?.useGeminiMode)
+    await syncClubWorldbookState(this.meta.currentRunId, this.settings?.useGeminiMode)
     
     return { success: true, message: `已成为${club.name}的顾问` }
   },
@@ -444,12 +444,12 @@ export const classClubActions = {
    * 拒绝社团申请
    */
   rejectClubApplication(this: any, clubId: string, from: string, reason: string) {
-    if (this.clubApplication && this.clubApplication.clubId === clubId) {
-      this.clubApplication = null
+    if (this.events.clubApplication && this.events.clubApplication.clubId === clubId) {
+      this.events.clubApplication = null
     }
 
-    this.clubRejection = {
-      clubName: this.allClubs[clubId]?.name || clubId,
+    this.events.clubRejection = {
+      clubName: this.world.allClubs[clubId]?.name || clubId,
       from,
       reason
     }
@@ -460,21 +460,21 @@ export const classClubActions = {
    * 确认拒绝通知
    */
   confirmClubRejection(this: any) {
-    this.clubRejection = null
+    this.events.clubRejection = null
   },
 
   /**
    * 确认邀请通知（邀请被接受或拒绝后清除）
    */
   confirmClubInvitation(this: any) {
-    this.clubInvitation = null
+    this.events.clubInvitation = null
   },
 
   /**
    * 玩家邀请 NPC 加入社团
    */
   async inviteNpcToClub(this: any, clubId: string, npcName: string) {
-    const club = this.allClubs[clubId]
+    const club = this.world.allClubs[clubId]
     if (!club) {
       return { success: false, message: '社团不存在' }
     }
@@ -490,11 +490,11 @@ export const classClubActions = {
     }
 
     // 检查是否已有待处理的邀请
-    if (this.clubInvitation) {
+    if (this.events.clubInvitation) {
       return { success: false, message: '请等待当前邀请处理完成' }
     }
 
-    this.clubInvitation = {
+    this.events.clubInvitation = {
       clubId: clubId,
       clubName: club.name,
       targetName: npcName,
@@ -513,7 +513,7 @@ export const classClubActions = {
    * 即使世界书更新失败，存档数据仍然是正确的。
    */
   async handleClubInviteAccepted(this: any, clubId: string, name: string) {
-    const club = this.allClubs[clubId]
+    const club = this.world.allClubs[clubId]
     if (!club) {
       console.warn(`[GameStore] Club ${clubId} not found in allClubs`)
       return
@@ -535,11 +535,11 @@ export const classClubActions = {
         this.player.joinedClubs.push(clubId)
         console.log(`[GameStore] Player joined club ${clubId}`)
       }
-      await addPlayerToClubInWorldbook(clubId, name, club, this.currentRunId)
+      await addPlayerToClubInWorldbook(clubId, name, club, this.meta.currentRunId)
       this.addCommand(`[系统提示] 你接受了邀请，加入了${club.name}`)
     } else {
       // 如果是 NPC
-      const success = await addNpcToClubInWorldbook(clubId, name, club, this.currentRunId)
+      const success = await addNpcToClubInWorldbook(clubId, name, club, this.meta.currentRunId)
       if (!success) {
         console.warn(`[GameStore] Failed to update worldbook for NPC ${name} joining ${club.name}, but memory is updated`)
       }
@@ -547,8 +547,8 @@ export const classClubActions = {
     }
 
     // 清除邀请状态 (如果是玩家发起的邀请)
-    if (this.clubInvitation && this.clubInvitation.clubId === clubId && this.clubInvitation.targetName === name) {
-      this.clubInvitation = null
+    if (this.events.clubInvitation && this.events.clubInvitation.clubId === clubId && this.events.clubInvitation.targetName === name) {
+      this.events.clubInvitation = null
     }
 
     // 【关键修复】立即保存到存储，确保内存中的更改不会丢失
@@ -563,11 +563,11 @@ export const classClubActions = {
    */
   handleClubInviteRejected(this: any, clubId: string, npcName: string, reason: string) {
     // 清除邀请状态
-    if (this.clubInvitation && this.clubInvitation.clubId === clubId && this.clubInvitation.targetName === npcName) {
-      this.clubInvitation = null
+    if (this.events.clubInvitation && this.events.clubInvitation.clubId === clubId && this.events.clubInvitation.targetName === npcName) {
+      this.events.clubInvitation = null
     }
 
-    const club = this.allClubs[clubId]
+    const club = this.world.allClubs[clubId]
     this.addCommand(`[系统提示] ${npcName}拒绝了加入${club?.name || clubId}的邀请：${reason}`)
     console.log(`[GameStore] ${npcName} rejected club invitation: ${reason}`)
   },
@@ -603,7 +603,7 @@ export const classClubActions = {
     }
 
     // 尝试创建世界书条目
-    let club = await createClubInWorldbook(fullClubInfo, this.currentRunId)
+    let club = await createClubInWorldbook(fullClubInfo, this.meta.currentRunId)
     let worldbookSuccess = !!club
 
     // 【关键修复】即使世界书创建失败，也要在内存中保存社团数据
@@ -617,13 +617,13 @@ export const classClubActions = {
     }
 
     // 确保 allClubs 已初始化
-    if (!this.allClubs) {
-      this.allClubs = {}
+    if (!this.world.allClubs) {
+      this.world.allClubs = {}
     }
 
     // 添加到 allClubs
-    this.allClubs[clubId] = club
-    console.log(`[GameStore] Club ${clubId} added to allClubs. Current clubs:`, Object.keys(this.allClubs))
+    this.world.allClubs[clubId] = club
+    console.log(`[GameStore] Club ${clubId} added to allClubs. Current clubs:`, Object.keys(this.world.allClubs))
 
     // 玩家加入社团
     if (!this.player.joinedClubs.includes(clubId)) {
@@ -657,10 +657,10 @@ export const classClubActions = {
     console.log('[GameStore] Syncing worldbook after rollback...')
     
     // 同步社团状态
-    await syncClubWorldbookState(this.currentRunId, this.settings?.useGeminiMode)
+    await syncClubWorldbookState(this.meta.currentRunId, this.settings?.useGeminiMode)
 
     // 同步班级世界书条目状态（处理进级后的 runId 隔离条目）
-    await syncClassWorldbookState(this.currentRunId, this.allClassData, this.settings?.useGeminiMode)
+    await syncClassWorldbookState(this.meta.currentRunId, this.world.allClassData, this.settings?.useGeminiMode)
 
     // 教师模式：重建教师班级副本（注入科任教师等）
     if (this.player.role === 'teacher' && this.player.teachingClasses && this.player.teachingClasses.length > 0) {
@@ -668,7 +668,7 @@ export const classClubActions = {
         this.player.teachingClasses,
         this.player.homeroomClassIds || (this.player.homeroomClassId ? [this.player.homeroomClassId] : []),
         this.player.name,
-        this.currentRunId,
+        this.meta.currentRunId,
         this.player.classSubjectMap || {},
         this.player.gender
       )
@@ -681,7 +681,7 @@ export const classClubActions = {
     // 回溯可能恢复了有选修课数据的快照，需要确保世界书条目与之一致
     try {
       const { syncElectiveWorldbookState } = await import('../../utils/electiveWorldbook.js')
-      await syncElectiveWorldbookState(this.currentRunId)
+      await syncElectiveWorldbookState(this.meta.currentRunId)
       
       // 如果当前状态有选修课数据，重新生成世界书条目
       if (this.player.selectedElectives && this.player.selectedElectives.length > 0) {
@@ -690,7 +690,7 @@ export const classClubActions = {
       } else {
         // 回溯到选课之前的状态，清除选修课条目
         const { clearElectiveEntries } = await import('../../utils/electiveWorldbook.js')
-        await clearElectiveEntries(this.currentRunId)
+        await clearElectiveEntries(this.meta.currentRunId)
       }
     } catch (e) {
       console.warn('[GameStore] Failed to sync elective worldbook:', e)
@@ -701,7 +701,7 @@ export const classClubActions = {
     await saveSocialRelationshipOverview()
     
     // 同步论坛数据
-    await saveForumToWorldbook(this.player.forum.posts, this.currentRunId, this.settings.forumWorldbookLimit)
+    await saveForumToWorldbook(this.player.forum.posts, this.meta.currentRunId, this.settings.forumWorldbookLimit)
     
     // 同步兼职数据
     try {
@@ -732,7 +732,7 @@ export const classClubActions = {
    * 单个操作失败不会阻塞整个初始化流程。
    */
   async rebuildWorldbookState(this: any) {
-    console.log('[GameStore] Rebuilding worldbook state for run:', this.currentRunId)
+    console.log('[GameStore] Rebuilding worldbook state for run:', this.meta.currentRunId)
     const startTime = Date.now()
     
     // 【防护】验证世界书内容确实已加载，避免在内容未就绪时执行写操作导致数据缺失
@@ -778,30 +778,30 @@ export const classClubActions = {
     
     // 【调试】记录当前玩家社团状态
     const playerClubsBefore = this.player?.joinedClubs ? [...this.player.joinedClubs] : []
-    const allClubIdsBefore = this.allClubs ? Object.keys(this.allClubs) : []
+    const allClubIdsBefore = this.world.allClubs ? Object.keys(this.world.allClubs) : []
     console.log('[GameStore] Before rebuild - joinedClubs:', playerClubsBefore, 'allClubs:', allClubIdsBefore)
 
     // === Phase 1: 加载基础数据（班级和社团） ===
 
     // 【修复】如果 allClassData 已经从快照恢复（非空），不要用 loadClassData 覆盖
-    const hasRestoredClassData = this.allClassData && Object.keys(this.allClassData).length > 0
+    const hasRestoredClassData = this.world.allClassData && Object.keys(this.world.allClassData).length > 0
     if (hasRestoredClassData) {
-      console.log('[GameStore] allClassData already restored from snapshot, skipping loadClassData. Classes:', Object.keys(this.allClassData))
+      console.log('[GameStore] allClassData already restored from snapshot, skipping loadClassData. Classes:', Object.keys(this.world.allClassData))
       try { this.initializeAllClassNpcs() } catch (e) { console.warn('[GameStore] initializeAllClassNpcs failed:', e) }
     } else {
       await safeRebuildStep(() => this.loadClassData(), 'loadClassData', 15000)
     }
     // 记录班级数据加载结果
-    this.worldbookLoadResults.classData = !!(this.allClassData && Object.keys(this.allClassData).length > 0)
+    this._ui.worldbookLoadResults.classData = !!(this.world.allClassData && Object.keys(this.world.allClassData).length > 0)
 
     await new Promise(r => setTimeout(r, 50)) // Yield
 
     await safeRebuildStep(() => this.loadClubData(), 'loadClubData', 15000)
     // 记录社团数据加载结果
-    this.worldbookLoadResults.clubData = !!(this.allClubs && Object.keys(this.allClubs).length > 0)
+    this._ui.worldbookLoadResults.clubData = !!(this.world.allClubs && Object.keys(this.world.allClubs).length > 0)
     
     // 【调试】检查加载后的社团状态
-    const allClubIdsAfter = this.allClubs ? Object.keys(this.allClubs) : []
+    const allClubIdsAfter = this.world.allClubs ? Object.keys(this.world.allClubs) : []
     console.log('[GameStore] After loadClubData - allClubs:', allClubIdsAfter)
     
     await new Promise(r => setTimeout(r, 50)) // Yield
@@ -812,7 +812,7 @@ export const classClubActions = {
     if (this.player.role === 'teacher' && this.player.teachingClasses && this.player.teachingClasses.length > 0) {
       // 先同步状态：禁用其他存档的 runId 副本，启用当前存档的
       await safeRebuildStep(
-        () => syncClassWorldbookState(this.currentRunId, this.allClassData, this.settings?.useGeminiMode),
+        () => syncClassWorldbookState(this.meta.currentRunId, this.world.allClassData, this.settings?.useGeminiMode),
         'syncClassWorldbookState', 10000
       )
       // 再创建/更新当前教师存档的班级副本
@@ -821,7 +821,7 @@ export const classClubActions = {
           this.player.teachingClasses,
           this.player.homeroomClassIds || (this.player.homeroomClassId ? [this.player.homeroomClassId] : []),
           this.player.name,
-          this.currentRunId,
+          this.meta.currentRunId,
           this.player.classSubjectMap || {},
           this.player.gender
         ),
@@ -830,7 +830,7 @@ export const classClubActions = {
     } else {
       // 学生模式或普通模式
       await safeRebuildStep(
-        () => syncClassWorldbookState(this.currentRunId, this.allClassData, this.settings?.useGeminiMode),
+        () => syncClassWorldbookState(this.meta.currentRunId, this.world.allClassData, this.settings?.useGeminiMode),
         'syncClassWorldbookState', 10000
       )
 
@@ -848,20 +848,20 @@ export const classClubActions = {
     await safeRebuildStep(async () => {
       const joinedClubsSet = new Set(this.player.joinedClubs)
 
-      for (const [clubId, club] of Object.entries(this.allClubs)) {
+      for (const [clubId, club] of Object.entries(this.world.allClubs)) {
         const clubData = club as ClubData
-        await ensureClubExistsInWorldbook(clubData, this.currentRunId, this.settings?.useGeminiMode)
+        await ensureClubExistsInWorldbook(clubData, this.meta.currentRunId, this.settings?.useGeminiMode)
 
         if (joinedClubsSet.has(clubId)) {
-          await addPlayerToClubInWorldbook(clubId, this.player.name, clubData, this.currentRunId)
+          await addPlayerToClubInWorldbook(clubId, this.player.name, clubData, this.meta.currentRunId)
         } else {
-          await removePlayerFromClubInWorldbook(clubId, this.player.name, clubData, this.currentRunId)
+          await removePlayerFromClubInWorldbook(clubId, this.player.name, clubData, this.meta.currentRunId)
         }
         // 每处理一个社团，稍微让出一点时间，防止大量社团导致卡顿
         await new Promise(r => setTimeout(r, 10)) 
       }
 
-      await syncClubWorldbookState(this.currentRunId, this.settings?.useGeminiMode)
+      await syncClubWorldbookState(this.meta.currentRunId, this.settings?.useGeminiMode)
     }, 'syncClubWorldbook', 30000) // 增加超时
     
     await new Promise(r => setTimeout(r, 100)) // Yield
@@ -870,7 +870,7 @@ export const classClubActions = {
     
     await safeRebuildStep(async () => {
       const { syncElectiveWorldbookState } = await import('../../utils/electiveWorldbook.js')
-      await syncElectiveWorldbookState(this.currentRunId)
+      await syncElectiveWorldbookState(this.meta.currentRunId)
 
       if (this.player.selectedElectives && this.player.selectedElectives.length > 0) {
         let hasElectiveSlots = false
@@ -899,7 +899,7 @@ export const classClubActions = {
         await this.processNpcElectiveSelection()
       } else {
         const { clearElectiveEntries } = await import('../../utils/electiveWorldbook.js')
-        await clearElectiveEntries(this.currentRunId)
+        await clearElectiveEntries(this.meta.currentRunId)
       }
     }, 'syncElectives', 20000)
     
@@ -922,8 +922,8 @@ export const classClubActions = {
     await new Promise(r => setTimeout(r, 50)) // Yield
 
     await safeRebuildStep(async () => {
-      await saveForumToWorldbook(this.player.forum.posts, this.currentRunId, this.settings.forumWorldbookLimit)
-      await switchForumSlot(this.currentRunId)
+      await saveForumToWorldbook(this.player.forum.posts, this.meta.currentRunId, this.settings.forumWorldbookLimit)
+      await switchForumSlot(this.meta.currentRunId)
     }, 'syncForum', 15000)
     
     await new Promise(r => setTimeout(r, 50)) // Yield
@@ -954,13 +954,13 @@ export const classClubActions = {
       'loadEventData', 10000
     )
     // 记录事件数据加载结果
-    this.worldbookLoadResults.eventData = !!(this.eventLibrary && this.eventLibrary.size > 0)
+    this._ui.worldbookLoadResults.eventData = !!(this.events.library && this.events.library.size > 0)
 
     // === 兜底：最终班级条目状态同步 ===
     // Phase 2 中 syncClassWorldbookState 设置的 enabled 状态可能被后续大量 updateWorldbookWith 调用覆盖，
     // 在所有写操作完成后再执行一次，确保班级条目状态正确。
     await safeRebuildStep(
-      () => syncClassWorldbookState(this.currentRunId, this.allClassData, this.settings?.useGeminiMode),
+      () => syncClassWorldbookState(this.meta.currentRunId, this.world.allClassData, this.settings?.useGeminiMode),
       'finalClassSync', 10000
     )
     if (this.player.role === 'teacher' && this.player.teachingClasses && this.player.teachingClasses.length > 0) {
@@ -969,7 +969,7 @@ export const classClubActions = {
           this.player.teachingClasses,
           this.player.homeroomClassIds || (this.player.homeroomClassId ? [this.player.homeroomClassId] : []),
           this.player.name,
-          this.currentRunId,
+          this.meta.currentRunId,
           this.player.classSubjectMap || {},
           this.player.gender
         ),
@@ -981,41 +981,41 @@ export const classClubActions = {
 
     await safeRebuildStep(async () => {
       const mapData = await fetchMapDataFromWorldbook()
-      this.worldbookLoadResults.mapData = !!(mapData && (Array.isArray(mapData) ? mapData.length > 0 : Object.keys(mapData).length > 0))
+      this._ui.worldbookLoadResults.mapData = !!(mapData && (Array.isArray(mapData) ? mapData.length > 0 : Object.keys(mapData).length > 0))
       // 检查兼职数据：地图数据中包含 partTimeJob 字段的项
       if (mapData && Array.isArray(mapData)) {
-        this.worldbookLoadResults.partTimeData = mapData.some((item: any) => item.partTimeJob || item.partTimeJobs)
+        this._ui.worldbookLoadResults.partTimeData = mapData.some((item: any) => item.partTimeJob || item.partTimeJobs)
       } else {
-        this.worldbookLoadResults.partTimeData = false
+        this._ui.worldbookLoadResults.partTimeData = false
       }
     }, 'probeMapData', 10000)
 
     await safeRebuildStep(async () => {
       const { loadScheduleDataFromWorldbook } = await import('../../utils/npcScheduleSystem.js')
       const result = await loadScheduleDataFromWorldbook()
-      this.worldbookLoadResults.scheduleData = !!result
+      this._ui.worldbookLoadResults.scheduleData = !!result
     }, 'probeScheduleData', 10000)
 
     await safeRebuildStep(async () => {
       const { fetchProductCatalogFromWorldbook } = await import('../../utils/deliveryWorldbook.js')
       const catalog = await fetchProductCatalogFromWorldbook()
-      this.worldbookLoadResults.shopData = !!(catalog && (Array.isArray(catalog) ? catalog.length > 0 : Object.keys(catalog).length > 0))
+      this._ui.worldbookLoadResults.shopData = !!(catalog && (Array.isArray(catalog) ? catalog.length > 0 : Object.keys(catalog).length > 0))
     }, 'probeShopData', 10000)
 
     await safeRebuildStep(async () => {
       const academicData = await fetchAcademicDataFromWorldbook()
-      this.worldbookLoadResults.academicData = !!(academicData && Object.keys(academicData).length > 0)
+      this._ui.worldbookLoadResults.academicData = !!(academicData && Object.keys(academicData).length > 0)
     }, 'probeAcademicData', 10000)
 
     await safeRebuildStep(async () => {
       const tagData = await fetchTagDataFromWorldbook()
-      this.worldbookLoadResults.tagData = !!(tagData && ((tagData instanceof Map) ? tagData.size > 0 : Object.keys(tagData).length > 0))
+      this._ui.worldbookLoadResults.tagData = !!(tagData && ((tagData instanceof Map) ? tagData.size > 0 : Object.keys(tagData).length > 0))
     }, 'probeTagData', 10000)
 
     await safeRebuildStep(async () => {
       const { fetchSocialData } = await import('../../utils/socialRelationshipsWorldbook.js')
       const socialData = await fetchSocialData()
-      this.worldbookLoadResults.socialData = !!(socialData && Object.keys(socialData).length > 0)
+      this._ui.worldbookLoadResults.socialData = !!(socialData && Object.keys(socialData).length > 0)
     }, 'probeSocialData', 10000)
 
     const elapsed = Date.now() - startTime
@@ -1027,16 +1027,16 @@ export const classClubActions = {
    */
   async startNewGame(this: any) {
     // 确保班级数据已加载
-    if (!this.allClassData || Object.keys(this.allClassData).length === 0) {
+    if (!this.world.allClassData || Object.keys(this.world.allClassData).length === 0) {
       await this.loadClassData()
     }
 
-    this.currentRunId = Date.now().toString(36)
-    this.currentFloor = 0
+    this.meta.currentRunId = Date.now().toString(36)
+    this.meta.currentFloor = 0
 
     // 重置课程池，清除上个存档的自定义课程，再从 worldbook 重新加载（带 runId 过滤）
     resetCourseData()
-    await loadCoursePoolFromWorldbook(this.currentRunId)
+    await loadCoursePoolFromWorldbook(this.meta.currentRunId)
     
     // 使用初始状态重置玩家
     const initialPlayer = createInitialPlayerState()
@@ -1051,22 +1051,22 @@ export const classClubActions = {
     this.player.characterFeature = preservedFeature
     
     // 重置全局状态
-    this.npcs = []
-    this.npcRelationships = {}
-    this.clubApplication = null
-    this.clubRejection = null
-    this.mapSelectionMode = false
-    this.mapSelectionCallback = null
+    this.world.npcs = []
+    this.world.npcRelationships = {}
+    this.events.clubApplication = null
+    this.events.clubRejection = null
+    this._ui.mapSelectionMode = false
+    this._ui.mapSelectionCallback = null
 
     // 重新初始化所有班级的 NPC，确保地图上能显示所有角色
     this.initializeAllClassNpcs()
 
     // 重置时间和世界状态
-    this.gameTime = createInitialGameTime()
-    this.eventChecks = {
+    this.world.gameTime = createInitialGameTime()
+    this.events.checks = {
       lastDaily: '', lastWeekly: '', lastMonthly: ''
     }
-    this.worldState = createInitialWorldState()
+    this.world.worldState = createInitialWorldState()
 
     // 初始化默认 NPC 关系
     await this.initializeNpcRelationships()
@@ -1074,15 +1074,15 @@ export const classClubActions = {
     this.saveToStorage(true)
     
     try {
-      await syncClubWorldbookState(this.currentRunId, this.settings?.useGeminiMode)
+      await syncClubWorldbookState(this.meta.currentRunId, this.settings?.useGeminiMode)
       
       await switchSaveSlot()
-      await switchForumSlot(this.currentRunId)
+      await switchForumSlot(this.meta.currentRunId)
       await switchPartTimeSaveSlot()
       await switchImpressionSlot()
       
       await saveSocialRelationshipOverview()
-      await saveImpressionData(this.currentRunId)
+      await saveImpressionData(this.meta.currentRunId)
     } catch (e) {
       console.error('[GameStore] Error initializing worldbook for new game:', e)
     }

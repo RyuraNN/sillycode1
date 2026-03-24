@@ -159,8 +159,8 @@ const applyPreset = async (preset) => {
     customData.value = restoredCustom
     
     // 如果有班级ID，刷新一下名册引用
-    if (formData.value.classId && gameStore.allClassData[formData.value.classId]) {
-      customData.value.classRoster = JSON.parse(JSON.stringify(gameStore.allClassData[formData.value.classId]))
+    if (formData.value.classId && gameStore.world.allClassData[formData.value.classId]) {
+      customData.value.classRoster = JSON.parse(JSON.stringify(gameStore.world.allClassData[formData.value.classId]))
     }
 
     showPresetModal.value = false
@@ -457,8 +457,8 @@ const customData = ref({
 
 // 监听班级选择变化，重置名册数据
 watch(() => formData.value.classId, (newId) => {
-  if (newId && gameStore.allClassData[newId]) {
-    customData.value.classRoster = JSON.parse(JSON.stringify(gameStore.allClassData[newId]))
+  if (newId && gameStore.world.allClassData[newId]) {
+    customData.value.classRoster = JSON.parse(JSON.stringify(gameStore.world.allClassData[newId]))
   } else {
     customData.value.classRoster = null
   }
@@ -468,9 +468,9 @@ watch(() => formData.value.classId, (newId) => {
 const handleFilterClose = () => {
   showFilterPanel.value = false
   // 如果当前已选班级，需要刷新本地数据，因为全校筛选可能修改了该班级数据
-  if (formData.value.classId && gameStore.allClassData[formData.value.classId]) {
+  if (formData.value.classId && gameStore.world.allClassData[formData.value.classId]) {
     console.log('[GameStart] Refreshing local roster after filter update')
-    customData.value.classRoster = JSON.parse(JSON.stringify(gameStore.allClassData[formData.value.classId]))
+    customData.value.classRoster = JSON.parse(JSON.stringify(gameStore.world.allClassData[formData.value.classId]))
   }
 }
 
@@ -885,7 +885,7 @@ const confirmSignature = async () => {
           ...course,
           teacher: formData.value.name,
           teacherGender: formData.value.gender,
-          runId: gameStore.currentRunId
+          runId: gameStore.meta.currentRunId
         })
         // 保存注册后的完整课程对象（包含生成的ID）
         registeredCourses.push(registered)
@@ -909,11 +909,11 @@ const confirmSignature = async () => {
     }
     
     // 生成教师课表 (使用独立排课系统)
-    // const termInfo = getTermInfo(gameStore.gameTime.year, gameStore.gameTime.month, gameStore.gameTime.day)
+    // const termInfo = getTermInfo(gameStore.world.gameTime.year, gameStore.world.gameTime.month, gameStore.world.gameTime.day)
     const currentDate = {
-      year: gameStore.gameTime.year,
-      month: gameStore.gameTime.month,
-      day: gameStore.gameTime.day
+      year: gameStore.world.gameTime.year,
+      month: gameStore.world.gameTime.month,
+      day: gameStore.world.gameTime.day
     }
     
     // 构造完整的教师信息对象
@@ -929,7 +929,7 @@ const confirmSignature = async () => {
     gameStore.player.schedule = generateIndependentTeacherSchedule(
       fullTeacherInfo,
       currentDate,
-      gameStore.allClassData
+      gameStore.world.allClassData
     )
     console.log('[GameStart] Generated independent teacher schedule:', gameStore.player.schedule)
     
@@ -938,14 +938,14 @@ const confirmSignature = async () => {
       teacherData.value.teachingClasses,
       teacherData.value.homeroomClassIds,
       formData.value.name,
-      gameStore.currentRunId,
+      gameStore.meta.currentRunId,
       teacherData.value.classSubjectMap,
       formData.value.gender
     )
 
     // 教师自动加入教授班级的群组
     for (const classId of teacherData.value.teachingClasses) {
-      const classInfo = gameStore.allClassData[classId]
+      const classInfo = gameStore.world.allClassData[classId]
       if (classInfo) {
         await gameStore.joinClassGroup(classId, classInfo)
       }
@@ -1137,7 +1137,7 @@ const confirmSignature = async () => {
   gameStore.player.talents = formData.value.talents.filter(Boolean)
   
   // 保存自定义课程池数据
-  gameStore.customCoursePool = getCoursePoolState()
+  gameStore.academic.customCoursePool = getCoursePoolState()
 
   // 初始化论坛默认帖子
   gameStore.player.forum.posts = JSON.parse(JSON.stringify(DEFAULT_FORUM_POSTS))
@@ -1146,7 +1146,7 @@ const confirmSignature = async () => {
   // 创建论坛世界书条目
   await saveForumToWorldbook(
     gameStore.player.forum.posts,
-    gameStore.currentRunId,
+    gameStore.meta.currentRunId,
     gameStore.settings.forumWorldbookLimit
   )
   console.log('[GameStart] Forum worldbook entry created')
@@ -1237,7 +1237,7 @@ const confirmSignature = async () => {
               <label>班级：</label>
               <select v-model="formData.classId" class="input-field">
                 <option value="" disabled>请选择班级</option>
-                <option v-for="(data, id) in gameStore.allClassData" :key="id" :value="id">
+                <option v-for="(data, id) in gameStore.world.allClassData" :key="id" :value="id">
                   {{ data.name }}
                 </option>
               </select>
@@ -1404,7 +1404,7 @@ const confirmSignature = async () => {
               <label>教授班级：</label>
               <div class="multi-select-container">
                 <div 
-                  v-for="(data, id) in gameStore.allClassData" 
+                  v-for="(data, id) in gameStore.world.allClassData" 
                   :key="id"
                   class="select-chip"
                   :class="{ active: teacherData.teachingClasses.includes(id) }"
@@ -1426,7 +1426,7 @@ const confirmSignature = async () => {
                   :class="{ active: teacherData.homeroomClassIds.includes(id) }"
                   @click="toggleHomeroomClass(id)"
                 >
-                  {{ gameStore.allClassData[id]?.name }}
+                  {{ gameStore.world.allClassData[id]?.name }}
                 </div>
               </div>
             </div>
@@ -1435,7 +1435,7 @@ const confirmSignature = async () => {
               <label>各班教授学科：</label>
               <div class="per-class-subject-area" style="flex: 1;">
                 <div v-for="classId in teacherData.teachingClasses" :key="classId" class="class-subject-group">
-                  <div class="class-subject-header">{{ gameStore.allClassData[classId]?.name || classId }}</div>
+                  <div class="class-subject-header">{{ gameStore.world.allClassData[classId]?.name || classId }}</div>
                   <div class="multi-select-container">
                     <div
                       v-for="subj in subjectOptions"

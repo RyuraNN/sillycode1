@@ -73,7 +73,7 @@ export async function updatePartTimeWorldbookEntry(runId, history, playerName) {
     const gameStore = useGameStore()
     
     // 如果未提供参数，则从 Store 获取
-    const currentRunId = runId || gameStore.currentRunId
+    const currentRunId = runId || gameStore.meta.currentRunId
     const currentHistory = history || gameStore.player.partTimeJob.history
     const currentPlayerName = playerName || gameStore.player.name
 
@@ -173,7 +173,7 @@ export async function cleanupOldPartTimeEntries(currentRunId) {
     if (typeof window.updateWorldbookWith !== 'function') return
 
     const gameStore = useGameStore()
-    const targetRunId = currentRunId || gameStore.currentRunId
+    const targetRunId = currentRunId || gameStore.meta.currentRunId
 
     const bookName = getCurrentBookName()
     if (!bookName) return
@@ -219,7 +219,7 @@ export async function cleanupOldPartTimeEntries(currentRunId) {
  */
 export async function restorePartTimeWorldbookFromStore() {
     const gameStore = useGameStore()
-    const runId = gameStore.currentRunId
+    const runId = gameStore.meta.currentRunId
     const history = gameStore.player.partTimeJob.history
     const playerName = gameStore.player.name
 
@@ -238,5 +238,5 @@ export async function restorePartTimeWorldbookFromStore() {
  */
 export async function switchPartTimeSaveSlot() {
     const gameStore = useGameStore()
-    await cleanupOldPartTimeEntries(gameStore.currentRunId)
+    await cleanupOldPartTimeEntries(gameStore.meta.currentRunId)
 }

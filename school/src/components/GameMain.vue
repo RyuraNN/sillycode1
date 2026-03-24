@@ -463,7 +463,7 @@ const handleImageRegenerate = async (newPrompt) => {
     const placeholderRegex = new RegExp(`<div id="${reqId}"[^>]*>[\\s\\S]*?<\\/div>`, 'i')
     targetLog.content = targetLog.content.replace(placeholderRegex, refHtml)
 
-    gameStore.createAutoSave(gameLog.value, gameStore.currentFloor)
+    gameStore.createAutoSave(gameLog.value, gameStore.meta.currentFloor)
   } catch (e) {
     console.error('[GameMain] Regenerate image failed:', e)
     const oldRefHtml = `<image-ref id="${oldId}" prompt="${selectedImageInfo.value.prompt}" history="${history.join(',')}" />`
@@ -488,7 +488,7 @@ const handleImageRestore = (historyId) => {
   targetLog.content = targetLog.content.replace(regex, refHtml)
   
   showImagePanel.value = false
-  gameStore.createAutoSave(gameLog.value, gameStore.currentFloor)
+  gameStore.createAutoSave(gameLog.value, gameStore.meta.currentFloor)
 }
 
 // ==================== 发送消息核心逻辑 ====================
@@ -530,7 +530,7 @@ const sendMessage = async () => {
       content: messageContent,
       snapshot: playerSnapshot
     })
-    gameStore.currentFloor = gameLog.value.length
+    gameStore.meta.currentFloor = gameLog.value.length
   }
   
   inputText.value = ''
@@ -609,7 +609,7 @@ const sendMessage = async () => {
       // 重新计算 RAG
       processingStage.value = 'rag'
       ragErrors.value = []
-      summarizedLog = await buildSummarizedHistory(historyLog, gameStore.currentFloor, messageContent)
+      summarizedLog = await buildSummarizedHistory(historyLog, gameStore.meta.currentFloor, messageContent)
       if (summarizedLog._ragErrors?.length > 0) {
         ragErrors.value = summarizedLog._ragErrors
       }
@@ -956,7 +956,7 @@ const sendMessage = async () => {
           isWarning: true
         })
       }
-      gameStore.currentFloor = gameLog.value.length
+      gameStore.meta.currentFloor = gameLog.value.length
       isGenerating.value = false
       return
     }
@@ -998,7 +998,7 @@ const sendMessage = async () => {
           isWarning: true
         })
       }
-      gameStore.currentFloor = gameLog.value.length
+      gameStore.meta.currentFloor = gameLog.value.length
       isGenerating.value = false
       // 主AI失败时不清除RAG缓存，以便重试时复用
       return
@@ -1128,7 +1128,7 @@ const processAIResponse = async (response) => {
         if (gameStore.settings.debugMode) {
           assistantLogs.value.push({
             id: Date.now(),
-            floor: gameStore.currentFloor,
+            floor: gameStore.meta.currentFloor,
             content: `[Variable Assistant]\n${assistantResponse}`
           })
         }
@@ -1161,7 +1161,7 @@ const processAIResponse = async (response) => {
         if (gameStore.settings.debugMode) {
           assistantLogs.value.push({
             id: Date.now() + 1,
-            floor: gameStore.currentFloor,
+            floor: gameStore.meta.currentFloor,
             content: `[Image Analysis]\n${results[1].value}`
           })
         }
@@ -1372,17 +1372,17 @@ const processAIResponse = async (response) => {
       })
     }
     
-    gameStore.currentFloor = gameLog.value.length
+    gameStore.meta.currentFloor = gameLog.value.length
     gameStore.cleanupSnapshots(gameLog.value)
     handleNewContent(contentAreaRef.value)
 
     const summarySource = cleanedContent.replace(/<minor_summary>[\s\S]*?<\/minor_summary>/g, '').trim()
-    const result = await processPostReply(summarySource, gameStore.currentFloor, preGeneratedSummary)
+    const result = await processPostReply(summarySource, gameStore.meta.currentFloor, preGeneratedSummary)
 
     // 处理小总结生成错误
     if (!result.success && result.error) {
       summaryErrors.value.push({
-        floor: gameStore.currentFloor,
+        floor: gameStore.meta.currentFloor,
         error: result.error,
         timestamp: Date.now()
       })
@@ -1435,7 +1435,7 @@ const processAIResponse = async (response) => {
     if (!result.success && result.reason === 'missing_minor') {
       pendingSummaryData.value = { 
         content: contentToShow, 
-        floor: gameStore.currentFloor 
+        floor: gameStore.meta.currentFloor 
       }
       showSummaryInput.value = true
     }
@@ -1498,10 +1498,10 @@ const processAIResponse = async (response) => {
 
     if (pendingPromises.length > 0) {
       Promise.all(pendingPromises).finally(() => {
-        gameStore.createAutoSave(gameLog.value, gameStore.currentFloor)
+        gameStore.createAutoSave(gameLog.value, gameStore.meta.currentFloor)
       })
     } else {
-      gameStore.createAutoSave(gameLog.value, gameStore.currentFloor)
+      gameStore.createAutoSave(gameLog.value, gameStore.meta.currentFloor)
     }
   }
 }
@@ -1623,14 +1623,14 @@ const handleRollbackToFloor = async (targetIndex) => {
     gameLog.value.pop()
   }
 
-  gameStore.currentFloor = gameLog.value.length
+  gameStore.meta.currentFloor = gameLog.value.length
 
   // 【修复】回溯后清理超出目标楼层的总结和持久事实，防止残留旧数据
-  const rollbackFloor = gameStore.currentFloor + 1 // removeSummariesAfterFloor 使用 < floor 比较
+  const rollbackFloor = gameStore.meta.currentFloor + 1 // removeSummariesAfterFloor 使用 < floor 比较
   removeSummariesAfterFloor(rollbackFloor)
   if (gameStore.player.persistentFacts?.length > 0) {
     gameStore.player.persistentFacts = gameStore.player.persistentFacts.filter(
-      f => f.sourceFloor <= gameStore.currentFloor
+      f => f.sourceFloor <= gameStore.meta.currentFloor
     )
   }
 
@@ -1648,7 +1648,7 @@ const handleRollbackToFloor = async (targetIndex) => {
   showDanmaku([`✅ 已回溯到第 ${targetIndex + 1} 层`])
 
   // 自动保存
-  gameStore.createAutoSave(gameLog.value, gameStore.currentFloor)
+  gameStore.createAutoSave(gameLog.value, gameStore.meta.currentFloor)
 
   scrollToBottom(contentAreaRef.value)
 }
@@ -1672,7 +1672,7 @@ const handleAssistantReroll = async () => {
   const preRerollSnapshot = lastLog.preVariableSnapshot || gameStore.getGameState()
   
   // 【修复】保存当前楼层的小总结，防止 restoreGameState 覆盖后丢失
-  const currentFloor = gameStore.currentFloor
+  const currentFloor = gameStore.meta.currentFloor
   const savedFloorSummaries = gameStore.player.summaries.filter(
     s => s.floor === currentFloor
   )
@@ -1711,7 +1711,7 @@ const handleAssistantReroll = async () => {
     if (gameStore.settings.debugMode) {
       assistantLogs.value.push({
         id: Date.now(),
-        floor: gameStore.currentFloor,
+        floor: gameStore.meta.currentFloor,
         content: `[Variable Assistant Reroll]\n${assistantResponse}`
       })
     }
@@ -1737,7 +1737,7 @@ const handleAssistantReroll = async () => {
         .replace(/<minor_summary>[\s\S]*?<\/minor_summary>/g, '')
         .replace(/\[GAME_DATA\][\s\S]*?\[\/GAME_DATA\]/g, '')
         .trim()
-      await processPostReply(summarySource, gameStore.currentFloor, rerollSummary)
+      await processPostReply(summarySource, gameStore.meta.currentFloor, rerollSummary)
     }
 
     // 提取建议回复
@@ -1752,7 +1752,7 @@ const handleAssistantReroll = async () => {
     showVariableErrorTip.value = false
 
     // 自动保存
-    gameStore.createAutoSave(gameLog.value, gameStore.currentFloor)
+    gameStore.createAutoSave(gameLog.value, gameStore.meta.currentFloor)
     
   } catch (e) {
     console.error('变量思考重roll失败:', e)
@@ -1779,7 +1779,7 @@ const handleSummarySubmit = async (content) => {
 
       // 补总结会改变世界状态与消息快照，需要立刻刷新自动存档；
       // 否则“读取”面板里基于自动存档的回溯可能仍使用旧快照链。
-      gameStore.createAutoSave(gameLog.value, gameStore.currentFloor)
+      gameStore.createAutoSave(gameLog.value, gameStore.meta.currentFloor)
     }
   }
   
@@ -1922,7 +1922,7 @@ const handleEditSubmit = (content) => {
   contentRenderCache.clear()
   cachedRAGHistory.value = null
   cachedRAGUserInput.value = ''
-  gameStore.createAutoSave(gameLog.value, gameStore.currentFloor, { rewriteFromIndex: editedIndex })
+  gameStore.createAutoSave(gameLog.value, gameStore.meta.currentFloor, { rewriteFromIndex: editedIndex })
 }
 
 const handleEditCancel = () => {
@@ -2006,13 +2006,13 @@ const handleRestore = async (snapshot) => {
 
   // 兜底：initializeGameWorld 中的 optimizeWorldbook/injectSmartKeysToWorldbook 可能覆盖班级条目状态
   try {
-    await syncClassWorldbookState(gameStore.currentRunId, gameStore.allClassData, gameStore.settings?.useGeminiMode)
+    await syncClassWorldbookState(gameStore.meta.currentRunId, gameStore.world.allClassData, gameStore.settings?.useGeminiMode)
     if (gameStore.player.role === 'teacher' && gameStore.player.teachingClasses?.length > 0) {
       await setupTeacherClassEntries(
         gameStore.player.teachingClasses,
         gameStore.player.homeroomClassIds || (gameStore.player.homeroomClassId ? [gameStore.player.homeroomClassId] : []),
         gameStore.player.name,
-        gameStore.currentRunId,
+        gameStore.meta.currentRunId,
         gameStore.player.classSubjectMap || {},
         gameStore.player.gender
       )
@@ -2054,7 +2054,7 @@ const handlePhoneApp = (appId) => {
 }
 
 const handleAttributeSave = () => {
-  gameStore.createAutoSave(gameLog.value, gameStore.currentFloor)
+  gameStore.createAutoSave(gameLog.value, gameStore.meta.currentFloor)
 }
 
 // 处理手机子应用中的变量修改（如本源APP），修改后触发自动保存和弹幕通知
@@ -2062,7 +2062,7 @@ const handleVariableModified = (changes) => {
   if (changes && changes.length > 0) {
     showDanmaku(changes)
   }
-  gameStore.createAutoSave(gameLog.value, gameStore.currentFloor)
+  gameStore.createAutoSave(gameLog.value, gameStore.meta.currentFloor)
 }
 
 const closeMenu = (e) => {
@@ -2103,15 +2103,15 @@ onMounted(async () => {
 
   // Gemini 3.0 Preview 模式提示（辅助AI已开启时不弹）
   if (gameStore.settings.useGeminiMode && !gameStore.settings.assistantAI?.enabled) {
-    const tipKey = `geminiTipShown_${gameStore.currentRunId}`
+    const tipKey = `geminiTipShown_${gameStore.meta.currentRunId}`
     if (!sessionStorage.getItem(tipKey)) {
       showGeminiTip.value = true
       sessionStorage.setItem(tipKey, '1')
     }
   }
 
-  if (gameStore.pendingRestoreLog) {
-    gameLog.value = [...gameStore.pendingRestoreLog]
+  if (gameStore._ui.pendingRestoreLog) {
+    gameLog.value = [...gameStore._ui.pendingRestoreLog]
     gameStore.clearPendingRestoreLog()
     loadImagesFromLog(gameLog.value)
     
@@ -2148,7 +2148,7 @@ onUnmounted(() => {
 
 // ==================== Watchers ====================
 
-watch(() => gameStore.mapSelectionMode, (newVal) => {
+watch(() => gameStore._ui.mapSelectionMode, (newVal) => {
   if (newVal) {
     showMapPanel.value = true
   }

@@ -104,16 +104,16 @@ export function matchTodoByKeyword(todoText, keyword) {
  * @param {boolean} success 是否成功
  */
 function updateMatchingStats(gameStore, mode, success) {
-  if (!gameStore.todoMatchingStats) {
-    gameStore.todoMatchingStats = {
+  if (!gameStore.notifications.todoMatchingStats) {
+    gameStore.notifications.todoMatchingStats = {
       keyword: { success: 0, total: 0 },
       index: { success: 0, total: 0 }
     }
   }
 
-  gameStore.todoMatchingStats[mode].total++
+  gameStore.notifications.todoMatchingStats[mode].total++
   if (success) {
-    gameStore.todoMatchingStats[mode].success++
+    gameStore.notifications.todoMatchingStats[mode].success++
   }
 }
 
@@ -152,7 +152,7 @@ export function findTodoMarker(gameStore, floor, todoIndex) {
   const summary = findSummaryByTodoFloor(gameStore, floor)
   if (!summary) return null
   const candidateFloors = getTodoMarkerCandidateFloors(summary, floor)
-  return gameStore.completedTodoMarkers?.find(
+  return gameStore.notifications.completedTodoMarkers?.find(
     marker => candidateFloors.includes(marker.floor) && marker.todoIndex === todoIndex
   ) || null
 }
@@ -189,24 +189,24 @@ export function markTodoAsCompletedByKeyword(gameStore, floor, keyword, currentF
   }
 
   // 标记完成
-  if (!gameStore.completedTodoMarkers) {
-    gameStore.completedTodoMarkers = []
+  if (!gameStore.notifications.completedTodoMarkers) {
+    gameStore.notifications.completedTodoMarkers = []
   }
 
   const markerFloor = getTodoMarkerFloor(summary, floor)
   const candidateFloors = getTodoMarkerCandidateFloors(summary, floor)
 
   // 检查是否已标记
-  const exists = gameStore.completedTodoMarkers.some(
+  const exists = gameStore.notifications.completedTodoMarkers.some(
     m => candidateFloors.includes(m.floor) && m.todoIndex === matchedIndex
   )
 
   if (!exists) {
-    gameStore.completedTodoMarkers.push({
+    gameStore.notifications.completedTodoMarkers.push({
       floor: markerFloor,
       todoIndex: matchedIndex,
       todoKeyword: keyword,
-      completedAt: currentFloor,
+      completedAt: gameStore.meta.currentFloor,
       completedTimestamp: Date.now(),
       matchedBy: 'keyword'
     })
@@ -251,22 +251,22 @@ export function markTodoAsCompletedByIndex(gameStore, floor, todoIndex, currentF
     return false
   }
 
-  if (!gameStore.completedTodoMarkers) {
-    gameStore.completedTodoMarkers = []
+  if (!gameStore.notifications.completedTodoMarkers) {
+    gameStore.notifications.completedTodoMarkers = []
   }
 
   const markerFloor = getTodoMarkerFloor(summary, floor)
   const candidateFloors = getTodoMarkerCandidateFloors(summary, floor)
 
-  const exists = gameStore.completedTodoMarkers.some(
+  const exists = gameStore.notifications.completedTodoMarkers.some(
     m => candidateFloors.includes(m.floor) && m.todoIndex === todoIndex
   )
 
   if (!exists) {
-    gameStore.completedTodoMarkers.push({
+    gameStore.notifications.completedTodoMarkers.push({
       floor: markerFloor,
       todoIndex,
-      completedAt: currentFloor,
+      completedAt: gameStore.meta.currentFloor,
       completedTimestamp: Date.now(),
       matchedBy: 'index'
     })
@@ -304,7 +304,7 @@ export function isTodoCompleted(gameStore, floor, todoIndex) {
  * @returns {Object} 统计信息
  */
 export function getMatchingStats(gameStore) {
-  const stats = gameStore.todoMatchingStats || {
+  const stats = gameStore.notifications.todoMatchingStats || {
     keyword: { success: 0, total: 0 },
     index: { success: 0, total: 0 }
   }

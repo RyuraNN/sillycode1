@@ -23,7 +23,7 @@ import type { ExamRecord } from '../gameStoreTypes'
 function ensureAcademicStudentNpc(store: any, student: any, classId: string) {
   if (!student?.name) return null
 
-  let npc = (store.npcs || []).find((n: any) => n.name === student.name)
+  let npc = (store.world.npcs || []).find((n: any) => n.name === student.name)
   if (!npc) {
     npc = {
       id: generateCharId(student.name),
@@ -39,10 +39,10 @@ function ensureAcademicStudentNpc(store: any, student: any, classId: string) {
       electivePreference: student.electivePreference,
       scheduleTag: student.scheduleTag
     }
-    if (!Array.isArray(store.npcs)) {
-      store.npcs = []
+    if (!Array.isArray(store.world.npcs)) {
+      store.world.npcs = []
     }
-    store.npcs.push(npc)
+    store.world.npcs.push(npc)
     return npc
   }
 
@@ -61,7 +61,7 @@ function ensureAcademicStudentNpc(store: any, student: any, classId: string) {
 function getAcademicStudentEntries(store: any) {
   const entries: Array<{ classId: string; npc: any }> = []
   const seen = new Set<string>()
-  const allClassData = store.allClassData || {}
+  const allClassData = store.world.allClassData || {}
 
   if (typeof store.initializeAllClassNpcs === 'function') {
     store.initializeAllClassNpcs()
@@ -95,11 +95,11 @@ export const academicActions = {
    * 检查是否应该触发考试（在时间推进时调用）
    */
   checkExamTrigger(this: any) {
-    const { year, month, day } = this.gameTime
+    const { year, month, day } = this.world.gameTime
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
     
     // 防止同一天重复触发
-    if (this.lastExamDate === dateStr) return null
+    if (this.academic.lastExamDate === dateStr) return null
 
     // 1. 检查静态考试日程（期中/期末等固定日期）
     for (const schedule of EXAM_SCHEDULE) {
@@ -125,11 +125,11 @@ export const academicActions = {
    * @param examType 考试类型
    */
   conductExam(this: any, examType: 'monthly' | 'midterm' | 'final') {
-    const { year, month, day } = this.gameTime
+    const { year, month, day } = this.world.gameTime
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
     
     // 防重复
-    if (this.lastExamDate === dateStr) {
+    if (this.academic.lastExamDate === dateStr) {
       console.log('[Academic] Exam already conducted today')
       return null
     }
@@ -138,7 +138,7 @@ export const academicActions = {
 
     // 按班级分组收集学生NPC
     const classResults: Record<string, Record<string, Record<string, number>>> = {}
-    const allClassData = this.allClassData || {}
+    const allClassData = this.world.allClassData || {}
 
     // 遍历所有班级
     for (const classId of Object.keys(allClassData)) {
@@ -204,16 +204,16 @@ export const academicActions = {
     }
 
     // 存储到 examHistory
-    if (!this.examHistory) this.examHistory = []
-    this.examHistory.push(examRecord)
+    if (!this.academic.examHistory) this.academic.examHistory = []
+    this.academic.examHistory.push(examRecord)
     
     // 限制历史记录数量（保留最近20次）
-    if (this.examHistory.length > 20) {
-      this.examHistory = this.examHistory.slice(-20)
+    if (this.academic.examHistory.length > 20) {
+      this.academic.examHistory = this.academic.examHistory.slice(-20)
     }
 
     // 更新最后考试日期
-    this.lastExamDate = dateStr
+    this.academic.lastExamDate = dateStr
 
     // 调整NPC动力
     for (const [classId, results] of Object.entries(classResults)) {
@@ -221,7 +221,7 @@ export const academicActions = {
       const totalStudents = ranking.length
       
       for (const entry of ranking) {
-        const npc = this.npcs.find((n: any) => n.name === entry.name)
+        const npc = this.world.npcs.find((n: any) => n.name === entry.name)
         if (npc) {
           const newMotivation = adjustMotivationAfterExam(
             entry.scores, entry.rank, totalStudents, npc.motivation ?? 50
@@ -235,8 +235,8 @@ export const academicActions = {
     updateAcademicWorldbookEntry(this)
 
     // 红点：将新考试 ID 加入未查看列表
-    if (!this.unviewedExamIds) this.unviewedExamIds = []
-    this.unviewedExamIds.push(examRecord.examId)
+    if (!this.notifications.unviewedExamIds) this.notifications.unviewedExamIds = []
+    this.notifications.unviewedExamIds.push(examRecord.examId)
 
     console.log(`[Academic] Exam completed. ${Object.keys(classResults).length} classes, records saved.`)
     
@@ -271,7 +271,7 @@ export const academicActions = {
    * 获取指定NPC的最近考试成绩
    */
   getNpcLatestScores(this: any, npcName: string): Record<string, number> | null {
-    const examHistory = this.examHistory || []
+    const examHistory = this.academic.examHistory || []
     if (examHistory.length === 0) return null
 
     const latest = examHistory[examHistory.length - 1]
@@ -286,7 +286,7 @@ export const academicActions = {
    * 获取指定班级的最近排名
    */
   getClassLatestRanking(this: any, classId: string) {
-    const examHistory = this.examHistory || []
+    const examHistory = this.academic.examHistory || []
     if (examHistory.length === 0) return null
 
     const latest = examHistory[examHistory.length - 1]
@@ -300,7 +300,7 @@ export const academicActions = {
    * 手动设置NPC动力（通过事件或AI指令）
    */
   setNpcMotivation(this: any, npcName: string, motivation: number) {
-    const npc = this.npcs.find((n: any) => n.name === npcName)
+    const npc = this.world.npcs.find((n: any) => n.name === npcName)
     if (npc) {
       npc.motivation = Math.max(0, Math.min(100, Math.round(motivation)))
       console.log(`[Academic] Set ${npcName} motivation to ${npc.motivation}`)
@@ -311,7 +311,7 @@ export const academicActions = {
    * 手动设置NPC专注科目
    */
   setNpcStudyFocus(this: any, npcName: string, subject: string | null) {
-    const npc = this.npcs.find((n: any) => n.name === npcName)
+    const npc = this.world.npcs.find((n: any) => n.name === npcName)
     if (npc) {
       npc.studyFocus = subject
       console.log(`[Academic] Set ${npcName} study focus to ${subject || 'none'}`)
@@ -340,7 +340,7 @@ export const academicActions = {
     const academicStudentMap = getAcademicStudentMap(this)
     
     // 2a. 尝试作为班级ID查找
-    const classData = this.allClassData[targetNameOrId]
+    const classData = this.world.allClassData[targetNameOrId]
     if (classData && classData.students) {
       type = 'class'
       // 收集班级内所有在籍学生 NPC（不能依赖 isAlive）
@@ -353,11 +353,11 @@ export const academicActions = {
       const allElectives = getAllElectives()
       const course = allElectives.find((c: any) => c.id === targetNameOrId || c.name === targetNameOrId)
       
-      if (course && this.npcElectiveSelections) {
+      if (course && this.academic.npcElectiveSelections) {
         type = 'class' // 选修课也视为班级教学
         const courseId = course.id
         // 查找选了这门课的学生
-        for (const [studentName, selections] of Object.entries(this.npcElectiveSelections)) {
+        for (const [studentName, selections] of Object.entries(this.academic.npcElectiveSelections)) {
           if ((selections as string[]).includes(courseId)) {
             const entry = academicStudentMap.get(studentName)
             if (entry?.npc) targets.push(entry.npc)
@@ -377,8 +377,8 @@ export const academicActions = {
       // 如果不是选修课，或者选修课没人选
       if (targets.length === 0) {
         // 2c. 尝试作为NPC查找 (优先ID，后名字)
-        let npc = this.npcs.find((n: any) => n.id === targetNameOrId)
-        if (!npc) npc = this.npcs.find((n: any) => n.name === targetNameOrId)
+        let npc = this.world.npcs.find((n: any) => n.id === targetNameOrId)
+        if (!npc) npc = this.world.npcs.find((n: any) => n.name === targetNameOrId)
         
         if (npc) {
           targets.push(npc)
@@ -484,7 +484,7 @@ export const academicActions = {
       motivation: this.player.attributes?.mood ?? 60
     }
 
-    this.weeklySnapshot = { week: weekNumber, data: snapshot }
+    this.notifications.weeklySnapshot = { week: weekNumber, data: snapshot }
     console.log(`[Academic] Weekly snapshot saved for week ${weekNumber}`)
   },
 
@@ -494,9 +494,9 @@ export const academicActions = {
   generateWeeklyPreview(this: any) {
     const weekNumber = this.getWeekNumber?.() || 0
     if (!weekNumber) return
-    if (this.lastWeeklyPreviewWeek === weekNumber) return // 本周已生成
+    if (this.notifications.lastWeeklyPreviewWeek === weekNumber) return // 本周已生成
 
-    const snapshot = this.weeklySnapshot
+    const snapshot = this.notifications.weeklySnapshot
     if (!snapshot || !snapshot.data) {
       console.log('[Academic] No snapshot for weekly preview')
       return
@@ -564,7 +564,7 @@ export const academicActions = {
     // 动力下降预警
     const motivationWarnings = changes.filter(c => c.motivationDelta < -5).sort((a, b) => a.motivationDelta - b.motivationDelta).slice(0, 3)
 
-    this.weeklyPreviewData = {
+    this.notifications.weeklyPreviewData = {
       week: weekNumber,
       playerChanges,
       top3,
@@ -573,7 +573,7 @@ export const academicActions = {
       avgMotivationDelta: npcCount > 0 ? Math.round(totalMotivationDelta / npcCount * 10) / 10 : 0,
       npcCount
     }
-    this.lastWeeklyPreviewWeek = weekNumber
+    this.notifications.lastWeeklyPreviewWeek = weekNumber
     console.log(`[Academic] Weekly preview generated for week ${weekNumber}`)
   }
 }

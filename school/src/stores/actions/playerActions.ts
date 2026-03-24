@@ -13,7 +13,7 @@ export const playerActions = {
    */
   setPlayerName(this: any, name: string) {
     this.player.name = name
-    updatePartTimeWorldbookEntry(this.currentRunId, this.player.partTimeJob.history, this.player.name).catch((e: unknown) => console.error('[GameStore] Failed to update part-time worldbook name:', e))
+    updatePartTimeWorldbookEntry(this.meta.currentRunId, this.player.partTimeJob.history, this.player.name).catch((e: unknown) => console.error('[GameStore] Failed to update part-time worldbook name:', e))
   },
 
   /**
@@ -190,16 +190,16 @@ export const playerActions = {
    */
   addNpc(this: any, npc: NpcStats) {
     // 先按 id 查重，再按 name 查重
-    let existing = npc.id ? this.npcs.find((n: NpcStats) => n.id === npc.id) : null
+    let existing = npc.id ? this.world.npcs.find((n: NpcStats) => n.id === npc.id) : null
     if (!existing && npc.name) {
-      existing = this.npcs.find((n: NpcStats) => n.name === npc.name)
+      existing = this.world.npcs.find((n: NpcStats) => n.name === npc.name)
     }
     if (existing) {
       // 已存在则更新
       Object.assign(existing, npc)
       console.log('[GameStore] addNpc: updated existing NPC:', npc.name || npc.id)
     } else {
-      this.npcs.push(npc)
+      this.world.npcs.push(npc)
     }
   },
 
@@ -227,14 +227,14 @@ export const playerActions = {
     }
     if (data.time) {
       const current = new Date(
-        this.gameTime.year,
-        this.gameTime.month - 1,
-        this.gameTime.day,
-        this.gameTime.hour,
-        this.gameTime.minute
+        this.world.gameTime.year,
+        this.world.gameTime.month - 1,
+        this.world.gameTime.day,
+        this.world.gameTime.hour,
+        this.world.gameTime.minute
       )
       
-      const targetTime = { ...this.gameTime, ...data.time }
+      const targetTime = { ...this.world.gameTime, ...data.time }
       const target = new Date(
         targetTime.year,
         targetTime.month - 1,
@@ -288,10 +288,10 @@ export const playerActions = {
         
         // 先按 id 查找，找不到再按 name 查找，避免重复添加
         if (newNpc.id) {
-          existingNpc = this.npcs.find((n: NpcStats) => n.id === newNpc.id)
+          existingNpc = this.world.npcs.find((n: NpcStats) => n.id === newNpc.id)
         }
         if (!existingNpc && newNpc.name) {
-          existingNpc = this.npcs.find((n: NpcStats) => n.name === newNpc.name)
+          existingNpc = this.world.npcs.find((n: NpcStats) => n.name === newNpc.name)
         }
 
         if (newNpc.isAlive !== undefined) {
@@ -315,13 +315,13 @@ export const playerActions = {
         } else if (npcData.id) {
           // @ts-ignore
           if (npcData.relationship === undefined) npcData.relationship = 0
-          this.npcs.push(npcData)
+          this.world.npcs.push(npcData)
         } else if (npcData.name) {
           // @ts-ignore
           npcData.id = generateCharId(npcData.name)
           // @ts-ignore
           if (npcData.relationship === undefined) npcData.relationship = 0
-          this.npcs.push(npcData)
+          this.world.npcs.push(npcData)
           console.log('[GameStore] Added new NPC with generated ID:', npcData)
         } else {
           console.warn('[GameStore] Cannot add new NPC without ID or Name:', npcData)
@@ -378,12 +378,12 @@ export const playerActions = {
       }
 
       if (current[part] === undefined) {
-        if (current === this.allClubs) {
+        if (current === this.world.allClubs) {
            if (current[part]) {
              current = current[part]
              continue
            }
-           const club = Object.values(this.allClubs).find((c: any) => c.name === part)
+           const club = Object.values(this.world.allClubs).find((c: any) => c.name === part)
            if (club) {
              current = club
              continue
@@ -434,12 +434,12 @@ export const playerActions = {
       part = pathMap[part] || part
       
       if (current[part] === undefined) {
-         if (current === this.allClubs) {
+         if (current === this.world.allClubs) {
            if (current[part]) {
              current = current[part]
              continue
            }
-           const club = Object.values(this.allClubs).find((c: any) => c.name === part)
+           const club = Object.values(this.world.allClubs).find((c: any) => c.name === part)
            if (club) {
              current = club
              continue

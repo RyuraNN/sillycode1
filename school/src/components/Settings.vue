@@ -477,7 +477,7 @@ const loadRerankModels = async () => {
                 <span class="setting-hint">关键词模式：AI输出待办内容关键词，系统自动匹配（推荐）<br>索引模式：AI输出数字索引（需要主AI支持，暂未实现）</span>
               </div>
               <div class="setting-control">
-                <select v-model="gameStore.todoMatchingMode" class="select-input" @change="gameStore.saveToStorage()">
+                <select v-model="gameStore.notifications.todoMatchingMode" class="select-input" @change="gameStore.saveToStorage()">
                   <option value="keyword">关键词匹配（推荐）</option>
                   <option value="index">数字索引匹配</option>
                 </select>

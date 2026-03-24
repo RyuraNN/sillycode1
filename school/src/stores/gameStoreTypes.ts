@@ -9,8 +9,8 @@
 export interface ChatLogEntry {
   type: 'player' | 'ai'
   content: string
-  snapshot?: GameStateData // 该消息产生时的游戏状态快照
-  preVariableSnapshot?: GameStateData // 应用变量前的快照（用于重Roll）
+  snapshot?: GameStateData | GameStateDataLegacy | any // 该消息产生时的游戏状态快照（v4分层 或 v3扁平）
+  preVariableSnapshot?: GameStateData | GameStateDataLegacy | any // 应用变量前的快照（用于重Roll）
   rawContent?: string // 原始回复内容（用于重Roll）
 }
 
@@ -20,7 +20,7 @@ export interface SaveSnapshot {
   timestamp: number             // 保存时间
   label: string                 // 用户可编辑的标签
   messageIndex: number          // 对应的聊天楼层索引
-  gameState?: GameStateData     // [可选] 完整的 gameStore 状态快照
+  gameState?: GameStateData | GameStateDataLegacy | any  // [可选] 完整的 gameStore 状态快照（v4分层 或 v3扁平）
   chatLog?: ChatLogEntry[]      // [可选] 到该楼层为止的聊天历史
   // 元数据（用于列表显示）
   gameTime?: {
@@ -35,8 +35,14 @@ export interface SaveSnapshot {
   gameVersion?: string    
 }
 
-/** 纯游戏状态数据（不含快照，用于存档） */
-export interface GameStateData {
+/** 纯游戏状态数据（用于存档序列化，自动排除 settings 和 _ui） */
+export type GameStateData = Omit<GameState, 'settings' | '_ui'>
+
+/**
+ * 旧版扁平 GameStateData（v3 兼容，用于导入旧存档）
+ * 迁移函数会将此格式转换为新的分层结构
+ */
+export interface GameStateDataLegacy {
   player: PlayerStats
   npcs: NpcStats[]
   npcRelationships: Record<string, NpcFullData>
@@ -70,6 +76,23 @@ export interface GameStateData {
   completedTodoMarkers?: CompletedTodoMarker[]
   todoMatchingMode?: 'keyword' | 'index'
   todoMatchingStats?: TodoMatchingStats
+  // 以下字段可能存在于旧存档中（v3 扩展）
+  electiveAcademicData?: Record<string, any>
+  eventChecks?: EventChecks
+  clubApplication?: any
+  clubRejection?: any
+  clubInvitation?: any
+  npcElectiveSelections?: Record<string, string[]>
+  characterNotes?: Record<string, string>
+  customCoursePool?: any
+  unviewedExamIds?: string[]
+  lastViewedWeeklyPreview?: number
+  viewedClubIds?: string[]
+  weeklySnapshot?: any
+  weeklyPreviewData?: any
+  showWeeklyPreview?: boolean
+  lastWeeklyPreviewWeek?: number
+  _lastBaseFloor?: number
 }
 
 // ==================== 物品与装备相关 ====================
@@ -760,21 +783,128 @@ export interface GraduatedNpc {
   clubsAtGraduation: string[] // 毕业时所属社团
 }
 
+/** 全局游戏状态（分层结构 v4） */
 export interface GameState {
-  player: PlayerStats
-  npcs: NpcStats[]
-  npcRelationships: Record<string, NpcFullData>
-  characterNotes: Record<string, string>
-  graduatedNpcs: GraduatedNpc[]
-  lastAcademicYear: number // 上次进级的学年（防止重复触发）
-  gameTime: {
-    year: number
-    month: number
-    day: number
-    weekday: string
-    hour: number
-    minute: number
+  // ── 元数据 ──
+  meta: {
+    currentRunId: string
+    currentFloor: number
+    _lastBaseFloor: number
+    _schemaVersion: number
   }
+
+  // ── 世界状态（联机可共享）──
+  world: {
+    gameTime: {
+      year: number
+      month: number
+      day: number
+      weekday: string
+      hour: number
+      minute: number
+    }
+    worldState: {
+      economy: number
+      weather: {
+        current: {
+          weather: string
+          weatherName: string
+          icon: string
+          temperature: number
+          tempHigh: number
+          tempLow: number
+        }
+        forecast: Array<{
+          date: string
+          year: number
+          month: number
+          day: number
+          weekday: string
+          weather: string
+          weatherName: string
+          icon: string
+          category: string
+          tempHigh: number
+          tempLow: number
+          hourly?: Array<{
+            time: string
+            weather: string
+            weatherName: string
+            icon: string
+            temp: number
+          }>
+        }>
+        lastUpdateDate: string
+        season: string
+        previousHour: number
+        lastChangeInfo: any
+      }
+    }
+    allClassData: any
+    allClubs: Record<string, ClubData>
+    npcs: NpcStats[]
+    npcRelationships: Record<string, NpcFullData>
+    graduatedNpcs: GraduatedNpc[]
+    lastAcademicYear: number
+    characterNotes: Record<string, string>
+  }
+
+  // ── 玩家数据 ──
+  player: PlayerStats
+
+  // ── 学业系统 ──
+  academic: {
+    examHistory: ExamRecord[]
+    lastExamDate: string | null
+    electiveAcademicData: Record<string, { quality: number }>
+    npcElectiveSelections: Record<string, string[]>
+    customCoursePool: any | null
+  }
+
+  // ── 事件系统 ──
+  events: {
+    checks: EventChecks
+    library: Map<string, any>
+    triggers: Array<any>
+    clubApplication: {
+      clubId: string
+      clubName: string
+      remainingTurns: number
+    } | null
+    clubRejection: {
+      clubName: string
+      from: string
+      reason: string
+    } | null
+    clubInvitation: {
+      clubId: string
+      clubName: string
+      targetName: string
+      remainingTurns: number
+    } | null
+  }
+
+  // ── 待办/通知 ──
+  notifications: {
+    completedTodoMarkers: CompletedTodoMarker[]
+    todoMatchingMode: 'keyword' | 'index'
+    todoMatchingStats: TodoMatchingStats
+    unviewedExamIds: string[]
+    lastViewedWeeklyPreview: number
+    viewedClubIds: string[]
+    weeklySnapshot: any
+    weeklyPreviewData: any
+    showWeeklyPreview: boolean
+    lastWeeklyPreviewWeek: number
+  }
+
+  // ── RAG/摘要（累积数据）──
+  rag: {
+    summaries: SummaryData[]
+    persistentFacts: PersistentFact[]
+  }
+
+  // ── 全局设置（不参与存档） ──
   settings: {
     difficulty: 'easy' | 'normal' | 'hard'
     expMultiplier: number
@@ -825,104 +955,31 @@ export interface GameState {
       retryDelay: number
     }
   }
-  saveSnapshots: SaveSnapshot[]
-  saveError: string | null
-  currentChatLog: ChatLogEntry[]
-  pendingRestoreLog: ChatLogEntry[] | null
-  allClassData: any
-  allClubs: Record<string, ClubData>
-  clubApplication: {
-    clubId: string
-    clubName: string
-    remainingTurns: number
-  } | null
-  clubRejection: {
-    clubName: string
-    from: string
-    reason: string
-  } | null
-  clubInvitation: {
-    clubId: string
-    clubName: string
-    targetName: string
-    remainingTurns: number
-  } | null
-  currentRunId: string
-  currentFloor: number
-  _lastBaseFloor?: number
-  mapSelectionMode: boolean
-  mapSelectionCallback: ((location: string) => void) | null
-  eventLibrary: Map<string, any>
-  eventTriggers: Array<any>
-  eventChecks: EventChecks
-  // 学业系统
-  examHistory: ExamRecord[]
-  electiveAcademicData: Record<string, { quality: number }>
-  lastExamDate: string | null  // 上次考试日期 'YYYY-MM-DD'，防止重复触发
-  customCoursePool: any | null
-  npcElectiveSelections?: Record<string, string[]> // NPC选课记录 { NPC名: [课程ID] }
-  // 红点/通知相关
-  unviewedExamIds: string[]
-  lastViewedWeeklyPreview: number
-  viewedClubIds: string[]
-  // 周报相关
-  weeklySnapshot: any
-  weeklyPreviewData: any
-  showWeeklyPreview: boolean
-  lastWeeklyPreviewWeek: number
-  // 待办事项管理
-  completedTodoMarkers: CompletedTodoMarker[]
-  todoMatchingMode: 'keyword' | 'index'
-  todoMatchingStats: TodoMatchingStats
-  ragDiagnostics: RagDiagnosticsState
-  worldbookLoadResults: {
-    classData: boolean | null
-    clubData: boolean | null
-    mapData: boolean | null
-    partTimeData: boolean | null
-    courseData: boolean | null
-    eventData: boolean | null
-    scheduleData: boolean | null
-    shopData: boolean | null
-    academicData: boolean | null
-    tagData: boolean | null
-    socialData: boolean | null
-  }
-  worldState: {
-    economy: number
-    weather: {
-      current: {
-        weather: string
-        weatherName: string
-        icon: string
-        temperature: number
-        tempHigh: number
-        tempLow: number
-      }
-      forecast: Array<{
-        date: string
-        year: number
-        month: number
-        day: number
-        weekday: string
-        weather: string
-        weatherName: string
-        icon: string
-        category: string
-        tempHigh: number
-        tempLow: number
-        hourly?: Array<{
-          time: string
-          weather: string
-          weatherName: string
-          icon: string
-          temp: number
-        }>
-      }>
-      lastUpdateDate: string
-      season: string
-      previousHour: number
-      lastChangeInfo: any
+
+  // ── UI/运行时（不持久化） ──
+  _ui: {
+    mapSelectionMode: boolean
+    mapSelectionCallback: ((location: string) => void) | null
+    saveError: string | null
+    saveSnapshots: SaveSnapshot[]
+    currentChatLog: ChatLogEntry[]
+    pendingRestoreLog: ChatLogEntry[] | null
+    worldbookLoadResults: {
+      classData: boolean | null
+      clubData: boolean | null
+      mapData: boolean | null
+      partTimeData: boolean | null
+      courseData: boolean | null
+      eventData: boolean | null
+      scheduleData: boolean | null
+      shopData: boolean | null
+      academicData: boolean | null
+      tagData: boolean | null
+      socialData: boolean | null
     }
+    ragDiagnostics: RagDiagnosticsState
   }
 }
+
+/** 联机同步用的公开玩家状态（未来扩展） */
+export type PublicPlayerState = Pick<PlayerStats, 'name' | 'gender' | 'role' | 'level' | 'avatar' | 'classId' | 'location' | 'equipment' | 'outfitSlots'>

@@ -15,7 +15,7 @@ const isDebugMode = computed(() => gameStore.settings.debugMode)
 
 const snapshots = computed(() => {
   // 按时间倒序排列
-  return [...gameStore.saveSnapshots].sort((a, b) => b.timestamp - a.timestamp)
+  return [...gameStore._ui.saveSnapshots].sort((a, b) => b.timestamp - a.timestamp)
 })
 
 const formatDate = (timestamp) => {

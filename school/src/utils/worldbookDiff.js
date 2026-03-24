@@ -258,29 +258,29 @@ export async function fetchAndDiffAll() {
     // 并行拉取班级、社团、学力
     const [wbClassData, wbClubs, wbAcademic] = await Promise.all([
       fetchClassDataFromWorldbook().catch(e => { errors.push('班级: ' + getErrorMessage(e)); return null }),
-      fetchClubDataFromWorldbook(gameStore.currentRunId).catch(e => { errors.push('社团: ' + getErrorMessage(e)); return null }),
+      fetchClubDataFromWorldbook(gameStore.meta.currentRunId).catch(e => { errors.push('社团: ' + getErrorMessage(e)); return null }),
       fetchAcademicDataFromWorldbook().catch(e => { errors.push('学力: ' + getErrorMessage(e)); return null })
     ])
 
     // 班级 diff
     if (wbClassData) {
-      allDiffs.push(...diffClasses(gameStore.allClassData, wbClassData))
+      allDiffs.push(...diffClasses(gameStore.world.allClassData, wbClassData))
     }
 
     // 社团 diff
     if (wbClubs) {
-      allDiffs.push(...diffClubs(gameStore.allClubs, wbClubs))
+      allDiffs.push(...diffClubs(gameStore.world.allClubs, wbClubs))
     }
 
     // 学力 diff
     if (wbAcademic) {
-      allDiffs.push(...diffAcademic(gameStore.npcs, wbAcademic))
+      allDiffs.push(...diffAcademic(gameStore.world.npcs, wbAcademic))
     }
 
     // 课程池 diff（需要特殊处理：先快照 → 加载世界书版 → 对比 → 恢复）
     try {
       const currentSnapshot = JSON.parse(JSON.stringify(getCoursePoolState()))
-      const loaded = await loadCoursePoolFromWorldbook(gameStore.currentRunId)
+      const loaded = await loadCoursePoolFromWorldbook(gameStore.meta.currentRunId)
       if (loaded) {
         const wbSnapshot = JSON.parse(JSON.stringify(getCoursePoolState()))
         restoreCoursePoolState(currentSnapshot)
@@ -319,16 +319,16 @@ export async function applyResolvedDiffs(resolvedDiffs) {
     const affectedClassIds = new Set()
     for (const d of grouped.classes) {
       const val = d.choice === 'worldbook' ? d.worldbook : d.current
-      if (!gameStore.allClassData) gameStore.allClassData = {}
+      if (!gameStore.world.allClassData) gameStore.world.allClassData = {}
 
       if (d.field === '_entire') {
         if (val === null) {
-          delete gameStore.allClassData[d.entityId]
+          delete gameStore.world.allClassData[d.entityId]
         } else {
-          gameStore.allClassData[d.entityId] = JSON.parse(JSON.stringify(val))
+          gameStore.world.allClassData[d.entityId] = JSON.parse(JSON.stringify(val))
         }
-      } else if (gameStore.allClassData[d.entityId]) {
-        const cls = gameStore.allClassData[d.entityId]
+      } else if (gameStore.world.allClassData[d.entityId]) {
+        const cls = gameStore.world.allClassData[d.entityId]
         if (d.field === 'headTeacher') {
           if (!cls.headTeacher) cls.headTeacher = {}
           cls.headTeacher.name = val
@@ -346,8 +346,8 @@ export async function applyResolvedDiffs(resolvedDiffs) {
     }
     // 写回世界书
     for (const classId of affectedClassIds) {
-      if (gameStore.allClassData[classId]) {
-        await updateClassDataInWorldbook(classId, gameStore.allClassData[classId], true)
+      if (gameStore.world.allClassData[classId]) {
+        await updateClassDataInWorldbook(classId, gameStore.world.allClassData[classId], true)
       }
     }
   }
@@ -357,23 +357,23 @@ export async function applyResolvedDiffs(resolvedDiffs) {
     const affectedClubIds = new Set()
     for (const d of grouped.clubs) {
       const val = d.choice === 'worldbook' ? d.worldbook : d.current
-      if (!gameStore.allClubs) gameStore.allClubs = {}
+      if (!gameStore.world.allClubs) gameStore.world.allClubs = {}
 
       if (d.field === '_entire') {
         if (val === null) {
-          delete gameStore.allClubs[d.entityId]
+          delete gameStore.world.allClubs[d.entityId]
         } else {
-          gameStore.allClubs[d.entityId] = JSON.parse(JSON.stringify(val))
+          gameStore.world.allClubs[d.entityId] = JSON.parse(JSON.stringify(val))
         }
-      } else if (gameStore.allClubs[d.entityId]) {
-        gameStore.allClubs[d.entityId][d.field] = Array.isArray(val) ? [...val] : val
+      } else if (gameStore.world.allClubs[d.entityId]) {
+        gameStore.world.allClubs[d.entityId][d.field] = Array.isArray(val) ? [...val] : val
       }
       affectedClubIds.add(d.entityId)
     }
     if (affectedClubIds.size > 0) {
       await batchUpdateClubsInWorldbook(
-        [...affectedClubIds].map(id => gameStore.allClubs[id]).filter(Boolean),
-        gameStore.currentRunId
+        [...affectedClubIds].map(id => gameStore.world.allClubs[id]).filter(Boolean),
+        gameStore.meta.currentRunId
       )
     }
   }
@@ -383,7 +383,7 @@ export async function applyResolvedDiffs(resolvedDiffs) {
     const affectedNpcs = new Set()
     for (const d of grouped.academic) {
       const val = d.choice === 'worldbook' ? d.worldbook : d.current
-      const npc = gameStore.npcs.find(n => n.name === d.entityId)
+      const npc = gameStore.world.npcs.find(n => n.name === d.entityId)
       if (!npc) continue
 
       // 确保 academicProfile 是对象
@@ -398,7 +398,7 @@ export async function applyResolvedDiffs(resolvedDiffs) {
     }
     // 收集所有有学力数据的学生，批量写回
     if (affectedNpcs.size > 0) {
-      const studentsForWb = gameStore.npcs
+      const studentsForWb = gameStore.world.npcs
         .filter(n => n.academicProfile && typeof n.academicProfile === 'object')
         .map(n => ({ name: n.name, academicProfile: n.academicProfile }))
       await updateAcademicDataInWorldbook(studentsForWb)
@@ -409,7 +409,7 @@ export async function applyResolvedDiffs(resolvedDiffs) {
   if (grouped.coursePool) {
     const d = grouped.coursePool[0]
     if (d.choice === 'worldbook') {
-      await loadCoursePoolFromWorldbook(gameStore.currentRunId)
+      await loadCoursePoolFromWorldbook(gameStore.meta.currentRunId)
       await saveCoursePoolToWorldbook()
     } else {
       await saveCoursePoolToWorldbook()

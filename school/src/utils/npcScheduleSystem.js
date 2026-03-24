@@ -1579,8 +1579,8 @@ function inferTemplateId(npc, gameStore) {
   
   // ============ 2. 社团判断 ============
   let clubId = null
-  if (gameStore?.allClubs) {
-    for (const [id, data] of Object.entries(gameStore.allClubs)) {
+  if (gameStore?.world?.allClubs) {
+    for (const [id, data] of Object.entries(gameStore.world.allClubs)) {
       if (data.members?.includes(npc.name) || data.president === npc.name || data.vicePresident === npc.name) {
         clubId = id
         break
@@ -1749,8 +1749,8 @@ export function resolveLocationPlaceholder(locationId, npcData, gameStore) {
   // 获取 NPC 的班级教室 ID
   const getClassroom = () => {
     // 优先从班级数据中读取自定义教室 (classroomId)
-    if (gameStore?.allClassData) {
-      for (const [classId, classData] of Object.entries(gameStore.allClassData)) {
+    if (gameStore?.world?.allClassData) {
+      for (const [classId, classData] of Object.entries(gameStore.world.allClassData)) {
         if (classData.students?.some(s => s.name === npcData.name)) {
           if (classData.classroomId) return classData.classroomId
           return `classroom_${classId.toLowerCase().replace('-', '')}`
@@ -1759,7 +1759,7 @@ export function resolveLocationPlaceholder(locationId, npcData, gameStore) {
     }
     if (npcData.classId) {
       // 检查该班级是否有自定义教室
-      const classInfo = gameStore?.allClassData?.[npcData.classId]
+      const classInfo = gameStore?.world?.allClassData?.[npcData.classId]
       if (classInfo?.classroomId) return classInfo.classroomId
       return `classroom_${npcData.classId.toLowerCase().replace('-', '')}`
     }
@@ -1773,8 +1773,8 @@ export function resolveLocationPlaceholder(locationId, npcData, gameStore) {
     case 'class_location': // 跑班制核心逻辑
       // 尝试查找 classId
       let currentClassId = npcData.classId
-      if (!currentClassId && gameStore?.allClassData) {
-        for (const [id, classData] of Object.entries(gameStore.allClassData)) {
+      if (!currentClassId && gameStore?.world?.allClassData) {
+        for (const [id, classData] of Object.entries(gameStore.world.allClassData)) {
           if (classData.students?.some(s => s.name === npcData.name)) {
             currentClassId = id
             break
@@ -1782,12 +1782,11 @@ export function resolveLocationPlaceholder(locationId, npcData, gameStore) {
         }
       }
       
-      if (!gameStore || !currentClassId) return getClassroom()
-      
-      const { hour, minute, year, month, day } = gameStore.gameTime
+      const { hour, minute, year, month, day } = gameStore.world.gameTime
       const currentTimeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
       
       // 1. 检查是否在上课时间
+// ...
       // 将时间转换为分钟数比较
       const currentMins = hour * 60 + minute
       const getMins = (str) => { const [h, m] = str.split(':').map(Number); return h * 60 + m; }
@@ -1802,11 +1801,11 @@ export function resolveLocationPlaceholder(locationId, npcData, gameStore) {
       
       if (currentPeriod) {
         // 2. 生成/获取当前课表
-        const classInfo = gameStore.allClassData?.[currentClassId] || {}
+        const classInfo = gameStore.world.allClassData?.[currentClassId] || {}
         const termInfo = getTermInfo(year, month, day)
         // 确保同一周的课表一致
         const schedule = generateWeeklySchedule(currentClassId, classInfo, termInfo.weekNumber)
-        const weekdayEng = getWeekdayEnglish(gameStore.gameTime.weekday)
+        const weekdayEng = getWeekdayEnglish(gameStore.world.gameTime.weekday)
         const todaySchedule = schedule[weekdayEng]
         
         if (todaySchedule) {
@@ -1820,8 +1819,8 @@ export function resolveLocationPlaceholder(locationId, npcData, gameStore) {
       
     case 'club':
       if (npcData.clubRoom) return npcData.clubRoom
-      if (gameStore?.allClubs) {
-        for (const [clubId, clubData] of Object.entries(gameStore.allClubs)) {
+      if (gameStore?.world?.allClubs) {
+        for (const [clubId, clubData] of Object.entries(gameStore.world.allClubs)) {
           const isMember = clubData.members?.includes(npcData.name) || 
                            clubData.president === npcData.name ||
                            clubData.vicePresident === npcData.name ||
@@ -2046,12 +2045,12 @@ function parseModifierEffects(str) {
  * 计算 NPC 的选修课位置
  */
 function calculateNpcElectiveLocation(npc, gameTime, gameStore) {
-  if (!gameStore || !gameStore.currentRunId) return null
-  const seed = gameStore.currentRunId.split('').reduce((a, b) => a + b.charCodeAt(0), 0)
+  if (!gameStore || !gameStore.meta.currentRunId) return null
+  const seed = gameStore.meta.currentRunId.split('').reduce((a, b) => a + b.charCodeAt(0), 0)
   const rng = seededRandom(seed)
   let preference = 'general'
-  if (gameStore.allClassData) {
-    for (const classInfo of Object.values(gameStore.allClassData)) {
+  if (gameStore.world.allClassData) {
+    for (const classInfo of Object.values(gameStore.world.allClassData)) {
       const student = classInfo.students?.find(s => s.name === npc.name)
       if (student && student.electivePreference) {
         preference = student.electivePreference
@@ -2168,7 +2167,7 @@ export function calculateNpcLocation(npc, gameTime, gameStore, forceRecalculate 
 
   // ============ 正常流程 ============
 
-  if (gameTime.hour >= 14 && gameTime.hour < 16 && !isWeekend(getWeekdayEnglish(gameStore.gameTime.weekday))) {
+  if (gameTime.hour >= 14 && gameTime.hour < 16 && !isWeekend(getWeekdayEnglish(gameStore.world.gameTime.weekday))) {
     const electiveLocation = calculateNpcElectiveLocation(npc, gameTime, gameStore)
     if (electiveLocation) {
       const seed = generateLocationSeed(npc.id, gameTime)
@@ -2362,7 +2361,7 @@ export function getNpcsAtLocation(locationId, gameStore = null) {
   if (locationNpcIndex.size === 0 && gameStore) updateAllNpcLocations(gameStore)
   const npcIds = locationNpcIndex.get(locationId)
   if (!npcIds || npcIds.size === 0) return []
-  if (gameStore?.npcs) return gameStore.npcs.filter(npc => npcIds.has(npc.id))
+  if (gameStore?.npcs) return gameStore.world.npcs.filter(npc => npcIds.has(npc.id))
   return Array.from(npcIds)
 }
 
@@ -2373,10 +2372,10 @@ export function getNpcCountAtLocation(locationId) {
 
 export function findNpcLocation(npcId, gameStore) {
   if (!gameStore) return null
-  const cacheKey = `${npcId}_${gameStore.gameTime.hour}`
+  const cacheKey = `${npcId}_${gameStore.world.gameTime.hour}`
   if (locationCache.has(cacheKey)) return locationCache.get(cacheKey).locationId
-  const npc = gameStore.npcs?.find(n => n.id === npcId)
-  if (npc) return calculateNpcLocation(npc, gameStore.gameTime, gameStore)
+  const npc = gameStore.world.npcs?.find(n => n.id === npcId)
+  if (npc) return calculateNpcLocation(npc, gameStore.world.gameTime, gameStore)
   return null
 }
 
@@ -2397,7 +2396,7 @@ export function isNpcTracked(npcId) { return trackedNpcs.has(npcId) }
 export function getTrackedNpcsWithLocations(gameStore) {
   const results = []
   for (const npcId of trackedNpcs) {
-    const npc = gameStore.npcs?.find(n => n.id === npcId)
+    const npc = gameStore.world.npcs?.find(n => n.id === npcId)
     if (!npc) continue
     const locationId = findNpcLocation(npcId, gameStore)
     const locationItem = getItem(locationId)

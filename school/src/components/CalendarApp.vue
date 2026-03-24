@@ -157,8 +157,8 @@ const newEventDate = computed(() => {
 
 // 初始化为游戏时间
 onMounted(() => {
-  displayYear.value = gameStore.gameTime.year
-  displayMonth.value = gameStore.gameTime.month
+  displayYear.value = gameStore.world.gameTime.year
+  displayMonth.value = gameStore.world.gameTime.month
 })
 
 const currentYear = computed(() => displayYear.value)
@@ -182,9 +182,9 @@ const calendarCells = computed(() => {
   
   // 获取今天的日期
   const today = {
-    year: gameStore.gameTime.year,
-    month: gameStore.gameTime.month,
-    day: gameStore.gameTime.day
+    year: gameStore.world.gameTime.year,
+    month: gameStore.world.gameTime.month,
+    day: gameStore.world.gameTime.day
   }
   
   // 填充上月日期

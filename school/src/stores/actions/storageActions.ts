@@ -10,6 +10,9 @@ import {
   saveSnapshotData, 
   getSnapshotData,
   saveChunkedChatLog,
+  loadChunkedChatLog,
+  saveSharedChatLog,
+  loadSharedChatLog,
   getRosterBackup,
   saveRosterBackup,
   getFullCharacterPool,
@@ -351,11 +354,11 @@ export const storageActions = {
     // 0. 优先从 IndexedDB 加载（按 currentRunId 隔离）
     try {
       const { getNpcRelationships } = await import('../../utils/indexedDB')
-      if (this.currentRunId && this.currentRunId !== 'temp_editing') {
-        const saved = await getNpcRelationships(this.currentRunId)
+      if (this.meta.currentRunId && this.meta.currentRunId !== 'temp_editing') {
+        const saved = await getNpcRelationships(this.meta.currentRunId)
         if (saved && typeof saved === 'object' && Object.keys(saved).length > 0) {
-          console.log('[GameStore] Loaded NPC relationships from IndexedDB for run:', this.currentRunId)
-          this.npcRelationships = saved
+          console.log('[GameStore] Loaded NPC relationships from IndexedDB for run:', this.meta.currentRunId)
+          this.world.npcRelationships = saved
           return  // IndexedDB 有数据，直接使用，不再从世界书读取
         }
       }
@@ -375,16 +378,16 @@ export const storageActions = {
 
     // By default, do not reuse in-memory relationships to avoid cross-run carryover.
     if (!options?.preserveCurrentInMemory) {
-      this.npcRelationships = {}
+      this.world.npcRelationships = {}
     }
 
     const newRelationships: Record<string, any> = {}
 
     // 2. 先处理世界书中的角色数据（优先级高于硬编码）
     for (const [charName, charData] of Object.entries(socialData)) {
-      if (this.npcRelationships[charName]) {
+      if (this.world.npcRelationships[charName]) {
         // 已存在于运行时 store 的直接保留（运行时数据 > 世界书）
-        newRelationships[charName] = this.npcRelationships[charName]
+        newRelationships[charName] = this.world.npcRelationships[charName]
       } else {
         // 从世界书构建（注意：世界书用 relationships，store 用 relations）
         newRelationships[charName] = {
@@ -398,7 +401,7 @@ export const storageActions = {
 
     // 3. 再用 DEFAULT_RELATIONSHIPS 填充世界书中没有的角色（兜底）
     for (const [charName, relations] of Object.entries(DEFAULT_RELATIONSHIPS as Record<string, any>)) {
-      if (!newRelationships[charName] && !this.npcRelationships[charName]) {
+      if (!newRelationships[charName] && !this.world.npcRelationships[charName]) {
         newRelationships[charName] = {
           personality: (DEFAULT_PERSONALITIES as Record<string, any>)[charName] || { order: 0, altruism: 0, tradition: 0, peace: 0 },
           goals: (DEFAULT_GOALS as Record<string, any>)[charName] || { immediate: '', shortTerm: '', longTerm: '' },
@@ -406,7 +409,7 @@ export const storageActions = {
           relations: {}
         }
       } else if (!newRelationships[charName]) {
-        newRelationships[charName] = this.npcRelationships[charName]
+        newRelationships[charName] = this.world.npcRelationships[charName]
       }
 
       // 填充缺失的具体关系对
@@ -421,14 +424,14 @@ export const storageActions = {
     }
 
     // 4. 保留已有的、不在上述两个来源中的角色
-    for (const [charName, data] of Object.entries(this.npcRelationships)) {
+    for (const [charName, data] of Object.entries(this.world.npcRelationships)) {
       if (!newRelationships[charName]) {
         newRelationships[charName] = data
       }
     }
 
     // 一次性赋值，减少 Vue 响应式开销
-    this.npcRelationships = newRelationships
+    this.world.npcRelationships = newRelationships
   },
 
   /**
@@ -472,7 +475,7 @@ export const storageActions = {
         const { cleaned, migrated } = await cleanAndMigrateSnapshots(snapshots)
         
         // 用轻量级数据赋值
-        this.saveSnapshots = cleaned
+        this._ui.saveSnapshots = cleaned
         
         if (migrated) {
           console.log('[GameStore] Migration complete, saving lightweight snapshots list.')
@@ -544,7 +547,7 @@ export const storageActions = {
         'load runId'
       )
       if (lastRunId) {
-        this.currentRunId = lastRunId
+        this.meta.currentRunId = lastRunId
       }
     } catch (e) {
       console.warn('[GameStore] Failed to load runId:', e)
@@ -588,13 +591,13 @@ export const storageActions = {
   async saveToStorage(this: any, force = false) {
     const doSave = async () => {
       try {
-        this.saveError = null
-        await setItem('school_game_snapshots', JSON.parse(JSON.stringify(this.saveSnapshots)))
+        this._ui.saveError = null
+        await setItem('school_game_snapshots', JSON.parse(JSON.stringify(this._ui.saveSnapshots)))
         await setItem('school_game_settings', JSON.parse(JSON.stringify(this.settings)))
-        await setItem('school_game_run_id', this.currentRunId)
+        await setItem('school_game_run_id', this.meta.currentRunId)
       } catch (e) {
         console.error('Failed to save to storage', e)
-        this.saveError = getErrorMessage(e, '存档保存失败')
+        this._ui.saveError = getErrorMessage(e, '存档保存失败')
         console.warn('存档保存可能失败，请检查控制台')
       }
     }
@@ -615,42 +618,61 @@ export const storageActions = {
    * 导出存档数据
    */
   async getExportData(this: any, options: { asText?: boolean, onProgress?: (stage: string) => void } = {}) {
-    const fullSnapshots = []
-    for (const snapshot of this.saveSnapshots) {
+    const recentWindow = Math.max(this.settings?.snapshotLimit || 10, 20)
+
+    // Phase 1.1 (v5): 按 runId 收集共享 chatLog，避免每个存档重复存储
+    const chatLogsByRun: Record<string, any[]> = {}
+    const snapshotRunMap: Record<string, string> = {} // snapshotId → runId
+
+    const exportSnapshots = []
+    for (const snapshot of this._ui.saveSnapshots) {
       let fullSnapshot = { ...snapshot }
-      if (!fullSnapshot.gameState || !fullSnapshot.chatLog) {
+      if (!fullSnapshot.gameState) {
         const details = await getSnapshotData(snapshot.id)
         if (details) {
           fullSnapshot = { ...fullSnapshot, ...details }
         }
       }
 
-      // 如果chatLog为空，尝试加载分片数据
-      if (!fullSnapshot.chatLog) {
-        try {
-          const { loadChunkedChatLog } = await import('../../utils/indexedDB')
-          const chunkedLog = await loadChunkedChatLog(snapshot.id)
-          if (chunkedLog) {
-            fullSnapshot.chatLog = chunkedLog
+      const runId = fullSnapshot.gameState?.meta?.currentRunId || fullSnapshot.gameState?.currentRunId || this.meta.currentRunId || 'unknown'
+      snapshotRunMap[snapshot.id] = runId
+
+      // 收集每个 runId 最完整的 chatLog（按 messageIndex 取最大的）
+      if (!chatLogsByRun[runId]) {
+        // 优先从共享 chatLog 池加载
+        let chatLog = await loadSharedChatLog(runId)
+        // 回退到 per-snapshot 分片存储
+        if (!chatLog || chatLog.length === 0) {
+          chatLog = await loadChunkedChatLog(snapshot.id)
+        }
+        if (chatLog && chatLog.length > 0) {
+          chatLogsByRun[runId] = chatLog
+        }
+      } else {
+        // 如果已有 chatLog 但当前快照的 messageIndex 更大，尝试加载更完整的版本
+        const existing = chatLogsByRun[runId]
+        if (fullSnapshot.messageIndex != null && fullSnapshot.messageIndex >= existing.length) {
+          let chatLog = await loadSharedChatLog(runId)
+          if (!chatLog || chatLog.length === 0) {
+            chatLog = await loadChunkedChatLog(snapshot.id)
           }
-        } catch (e) {
-          console.warn(`[Export] Failed to load chunked chatLog for ${snapshot.id}:`, e)
+          if (chatLog && chatLog.length > existing.length) {
+            chatLogsByRun[runId] = chatLog
+          }
         }
       }
 
-      // 保留快照数据用于导入后回溯
-      // 增量快照已经过优化，每个只有 5-15KB，1600层约 16MB（可接受）
-      // 基准快照每20层一个，1600层约 80个 × 250KB = 20MB
-      // 总计约 36MB，相比之前的 375MB 已经大幅减少
+      // 导出 snapshot 不含 chatLog，只保留 gameState + 元数据
       if (fullSnapshot.gameState) {
         fullSnapshot.gameState = createPortableGameState(fullSnapshot.gameState)
       }
-      if (fullSnapshot.chatLog && Array.isArray(fullSnapshot.chatLog)) {
-        const recentWindow = Math.max(this.settings?.snapshotLimit || 10, 20)
-        fullSnapshot.chatLog = compactPortableChatLog(fullSnapshot.chatLog, recentWindow)
-      }
+      delete fullSnapshot.chatLog
+      exportSnapshots.push(fullSnapshot)
+    }
 
-      fullSnapshots.push(fullSnapshot)
+    // 对每个 runId 的 chatLog 做精简（剥离旧消息的内联快照）
+    for (const [runId, chatLog] of Object.entries(chatLogsByRun)) {
+      chatLogsByRun[runId] = compactPortableChatLog(chatLog, recentWindow)
     }
 
     // 获取扩展数据 (IndexedDB)
@@ -672,14 +694,16 @@ export const storageActions = {
 
     // 导出 eventLibrary（Map → Array）
     let eventLibraryArray: any[] = []
-    if (this.eventLibrary instanceof Map && this.eventLibrary.size > 0) {
-      eventLibraryArray = Array.from(this.eventLibrary.entries())
+    if (this.events.library instanceof Map && this.events.library.size > 0) {
+      eventLibraryArray = Array.from(this.events.library.entries())
     }
 
     const exportObj = {
-      version: 3,
+      version: 5,
       timestamp: Date.now(),
-      snapshots: fullSnapshots,
+      // v5: 共享 chatLog 按 runId 分组，不再在每个 snapshot 中重复
+      chatLogs: chatLogsByRun,
+      snapshots: exportSnapshots,
       extraData: {
         rosterBackup,
         fullCharacterPool,
@@ -687,14 +711,13 @@ export const storageActions = {
       },
       globalData: {
         settings: sanitizedSettings,
-        characterNotes: this.characterNotes || {},
-        customCoursePool: this.customCoursePool || null,
+        characterNotes: this.world.characterNotes || {},
+        customCoursePool: this.academic.customCoursePool || null,
         eventLibrary: eventLibraryArray,
-        eventTriggers: this.eventTriggers || [],
-        // 通知/红点状态
-        unviewedExamIds: this.unviewedExamIds || [],
-        lastViewedWeeklyPreview: this.lastViewedWeeklyPreview || 0,
-        viewedClubIds: this.viewedClubIds || []
+        eventTriggers: this.events.triggers || [],
+        unviewedExamIds: this.notifications.unviewedExamIds || [],
+        lastViewedWeeklyPreview: this.notifications.lastViewedWeeklyPreview || 0,
+        viewedClubIds: this.notifications.viewedClubIds || []
       }
     }
 
@@ -792,30 +815,41 @@ export const storageActions = {
         }
 
         if (g.characterNotes && typeof g.characterNotes === 'object') {
-          this.characterNotes = g.characterNotes
+          this.world.characterNotes = g.characterNotes
           console.log('[GameStore] Restored character notes')
         }
 
         if (g.customCoursePool !== undefined) {
-          this.customCoursePool = g.customCoursePool
+          this.academic.customCoursePool = g.customCoursePool
           console.log('[GameStore] Restored custom course pool')
         }
 
         // eventLibrary: Array → Map
         if (Array.isArray(g.eventLibrary) && g.eventLibrary.length > 0) {
-          this.eventLibrary = new Map(g.eventLibrary)
-          console.log(`[GameStore] Restored event library (${this.eventLibrary.size} events)`)
+          this.events.library = new Map(g.eventLibrary)
+          console.log(`[GameStore] Restored event library (${this.events.library.size} events)`)
         }
 
         if (Array.isArray(g.eventTriggers)) {
-          this.eventTriggers = g.eventTriggers
-          console.log(`[GameStore] Restored event triggers (${this.eventTriggers.length})`)
+          this.events.triggers = g.eventTriggers
+          console.log(`[GameStore] Restored event triggers (${this.events.triggers.length})`)
         }
 
         // 通知状态
-        if (Array.isArray(g.unviewedExamIds)) this.unviewedExamIds = g.unviewedExamIds
-        if (typeof g.lastViewedWeeklyPreview === 'number') this.lastViewedWeeklyPreview = g.lastViewedWeeklyPreview
-        if (Array.isArray(g.viewedClubIds)) this.viewedClubIds = g.viewedClubIds
+        if (Array.isArray(g.unviewedExamIds)) this.notifications.unviewedExamIds = g.unviewedExamIds
+        if (typeof g.lastViewedWeeklyPreview === 'number') this.notifications.lastViewedWeeklyPreview = g.lastViewedWeeklyPreview
+        if (Array.isArray(g.viewedClubIds)) this.notifications.viewedClubIds = g.viewedClubIds
+      }
+
+      // v5: 先保存共享 chatLog 到 IndexedDB（按 runId）
+      if (data.version >= 5 && data.chatLogs && typeof data.chatLogs === 'object') {
+        console.log('[Import] v5 format detected: saving shared chatLogs...')
+        for (const [runId, chatLog] of Object.entries(data.chatLogs)) {
+          if (Array.isArray(chatLog) && chatLog.length > 0) {
+            await saveSharedChatLog(runId, chatLog as any[])
+            console.log(`[Import] Saved shared chatLog for run ${runId}: ${(chatLog as any[]).length} messages`)
+          }
+        }
       }
 
       const processedSnapshots: SaveSnapshot[] = []
@@ -825,9 +859,18 @@ export const storageActions = {
         const snapshot = { ...s }
         
         if (snapshot.gameState || snapshot.chatLog) {
-          if (Array.isArray(snapshot.chatLog)) {
-            const recentWindow = Math.max(this.settings?.snapshotLimit || 10, 20)
-            await saveChunkedChatLog(snapshot.id, compactPortableChatLog(snapshot.chatLog, recentWindow))
+          // v1-v4 兼容：旧格式的 per-snapshot chatLog 仍然保存到共享池
+          if (Array.isArray(snapshot.chatLog) && snapshot.chatLog.length > 0) {
+            const runId = snapshot.gameState?.meta?.currentRunId || snapshot.gameState?.currentRunId
+            if (runId) {
+              // 保存到共享 chatLog 池
+              const recentWindow = Math.max(this.settings?.snapshotLimit || 10, 20)
+              await saveSharedChatLog(runId, compactPortableChatLog(snapshot.chatLog, recentWindow))
+            } else {
+              // 无 runId 时回退到 per-snapshot 存储
+              const recentWindow = Math.max(this.settings?.snapshotLimit || 10, 20)
+              await saveChunkedChatLog(snapshot.id, compactPortableChatLog(snapshot.chatLog, recentWindow))
+            }
           }
 
           await saveSnapshotData(snapshot.id, {
@@ -845,7 +888,7 @@ export const storageActions = {
         }
       }
 
-      this.saveSnapshots = processedSnapshots
+      this._ui.saveSnapshots = processedSnapshots
       this.saveToStorage(true)
       
       // 在 rebuildWorldbookState 之前，从最新快照预加载玩家创建的社团
@@ -857,62 +900,55 @@ export const storageActions = {
         if (latestSnapshot) {
           const details = await getSnapshotData(latestSnapshot.id)
           if (details && details.gameState) {
+            // Phase 2: gameState 可能是 v3 扁平格式或 v4 分层格式，兼容两者
+            const gs = details.gameState
+            const gsAllClubs = gs.world?.allClubs || gs.allClubs
+            const gsAllClassData = gs.world?.allClassData || gs.allClassData
+            const gsRunId = gs.meta?.currentRunId || gs.currentRunId
+            const gsPlayer = gs.player
+            const gsExamHistory = gs.academic?.examHistory || gs.examHistory
+
             // 预加载玩家创建的社团（ID 以 player_club_ 开头）
-            if (details.gameState.allClubs) {
-              if (!this.allClubs) this.allClubs = {}
-              for (const [clubId, club] of Object.entries(details.gameState.allClubs)) {
+            if (gsAllClubs) {
+              if (!this.world.allClubs) this.world.allClubs = {}
+              for (const [clubId, club] of Object.entries(gsAllClubs)) {
                 if (clubId.startsWith('player_club_')) {
                   console.log(`[GameStore] Pre-loading player created club: ${clubId}`)
-                  this.allClubs[clubId] = club
+                  this.world.allClubs[clubId] = club
                 }
               }
             }
             
-            // 预加载班级数据，确保选修课世界书条目中的同学列表能正确恢复
-            // 这是因为 processNpcElectiveSelection 依赖 allClassData 来获取 NPC 列表
-            if (details.gameState.allClassData) {
+            // 预加载班级数据
+            if (gsAllClassData) {
               console.log('[GameStore] Pre-loading class data from snapshot')
-              this.allClassData = details.gameState.allClassData
+              this.world.allClassData = gsAllClassData
             }
             
             // 同时恢复 currentRunId 和 player，因为 rebuildWorldbookState 需要用到
-            if (details.gameState.currentRunId) {
-              this.currentRunId = details.gameState.currentRunId
+            if (gsRunId) {
+              this.meta.currentRunId = gsRunId
             }
-            if (details.gameState.player) {
-              // 【修复】状态合并：确保旧存档缺失的字段被默认值填充
-              // 使用 createInitialState().player 作为基础模板
+            if (gsPlayer) {
               const defaultPlayer = createInitialState().player
-              
-              // 递归合并对象（这里简单实现一层深拷贝，针对关键嵌套对象）
-              // 对于深层嵌套如 attributes, skills 等，如果存档中有，就用存档的，否则用默认的
-              // 注意：这里假设存档中的对象结构如果是旧的，至少第一层是匹配的
-              
-              // 简单的合并策略：
-              this.player = { ...defaultPlayer, ...details.gameState.player }
-              
-              // 针对特定的嵌套对象进行深度合并
-              if (details.gameState.player.partTimeJob) {
-                this.player.partTimeJob = { ...defaultPlayer.partTimeJob, ...details.gameState.player.partTimeJob }
+              this.player = { ...defaultPlayer, ...gsPlayer }
+              if (gsPlayer.partTimeJob) {
+                this.player.partTimeJob = { ...defaultPlayer.partTimeJob, ...gsPlayer.partTimeJob }
               }
-              if (details.gameState.player.forum) {
-                this.player.forum = { ...defaultPlayer.forum, ...details.gameState.player.forum }
+              if (gsPlayer.forum) {
+                this.player.forum = { ...defaultPlayer.forum, ...gsPlayer.forum }
               }
-              if (details.gameState.player.social) {
-                this.player.social = { ...defaultPlayer.social, ...details.gameState.player.social }
+              if (gsPlayer.social) {
+                this.player.social = { ...defaultPlayer.social, ...gsPlayer.social }
               }
-              // 教师相关字段
-              if (details.gameState.player.role) {
-                // 如果存档中有 role，保留相关字段
-              } else {
-                // 如果没有，确保使用默认值
+              if (!gsPlayer.role) {
                 this.player.role = defaultPlayer.role
               }
             }
             
             // 预加载考试历史
-            if (details.gameState.examHistory) {
-              this.examHistory = details.gameState.examHistory
+            if (gsExamHistory) {
+              this.academic.examHistory = gsExamHistory
             }
           }
         }
@@ -949,7 +985,7 @@ export const storageActions = {
       const allSnapshotIds = await getAllSnapshotIds()
 
       // 获取元数据中的快照ID
-      const metaSnapshotIds = new Set(this.saveSnapshots.map((s: SaveSnapshot) => s.id))
+      const metaSnapshotIds = new Set(this._ui.saveSnapshots.map((s: SaveSnapshot) => s.id))
 
       // 找出孤立的快照（存在于IndexedDB但不在元数据中）
       const orphanedSnapshots = allSnapshotIds.filter(id => !metaSnapshotIds.has(id))
@@ -958,7 +994,7 @@ export const storageActions = {
         usageMB: estimate.usageMB,
         quotaMB: estimate.quotaMB,
         usagePercent: estimate.usagePercent,
-        snapshotCount: this.saveSnapshots.length,
+        snapshotCount: this._ui.saveSnapshots.length,
         orphanedSnapshots,
         orphanedCount: orphanedSnapshots.length
       }
@@ -968,7 +1004,7 @@ export const storageActions = {
         usageMB: 0,
         quotaMB: 0,
         usagePercent: 0,
-        snapshotCount: this.saveSnapshots.length,
+        snapshotCount: this._ui.saveSnapshots.length,
         orphanedSnapshots: [],
         orphanedCount: 0
       }
@@ -983,7 +1019,7 @@ export const storageActions = {
       const { getAllSnapshotIds, removeSnapshotData, removeChunkedChatLog } = await import('../../utils/indexedDB')
 
       const allSnapshotIds = await getAllSnapshotIds()
-      const metaSnapshotIds = new Set(this.saveSnapshots.map((s: SaveSnapshot) => s.id))
+      const metaSnapshotIds = new Set(this._ui.saveSnapshots.map((s: SaveSnapshot) => s.id))
       const orphanedSnapshots = allSnapshotIds.filter(id => !metaSnapshotIds.has(id))
 
       if (orphanedSnapshots.length === 0) {

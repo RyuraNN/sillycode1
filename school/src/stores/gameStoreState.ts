@@ -1,29 +1,65 @@
 /**
  * GameStore 初始状态
  * 从 gameStore.ts 中拆分出来的初始 state 定义
+ * Phase 2: 分层结构 (meta/world/academic/events/notifications/rag/settings/_ui)
  */
 
 import type { GameState } from './gameStoreTypes'
 
+/** 当前 GameState schema 版本 */
+export const GAME_STATE_SCHEMA_VERSION = 4
+
 /**
- * 创建初始游戏状态
+ * 创建初始游戏状态（分层结构 v4）
  */
 export function createInitialState(): GameState {
   return {
-    currentRunId: 'temp_editing',
-    currentFloor: 0,
-    _lastBaseFloor: 0,
-    mapSelectionMode: false,
-    mapSelectionCallback: null,
-    allClassData: {},
-    allClubs: {},
-    graduatedNpcs: [],
-    lastAcademicYear: 0,
-    clubApplication: null,
-    clubRejection: null,
-    clubInvitation: null,
-    npcRelationships: {},
-    characterNotes: {},
+    // ── 元数据 ──
+    meta: {
+      currentRunId: 'temp_editing',
+      currentFloor: 0,
+      _lastBaseFloor: 0,
+      _schemaVersion: GAME_STATE_SCHEMA_VERSION
+    },
+
+    // ── 世界状态 ──
+    world: {
+      gameTime: {
+        year: 2024,
+        month: 4,
+        day: 1,
+        weekday: 'Monday',
+        hour: 8,
+        minute: 0
+      },
+      worldState: {
+        economy: 100,
+        weather: {
+          current: {
+            weather: 'sunny',
+            weatherName: '晴',
+            icon: '☀️',
+            temperature: 22,
+            tempHigh: 25,
+            tempLow: 18
+          },
+          forecast: [],
+          lastUpdateDate: '',
+          season: 'spring',
+          previousHour: 8,
+          lastChangeInfo: null
+        }
+      },
+      allClassData: {},
+      allClubs: {},
+      npcs: [],
+      npcRelationships: {},
+      graduatedNpcs: [],
+      lastAcademicYear: 0,
+      characterNotes: {}
+    },
+
+    // ── 玩家数据 ──
     player: {
       name: 'Player',
       gender: 'male',
@@ -156,15 +192,54 @@ export function createInitialState(): GameState {
       teachingElectives: [],
       advisorClubs: []
     },
-    npcs: [],
-    gameTime: {
-      year: 2024,
-      month: 4,
-      day: 1,
-      weekday: 'Monday',
-      hour: 8,
-      minute: 0
+
+    // ── 学业系统 ──
+    academic: {
+      examHistory: [],
+      lastExamDate: null,
+      electiveAcademicData: {},
+      npcElectiveSelections: {},
+      customCoursePool: null
     },
+
+    // ── 事件系统 ──
+    events: {
+      checks: {
+        lastDaily: '',
+        lastWeekly: '',
+        lastMonthly: ''
+      },
+      library: new Map(),
+      triggers: [],
+      clubApplication: null,
+      clubRejection: null,
+      clubInvitation: null
+    },
+
+    // ── 待办/通知 ──
+    notifications: {
+      completedTodoMarkers: [],
+      todoMatchingMode: 'keyword',
+      todoMatchingStats: {
+        keyword: { success: 0, total: 0 },
+        index: { success: 0, total: 0 }
+      },
+      unviewedExamIds: [],
+      lastViewedWeeklyPreview: 0,
+      viewedClubIds: [],
+      weeklySnapshot: null as any,
+      weeklyPreviewData: null as any,
+      showWeeklyPreview: false,
+      lastWeeklyPreviewWeek: 0
+    },
+
+    // ── RAG/摘要 ──
+    rag: {
+      summaries: [],
+      persistentFacts: []
+    },
+
+    // ── 全局设置 ──
     settings: {
       difficulty: 'normal',
       expMultiplier: 1,
@@ -240,74 +315,33 @@ export function createInitialState(): GameState {
         retryDelay: 2000
       }
     },
-    saveSnapshots: [],
-    saveError: null as string | null,
-    currentChatLog: [],
-    pendingRestoreLog: null,
-    eventLibrary: new Map(),
-    eventTriggers: [],
-    eventChecks: {
-      lastDaily: '',
-      lastWeekly: '',
-      lastMonthly: ''
-    },
-    // 学业系统
-    examHistory: [],
-    electiveAcademicData: {},
-    lastExamDate: null,
-    customCoursePool: null,
-    npcElectiveSelections: {},
-    // 红点/通知相关
-    unviewedExamIds: [] as string[],
-    lastViewedWeeklyPreview: 0,
-    viewedClubIds: [] as string[],
-    // 周报相关
-    weeklySnapshot: null as any,
-    weeklyPreviewData: null as any,
-    showWeeklyPreview: false,
-    lastWeeklyPreviewWeek: 0,
-    ragDiagnostics: {
-      traces: [],
-      activeTraceId: null,
-      maxEntries: 15
-    },
-    worldbookLoadResults: {
-      classData: null,
-      clubData: null,
-      mapData: null,
-      partTimeData: null,
-      courseData: null,
-      eventData: null,
-      scheduleData: null,
-      shopData: null,
-      academicData: null,
-      tagData: null,
-      socialData: null,
-    },
-    worldState: {
-      economy: 100,
-      weather: {
-        current: {
-          weather: 'sunny',
-          weatherName: '晴',
-          icon: '☀️',
-          temperature: 22,
-          tempHigh: 25,
-          tempLow: 18
-        },
-        forecast: [],
-        lastUpdateDate: '',
-        season: 'spring',
-        previousHour: 8,
-        lastChangeInfo: null
+
+    // ── UI/运行时 ──
+    _ui: {
+      mapSelectionMode: false,
+      mapSelectionCallback: null,
+      saveError: null as string | null,
+      saveSnapshots: [],
+      currentChatLog: [],
+      pendingRestoreLog: null,
+      worldbookLoadResults: {
+        classData: null,
+        clubData: null,
+        mapData: null,
+        partTimeData: null,
+        courseData: null,
+        eventData: null,
+        scheduleData: null,
+        shopData: null,
+        academicData: null,
+        tagData: null,
+        socialData: null,
+      },
+      ragDiagnostics: {
+        traces: [],
+        activeTraceId: null,
+        maxEntries: 15
       }
-    },
-    // 待办事项管理
-    completedTodoMarkers: [],
-    todoMatchingMode: 'keyword',
-    todoMatchingStats: {
-      keyword: { success: 0, total: 0 },
-      index: { success: 0, total: 0 }
     }
   }
 }

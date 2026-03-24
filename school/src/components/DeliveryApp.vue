@@ -47,7 +47,7 @@ onMounted(async () => {
 
 // 当月可用商品
 const availableProducts = computed(() => {
-  const month = gameStore.gameTime.month
+  const month = gameStore.world.gameTime.month
   return filterProductsByMonth(allProducts.value, month)
 })
 
@@ -92,7 +92,7 @@ const earliestDeliveryHours = computed(() => {
 // 可选送达时间列表
 const deliveryTimeOptions = computed(() => {
   const options = []
-  const { year, month, day, hour } = gameStore.gameTime
+  const { year, month, day, hour } = gameStore.world.gameTime
   const minHours = earliestDeliveryHours.value
 
   for (let i = 0; i < 24; i++) {
@@ -190,10 +190,10 @@ const confirmOrder = () => {
     })),
     total: cartTotal.value,
     orderTime: {
-      year: gameStore.gameTime.year,
-      month: gameStore.gameTime.month,
-      day: gameStore.gameTime.day,
-      hour: gameStore.gameTime.hour
+      year: gameStore.world.gameTime.year,
+      month: gameStore.world.gameTime.month,
+      day: gameStore.world.gameTime.day,
+      hour: gameStore.world.gameTime.hour
     },
     deliveryTime: selectedDeliveryTime.value,
     status: 'pending'

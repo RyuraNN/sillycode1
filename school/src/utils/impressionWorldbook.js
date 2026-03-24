@@ -32,7 +32,7 @@ function getValidPlayerRelation(relationships, charName, playerName) {
 // 获取当前运行 ID
 function getCurrentRunId() {
   const gameStore = useGameStore()
-  return gameStore.currentRunId || 'default'
+  return gameStore.meta.currentRunId || 'default'
 }
 
 // 获取当前绑定的世界书名称
@@ -106,8 +106,8 @@ async function performSaveImpressionData(runId) {
   
   // 0. 构建当前激活角色名单（来自 allClassData），用于过滤被屏蔽的角色
   const activeCharacterNames = new Set()
-  if (gameStore.allClassData) {
-    for (const classData of Object.values(gameStore.allClassData)) {
+  if (gameStore.world.allClassData) {
+    for (const classData of Object.values(gameStore.world.allClassData)) {
       if (classData.headTeacher?.name) activeCharacterNames.add(classData.headTeacher.name)
       const teachers = Array.isArray(classData.teachers) ? classData.teachers : []
       teachers.forEach(t => { if (t.name) activeCharacterNames.add(t.name) })
@@ -118,12 +118,12 @@ async function performSaveImpressionData(runId) {
   
   // 1. 筛选出与玩家有关系的角色（仅包含当前激活的角色）
   const relevantChars = []
-  for (const charName of Object.keys(gameStore.npcRelationships)) {
+  for (const charName of Object.keys(gameStore.world.npcRelationships)) {
     // 跳过不在激活名单中的角色（被筛选面板排除的角色）
     if (activeCharacterNames.size > 0 && !activeCharacterNames.has(charName) && charName !== playerName) {
       continue
     }
-    const relation = getValidPlayerRelation(gameStore.npcRelationships, charName, playerName)
+    const relation = getValidPlayerRelation(gameStore.world.npcRelationships, charName, playerName)
     if (relation) {
       relevantChars.push({ name: charName, relation })
     }
@@ -133,7 +133,7 @@ async function performSaveImpressionData(runId) {
   const activeKeys = relevantChars.map(c => c.name)
   
   // 3. 生成内容
-  const content = formatImpressionContent(relevantChars, playerName, gameStore.npcs)
+  const content = formatImpressionContent(relevantChars, playerName, gameStore.world.npcs)
   const entryName = `${IMPRESSION_PREFIX}${runId}] 印象列表`
 
   try {

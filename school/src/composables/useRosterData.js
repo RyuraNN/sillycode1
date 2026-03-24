@@ -25,8 +25,8 @@ export function useRosterData() {
   // 获取学生所属社团
   const getStudentClubs = (studentName) => {
     const clubs = []
-    if (gameStore.allClubs) {
-      for (const [clubId, club] of Object.entries(gameStore.allClubs)) {
+    if (gameStore.world.allClubs) {
+      for (const [clubId, club] of Object.entries(gameStore.world.allClubs)) {
         let role = ''
         let isMember = false
 
@@ -62,7 +62,7 @@ export function useRosterData() {
     loading.value = true
     try {
       // 确保班级数据已加载
-      if (!gameStore.allClassData || Object.keys(gameStore.allClassData).length === 0) {
+      if (!gameStore.world.allClassData || Object.keys(gameStore.world.allClassData).length === 0) {
         console.log('[RosterFilter] Class data not loaded, loading now...')
         await gameStore.loadClassData()
       }
@@ -71,7 +71,7 @@ export function useRosterData() {
       const academicMap = await fetchAcademicDataFromWorldbook()
       if (academicMap && Object.keys(academicMap).length > 0) {
         console.log('[RosterFilter] Merging academic data from worldbook database...')
-        for (const classInfo of Object.values(gameStore.allClassData)) {
+        for (const classInfo of Object.values(gameStore.world.allClassData)) {
           if (Array.isArray(classInfo.students)) {
             classInfo.students.forEach(s => {
               if (academicMap[s.name]) {
@@ -83,7 +83,7 @@ export function useRosterData() {
       }
 
       let backupData = await getRosterBackup()
-      const currentData = gameStore.allClassData
+      const currentData = gameStore.world.allClassData
 
       if (!backupData || Object.keys(backupData).length === 0) {
         console.log('[RosterFilter] Creating new backup from current data')

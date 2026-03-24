@@ -43,13 +43,13 @@ const isLastSelfMessage = (msg) => {
 // ==================== 游戏内时间辅助函数 ====================
 // 获取游戏内当前时间的格式化字符串 (HH:mm)
 const getGameTimeString = () => {
-  const { hour, minute } = gameStore.gameTime
+  const { hour, minute } = gameStore.world.gameTime
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
 
 // 获取游戏内时间戳（用于排序和计算相对时间）
 const getGameTimestamp = () => {
-  const { year, month, day, hour, minute } = gameStore.gameTime
+  const { year, month, day, hour, minute } = gameStore.world.gameTime
   return new Date(year, month - 1, day, hour, minute).getTime()
 }
 
@@ -205,7 +205,7 @@ const currentGroupMembers = computed(() => {
     }
     const friend = friends.value.find(f => f.id === memberId)
     if (friend) return friend
-    const npc = gameStore.npcs.find(n => n.id === memberId)
+    const npc = gameStore.world.npcs.find(n => n.id === memberId)
     if (npc) return { id: npc.id, name: npc.name, avatar: '👤', gender: npc.gender }
     // 如果ID本身看起来像名字（非ID格式），直接使用
     if (!memberId.startsWith('char_') && !memberId.startsWith('npc_')) {
@@ -224,7 +224,7 @@ const getSenderInfo = (senderName) => {
   if (friend) return friend
   
   // 2. 尝试在所有 NPC 中查找
-  const npc = gameStore.npcs.find(n => n.name === senderName)
+  const npc = gameStore.world.npcs.find(n => n.name === senderName)
   if (npc) return { name: npc.name, avatar: '👤', gender: npc.gender }
   
   // 3. 尝试在群成员中查找（可能已经是 ID）
@@ -449,10 +449,10 @@ const inviteFriends = async () => {
       sender: '系统',
       content: sysMsg,
       time: getGameTimeString(),
-      floor: gameStore.currentFloor
+      floor: gameStore.meta.currentFloor
     })
     
-    await saveSocialData(group.id, group.name, data, [], gameStore.currentFloor)
+    await saveSocialData(group.id, group.name, data, [], gameStore.meta.currentFloor)
     await loadMessages()
     showInviteModal.value = false
   } 
@@ -497,7 +497,7 @@ const inviteFriends = async () => {
         const f = friends.value.find(f => f.id === mid)
         if (f) return f.name
         return null
-    }).filter(n => n), gameStore.currentFloor)
+    }).filter(n => n), gameStore.meta.currentFloor)
     
     showInviteModal.value = false
     
@@ -622,7 +622,7 @@ const sendContent = async (content, rollbackData = null) => {
     type: 'self',
     content: content,
     time: time,
-    floor: gameStore.currentFloor
+    floor: gameStore.meta.currentFloor
   })
   await scrollToBottom()
   
@@ -632,9 +632,9 @@ const sendContent = async (content, rollbackData = null) => {
     type: 'self',
     content: content,
     time: time,
-    floor: gameStore.currentFloor
+    floor: gameStore.meta.currentFloor
   })
-  await saveSocialData(activeChat.value.id, activeChat.value.name, data, [], gameStore.currentFloor)
+  await saveSocialData(activeChat.value.id, activeChat.value.name, data, [], gameStore.meta.currentFloor)
 
   if (activeChat.value) {
     gameStore.updateSocialStatus(activeChat.value.id, activeChat.value.type, {
@@ -859,7 +859,7 @@ const openAddFriendModal = async () => {
   
   // 确保角色数据已加载
   // 如果 allClassData 为空且 npcs 也为空，尝试重新加载数据
-  if (Object.keys(gameStore.allClassData || {}).length === 0 && (gameStore.npcs || []).length === 0) {
+  if (Object.keys(gameStore.world.allClassData || {}).length === 0 && (gameStore.world.npcs || []).length === 0) {
     console.log('[SocialApp] Character data not loaded, attempting to load...')
     try {
       await gameStore.loadClassData()

@@ -155,18 +155,18 @@ function getNestedValue(gameStore, path) {
     if (i === 0 && mappedPart === 'player') {
       current = gameStore.player
     } else if (i === 0 && mappedPart === 'clubs') {
-      current = gameStore.allClubs
+      current = gameStore.world.allClubs
     } else if (i === 0 && mappedPart === 'worldState') {
-      current = gameStore.worldState
+      current = gameStore.world.worldState
     } else if (current === gameStore.player && playerVarMap[part]) {
       current = current[playerVarMap[part]]
     } else if (current === gameStore.player.relationships && relationshipMap[part]) {
       current = current[relationshipMap[part]]
-    } else if (current === gameStore.worldState && worldStateMap[part]) {
+    } else if (current === gameStore.world.worldState && worldStateMap[part]) {
       current = current[worldStateMap[part]]
     } else if (current && typeof current === 'object') {
       // 尝试直接访问或查找匹配的社团
-      if (current === gameStore.allClubs) {
+      if (current === gameStore.world.allClubs) {
         // 按名称查找社团
         const club = Object.values(current).find(c => c.name === part || c.id === part)
         current = club || undefined
@@ -253,12 +253,12 @@ function checkCompositeCondition(condition, gameStore) {
         return false
       }
     } else if (triggerType === 'date_in_month') {
-      const { day } = gameStore.gameTime
+      const { day } = gameStore.world.gameTime
       if (day !== parseInt(triggerCondition)) {
         return false
       }
     } else if (triggerType === 'date_in_season') {
-      const { month } = gameStore.gameTime
+      const { month } = gameStore.world.gameTime
       const seasonMap = {
         'spring': [3, 4, 5],
         'summer': [6, 7, 8],

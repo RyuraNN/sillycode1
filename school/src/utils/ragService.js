@@ -244,7 +244,7 @@ export function getOrBuildEntityLookup() {
   }
 
   const gameStore = useGameStore()
-  const summaries = gameStore.player?.summaries || []
+  const summaries = gameStore.player.summaries
   _cachedEntityLookup = buildEntityLookup(summaries)
   _cachedEntityLookupVersion++
   _entityLookupDirty = false
@@ -280,7 +280,7 @@ async function getOrInitHolder() {
   if (_memoryHolder) return _memoryHolder
 
   const gameStore = useGameStore()
-  const runId = gameStore.currentRunId
+  const runId = gameStore.meta.currentRunId
   if (runId && runId !== 'temp_editing') {
     try {
       const saved = await retrieveMemoryPoolState(runId)
@@ -302,7 +302,7 @@ async function getOrInitHolder() {
  */
 function persistHolderAsync(holder) {
   const gameStore = useGameStore()
-  const runId = gameStore.currentRunId
+  const runId = gameStore.meta.currentRunId
   if (!runId || runId === 'temp_editing') return
 
   persistMemoryPoolState(runId, exportHolderSnapshot(holder)).catch(e => {
@@ -449,7 +449,7 @@ async function orchestrateMultiPathSearch(mainQuery, entityTerms, entityLookup, 
 
   // 路径 C (关键词精确匹配)
   const allKnownEntities = [
-    ...(gameStore.npcs || []).filter(n => n.isAlive).map(n => n.name),
+    ...(gameStore.world.npcs || []).filter(n => n.isAlive).map(n => n.name),
     ...(entityLookup?.locationIndex ? [...entityLookup.locationIndex.keys()] : [])
   ]
   const keywordCandidates = preciseKeywordMatch(mainQuery, minorSummaries, allKnownEntities)
@@ -610,7 +610,7 @@ export function summaryNeedsEmbeddingRefresh(summary) {
 
 function getTrace(traceId) {
   const gameStore = useGameStore()
-  return (gameStore.ragDiagnostics?.traces || []).find(trace => trace.id === traceId) || null
+  return (gameStore._ui.ragDiagnostics?.traces || []).find(trace => trace.id === traceId) || null
 }
 
 function appendTraceStep(traceId, stage, title, status = 'info', data, detail) {
@@ -807,7 +807,7 @@ export async function rewriteQueryWithAI(userInput, gameTime, lastRound, options
   // 添加NPC上下文（如果启用主动查询）
   let npcContextBlock = ''
   if (enableProactiveQuery && npcContext.length > 0) {
-    npcContextBlock = `\n**当前场景人物**: ${npcContext.join('、')}\n（如果用户输入隐含需要这些人物的历史信息，可以考虑生成补充查询）`
+    npcContextBlock = `\n**当前场景人物**: ${npcContext.join('、')}\n（如果用户输入或召回结果提到这些人物，但缺少相关历史信息，可以考虑在补充查询中包含）`
   }
 
   const userPrompt = `当前游戏时间：${gameTime.year}年${gameTime.month}月${gameTime.day}日 ${gameTime.hour}:${String(gameTime.minute).padStart(2, '0')}
@@ -910,9 +910,9 @@ export async function embedSummary(summary) {
         updatedAt: Date.now()
       }
 
-      if (gameStore.currentRunId && gameStore.currentRunId !== 'temp_editing') {
+      if (gameStore.meta.currentRunId && gameStore.meta.currentRunId !== 'temp_editing') {
         try {
-          await saveSummaryEmbedding(gameStore.currentRunId, getSummaryCoverageKey(summary), {
+          await saveSummaryEmbedding(gameStore.meta.currentRunId, getSummaryCoverageKey(summary), {
             embedding: [...embedding],
             embeddingMeta: { ...summary.embeddingMeta },
             floor: summary?.floor,
@@ -929,7 +929,7 @@ export async function embedSummary(summary) {
     return false
   } catch (e) {
     console.warn('[RAG] embedSummary failed:', getErrorMessage(e))
-    const traceId = gameStore.ragDiagnostics?.activeTraceId || gameStore.ragDiagnostics?.traces?.[0]?.id || null
+    const traceId = gameStore._ui.ragDiagnostics?.activeTraceId || gameStore._ui.ragDiagnostics?.traces?.[0]?.id || null
     appendTraceError(traceId, 'embedding', e)
     appendTraceStep(traceId, 'embedding', '向量生成失败', 'error', {
       floor: summary?.floor,
@@ -942,10 +942,10 @@ export async function embedSummary(summary) {
 
 export async function rehydrateSummaryEmbeddings(options = {}) {
   const gameStore = useGameStore()
-  const runId = options.runId || gameStore.currentRunId
+  const runId = options.runId || gameStore.meta.currentRunId
   const summaries = Array.isArray(options.summaries)
     ? options.summaries
-    : (gameStore.player?.summaries || [])
+    : (gameStore.player.summaries || [])
   const minorSummaries = summaries.filter(summary => summary?.type === 'minor')
   const missingSummaries = minorSummaries.filter(summary => {
     const embedding = Array.isArray(summary?.embedding) ? summary.embedding : []
@@ -1252,15 +1252,15 @@ function collectContextNpcs(gameStore, maxCount = 5) {
   // 2. 如果场景 NPC 不足，补充关系亲密的 NPC
   if (contextNpcs.length < maxCount) {
     try {
-      const closeNpcs = gameStore.npcs
+      const closeNpcs = gameStore.world.npcs
         .filter(npc => npc.isAlive && !contextNpcs.includes(npc.name))
         .filter(npc => {
-          const rel = gameStore.npcRelationships?.[npc.name]?.relations?.[gameStore.player.name]
+          const rel = gameStore.world.npcRelationships?.[npc.name]?.relations?.[gameStore.player.name]
           return rel && (rel.intimacy > 60 || rel.trust > 60)
         })
         .sort((a, b) => {
-          const relA = gameStore.npcRelationships?.[a.name]?.relations?.[gameStore.player.name]
-          const relB = gameStore.npcRelationships?.[b.name]?.relations?.[gameStore.player.name]
+          const relA = gameStore.world.npcRelationships?.[a.name]?.relations?.[gameStore.player.name]
+          const relB = gameStore.world.npcRelationships?.[b.name]?.relations?.[gameStore.player.name]
           const scoreA = (relA?.intimacy || 0) + (relA?.trust || 0)
           const scoreB = (relB?.intimacy || 0) + (relB?.trust || 0)
           return scoreB - scoreA
@@ -1296,7 +1296,7 @@ export async function analyzeRecalledSummaries(userInput, ragSummaries, gameTime
     return { pruneIndexes: [], additionalQueries: [] }
   }
 
-  // 收集场景NPC上下文（复用工具函数 + 从召回总结中补充）
+  // 收集场景NPC上下文（复用工具函数 + 从召回的总结中补充）
   const contextNpcs = collectContextNpcs(gameStore, 5)
 
   // 从召回的总结中提取提到的人物（补充到8个）
@@ -1306,7 +1306,7 @@ export async function analyzeRecalledSummaries(userInput, ragSummaries, gameTime
       for (const item of ragSummaries) {
         const keywords = extractKeywordsFromSummary(item.summary.content)
         for (const keyword of keywords) {
-          const npc = gameStore.npcs.find(n => n.name === keyword && n.isAlive)
+          const npc = gameStore.world.npcs.find(n => n.name === keyword && n.isAlive)
           if (npc && !contextNpcs.includes(npc.name)) {
             mentionedNpcs.add(npc.name)
           }
@@ -1493,7 +1493,7 @@ export async function executeAdditionalQuery(queries, excludeFloors, topN, optio
 
     for (const query of queryList) {
       const candidates = await searchSimilarSummaries(query, Math.min(topK, 50), {
-        currentFloor: gameStore.currentFloor,
+        currentFloor: gameStore.meta.currentFloor,
         excludeFloors,
         minVectorScore,
         recencyBias,
@@ -1524,7 +1524,7 @@ export async function executeAdditionalQuery(queries, excludeFloors, topN, optio
     }
 
     return await rerankSummaries(mainQuery, fusedCandidates, topN, {
-      currentFloor: gameStore.currentFloor,
+      currentFloor: gameStore.meta.currentFloor,
       minRerankScore,
       recencyBias,
       recencyHalfLife,
@@ -1647,7 +1647,7 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
         traceId
       }
 
-      const rewriteResult = await rewriteQueryWithAI(userInput, gameStore.gameTime, lastRound, rewriteOptions)
+      const rewriteResult = await rewriteQueryWithAI(userInput, gameStore.world.gameTime, lastRound, rewriteOptions)
 
       // 处理返回值：兼容字符串和对象两种格式
       if (typeof rewriteResult === 'string') {
@@ -1680,64 +1680,8 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
     proactiveQueries: additionalQueries
   })
 
-  // 1. 分离最近楼层（Layer 1: 原文）和更早楼层
-  const recentLogs = []
-  const olderFloors = []
-
-  for (let i = 0; i < chatLog.length; i++) {
-    const logFloor = i + 1
-    const distance = currentFloor - logFloor
-    if (distance < recentThreshold) {
-      recentLogs.push({ log: chatLog[i], floor: logFloor })
-    } else {
-      olderFloors.push(logFloor)
-    }
-  }
-
-  // 2. 从更早楼层中分离桥接层（Layer 2）和 RAG 层（Layer 3）
-  const sortedOlder = [...olderFloors].sort((a, b) => b - a)
-  const bridgeFloors = sortedOlder.slice(0, bridgeCount)
-  const bridgeSet = new Set(bridgeFloors)
-  const recentFloorSet = new Set(recentLogs.map(r => r.floor))
-  const excludeSet = new Set([...bridgeSet, ...recentFloorSet])
-  const minorSummaries = gameStore.player.summaries.filter(s => s.type === 'minor')
-
-  // 3. 桥接层：查找对应小总结，按楼层升序注入
-  const bridgeSummaries = []
-  const usedBridgeKeys = new Set()
-  for (const floor of [...bridgeFloors].sort((a, b) => a - b)) {
-    const summary = minorSummaries
-      .filter(s => getSummaryCoveredFloors(s).includes(floor) && !usedBridgeKeys.has(getSummaryCoverageKey(s)))
-      .sort((a, b) => {
-        const spanA = getSummaryCoveredFloors(a).length
-        const spanB = getSummaryCoveredFloors(b).length
-        if (spanA !== spanB) return spanA - spanB
-        return getSummaryAnchorFloor(b) - getSummaryAnchorFloor(a)
-      })[0]
-    if (summary) {
-      usedBridgeKeys.add(getSummaryCoverageKey(summary))
-      // 过滤已完成的待办事项
-      let filteredContent = summary.content
-      if (summary.completedTodos && summary.completedTodos.length > 0) {
-        filteredContent = filterCompletedTodos(summary.content, summary.completedTodos)
-      }
-
-      bridgeSummaries.push({
-        type: 'summary',
-        content: `[桥接总结 ${formatSummaryFloorLabel(summary)}] ${filteredContent}`,
-        isSummary: true,
-        summaryType: 'bridge'
-      })
-    }
-  }
-
-  appendTraceStep(traceId, 'historyBuild', '桥接层构建完成', 'success', {
-    bridgeFloors,
-    bridgeSummaryCount: bridgeSummaries.length
-  })
-
   // Phase 0.1: 检测用户输入中提到的实体名
-  const knownNpcNames = (gameStore.npcs || []).filter(n => n.isAlive).map(n => n.name)
+  const knownNpcNames = (gameStore.world.npcs || []).filter(n => n.isAlive).map(n => n.name)
   const mentionedEntities = detectMentionedEntities(userInput, knownNpcNames)
 
   // Phase 1.1: 懒构建实体索引
@@ -1745,7 +1689,7 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
 
   // 4. RAG 检索（三路融合：向量 + 图谱 + 关键词）
   let ragSummaries = []
-  const ragCandidateCount = olderFloors.length - bridgeFloors.length
+  const ragCandidateCount = currentFloor - recentThreshold
   if (ragCandidateCount > 0 && userInput) {
     try {
       const { topK, topN, minVectorScore, minRerankScore, recencyBias, recencyHalfLife } = getEffectiveRAGParams()
@@ -1754,7 +1698,7 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
       const fusedCandidates = await orchestrateMultiPathSearch(mainQuery, mentionedEntities, entityLookup, {
         topK,
         currentFloor,
-        excludeFloors: excludeSet,
+        excludeFloors: new Set(),
         minVectorScore,
         recencyBias,
         recencyHalfLife,
@@ -1783,7 +1727,7 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
         })
 
         // Phase 0.2: 时序上下文窗口扩展
-        ragSummaries = expandTemporalContext(ragSummaries, minorSummaries)
+        ragSummaries = expandTemporalContext(ragSummaries, gameStore.player.summaries)
 
         // 记忆保持器轮次推进
         try {
@@ -1829,7 +1773,7 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
     try {
       // 1. 分析召回结果
       const { pruneIndexes, additionalQueries: enhancedQueries } = await analyzeRecalledSummaries(
-        userInput, ragSummaries, gameStore.gameTime, { traceId }
+        userInput, ragSummaries, gameStore.world.gameTime, { traceId }
       )
 
       // 2. 剪枝：移除标记的总结
@@ -1842,7 +1786,7 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
       // 3. 补充查询：二次检索（支持多个查询）
       if (enhancedQueries && enhancedQueries.length > 0) {
         console.log('[Enhanced Recall] Additional queries:', enhancedQueries)
-        const enhancedExcludeSet = new Set([...excludeSet])
+        const enhancedExcludeSet = new Set()
         for (const item of ragSummaries) {
           for (const floor of getSummaryCoveredFloors(item.summary)) {
             enhancedExcludeSet.add(floor)
@@ -1944,9 +1888,44 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
     }
   }
 
+  // 桥接层：查找对应小总结，按楼层升序注入
+  const bridgeSummaries = []
+  const usedBridgeKeys = new Set()
+  for (const floor of [...Array(currentFloor - recentThreshold).keys()].map(i => currentFloor - i - 1)) {
+    const summary = gameStore.player.summaries
+      .filter(s => getSummaryCoveredFloors(s).includes(floor) && !usedBridgeKeys.has(getSummaryCoverageKey(s)))
+      .sort((a, b) => {
+        const spanA = getSummaryCoveredFloors(a).length
+        const spanB = getSummaryCoveredFloors(b).length
+        if (spanA !== spanB) return spanA - spanB
+        return getSummaryAnchorFloor(b) - getSummaryAnchorFloor(a)
+      })[0]
+    if (summary) {
+      usedBridgeKeys.add(getSummaryCoverageKey(summary))
+      // 过滤已完成的待办事项
+      let filteredContent = summary.content
+      if (summary.completedTodos && summary.completedTodos.length > 0) {
+        const { filterCompletedTodos } = await import('./todoManager')
+        filteredContent = filterCompletedTodos(summary.content, summary.completedTodos)
+      }
+
+      bridgeSummaries.push({
+        type: 'summary',
+        content: `[桥接总结 ${formatSummaryFloorLabel(summary)}] ${filteredContent}`,
+        isSummary: true,
+        summaryType: 'bridge'
+      })
+    }
+  }
+
+  appendTraceStep(traceId, 'historyBuild', '桥接层构建完成', 'success', {
+    bridgeFloors: [...Array(currentFloor - recentThreshold).keys()].map(i => currentFloor - i - 1),
+    bridgeSummaryCount: bridgeSummaries.length
+  })
+
   result.push(...bridgeSummaries)
 
-  for (const { log } of recentLogs) {
+  for (const { log } of chatLog.slice(-recentThreshold).map((log, idx) => ({ log, idx }))) {
     result.push({
       ...log,
       content: cleanImageTags(log.content)

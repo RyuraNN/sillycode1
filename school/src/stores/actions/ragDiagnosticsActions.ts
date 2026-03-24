@@ -43,15 +43,15 @@ function formatHistoryPreview(messages?: RagTraceHistoryMessage[]): string {
 
 export const ragDiagnosticsActions = {
   startRagTrace(this: any, payload: Partial<RagTraceEntry> = {}) {
-    if (!this.ragDiagnostics) {
-      this.ragDiagnostics = { traces: [], activeTraceId: null, maxEntries: 15 }
+    if (!this._ui.ragDiagnostics) {
+      this._ui.ragDiagnostics = { traces: [], activeTraceId: null, maxEntries: 15 }
     }
 
     const traceId = payload.id || `rag_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     const trace: RagTraceEntry = {
       id: traceId,
       createdAt: Date.now(),
-      floor: Number(payload.floor) || this.currentFloor || 0,
+      floor: Number(payload.floor) || this.meta.currentFloor || 0,
       userInput: clampText(payload.userInput || ''),
       cacheHit: !!payload.cacheHit,
       status: payload.status || 'running',
@@ -65,27 +65,27 @@ export const ragDiagnosticsActions = {
     trace.steps = trace.steps || []
     trace.errors = trace.errors || []
 
-    this.ragDiagnostics.traces.unshift(trace)
-    this.ragDiagnostics.traces = this.ragDiagnostics.traces.slice(0, this.ragDiagnostics.maxEntries || 15)
-    this.ragDiagnostics.activeTraceId = traceId
+    this._ui.ragDiagnostics.traces.unshift(trace)
+    this._ui.ragDiagnostics.traces = this._ui.ragDiagnostics.traces.slice(0, this._ui.ragDiagnostics.maxEntries || 15)
+    this._ui.ragDiagnostics.activeTraceId = traceId
     return traceId
   },
 
   updateRagTrace(this: any, traceId: string | null, patch: Partial<RagTraceEntry> = {}) {
-    if (!traceId || !this.ragDiagnostics?.traces) return
-    const index = findTraceIndex(this.ragDiagnostics.traces, traceId)
+    if (!traceId || !this._ui.ragDiagnostics?.traces) return
+    const index = findTraceIndex(this._ui.ragDiagnostics.traces, traceId)
     if (index < 0) return
 
-    const trace = this.ragDiagnostics.traces[index]
+    const trace = this._ui.ragDiagnostics.traces[index]
     Object.assign(trace, sanitizeValue(patch))
   },
 
   appendRagTraceStep(this: any, traceId: string | null, step: Partial<RagTraceStep>) {
-    if (!traceId || !this.ragDiagnostics?.traces) return
-    const index = findTraceIndex(this.ragDiagnostics.traces, traceId)
+    if (!traceId || !this._ui.ragDiagnostics?.traces) return
+    const index = findTraceIndex(this._ui.ragDiagnostics.traces, traceId)
     if (index < 0) return
 
-    const trace = this.ragDiagnostics.traces[index]
+    const trace = this._ui.ragDiagnostics.traces[index]
     const nextStep: RagTraceStep = {
       id: step.id || `step_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       stage: step.stage || 'unknown',
@@ -101,29 +101,29 @@ export const ragDiagnosticsActions = {
   finishRagTrace(this: any, traceId: string | null, patch: Partial<RagTraceEntry> = {}) {
     if (!traceId) return
     this.updateRagTrace(traceId, patch)
-    const index = findTraceIndex(this.ragDiagnostics?.traces || [], traceId)
+    const index = findTraceIndex(this._ui.ragDiagnostics?.traces || [], traceId)
     if (index >= 0) {
-      const trace = this.ragDiagnostics.traces[index]
+      const trace = this._ui.ragDiagnostics.traces[index]
       if (trace.status === 'running') {
         trace.status = trace.errors?.length > 0 ? 'warning' : 'success'
       }
     }
-    if (this.ragDiagnostics?.activeTraceId === traceId) {
-      this.ragDiagnostics.activeTraceId = null
+    if (this._ui.ragDiagnostics?.activeTraceId === traceId) {
+      this._ui.ragDiagnostics.activeTraceId = null
     }
   },
 
   clearRagDiagnostics(this: any) {
-    if (!this.ragDiagnostics) {
-      this.ragDiagnostics = { traces: [], activeTraceId: null, maxEntries: 15 }
+    if (!this._ui.ragDiagnostics) {
+      this._ui.ragDiagnostics = { traces: [], activeTraceId: null, maxEntries: 15 }
       return
     }
-    this.ragDiagnostics.traces = []
-    this.ragDiagnostics.activeTraceId = null
+    this._ui.ragDiagnostics.traces = []
+    this._ui.ragDiagnostics.activeTraceId = null
   },
 
   formatRagTraceForCopy(this: any, traceId: string, mode: 'full' | 'memory' | 'history' = 'full') {
-    const trace = (this.ragDiagnostics?.traces || []).find((item: RagTraceEntry) => item.id === traceId)
+    const trace = (this._ui.ragDiagnostics?.traces || []).find((item: RagTraceEntry) => item.id === traceId)
     if (!trace) return ''
 
     if (mode === 'memory') {

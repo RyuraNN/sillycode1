@@ -77,10 +77,10 @@ const onGeminiModeChange = async () => {
   // 同步世界书灯光颜色状态
   try {
     // 同步社团世界书状态（蓝灯/绿灯切换）
-    await syncClubWorldbookState(gameStore.currentRunId, gameStore.settings.useGeminiMode)
+    await syncClubWorldbookState(gameStore.meta.currentRunId, gameStore.settings.useGeminiMode)
 
     // 同步班级世界书状态（蓝灯/绿灯切换）
-    await syncClassWorldbookState(gameStore.currentRunId, gameStore.allClassData, gameStore.settings.useGeminiMode)
+    await syncClassWorldbookState(gameStore.meta.currentRunId, gameStore.world.allClassData, gameStore.settings.useGeminiMode)
 
     // 如果玩家已经选择了班级，重新设置玩家班级（确保玩家班级始终是蓝灯）
     if (gameStore.player.classId) {

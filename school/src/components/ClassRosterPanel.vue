@@ -66,7 +66,7 @@ const currentClass = computed(() => {
     }
   }
   // 否则使用预设数据
-  const classData = gameStore.allClassData[props.classId]
+  const classData = gameStore.world.allClassData[props.classId]
   if (classData) {
     return {
       ...defaultClassData,
@@ -415,9 +415,9 @@ const handleConfirm = async () => {
     await flushPendingSocialData()
 
     // 1. 同步到内存 Store
-    if (gameStore.allClassData[props.classId]) {
+    if (gameStore.world.allClassData[props.classId]) {
       // 使用 JSON 序列化确保数据纯净，移除可能的 Proxy 引用
-      gameStore.allClassData[props.classId] = JSON.parse(JSON.stringify(currentClass.value))
+      gameStore.world.allClassData[props.classId] = JSON.parse(JSON.stringify(currentClass.value))
     }
 
     // 2. 同步到世界书

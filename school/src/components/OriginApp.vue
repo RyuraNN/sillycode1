@@ -154,7 +154,7 @@ const weekdayOptions = [
 // 初始化编辑数据
 const loadCurrentState = () => {
   const p = gameStore.player
-  const t = gameStore.gameTime
+  const t = gameStore.world.gameTime
 
   editData.money = p.money
   editData.hp = p.hp
@@ -211,7 +211,7 @@ const toggleGroup = (group) => {
 const applyChanges = () => {
   const changes = []
   const p = gameStore.player
-  const t = gameStore.gameTime
+  const t = gameStore.world.gameTime
 
   // 基础属性
   const basicFields = ['money', 'hp', 'maxHp', 'mp', 'maxMp', 'health', 'level', 'exp', 'freePoints']

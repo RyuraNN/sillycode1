@@ -15,11 +15,11 @@ export const electiveActions = {
     console.log('[GameStore] Processing NPC elective selection...')
     
     const npcSelections: Record<string, string[]> = {}
-    const rng = seededRandom(this.currentRunId.split('').reduce((a: number, b: string) => a + b.charCodeAt(0), 0))
+    const rng = seededRandom(this.meta.currentRunId.split('').reduce((a: number, b: string) => a + b.charCodeAt(0), 0))
 
     // 1. 优先处理全校学生数据 (从 allClassData)
-    if (this.allClassData) {
-      for (const [classId, classInfo] of Object.entries(this.allClassData)) {
+    if (this.world.allClassData) {
+      for (const [classId, classInfo] of Object.entries(this.world.allClassData)) {
         // @ts-ignore
         if (classInfo.students && Array.isArray(classInfo.students)) {
           // @ts-ignore
@@ -36,8 +36,8 @@ export const electiveActions = {
       }
     }
 
-    // 2. 补充处理 this.npcs (可能包含不在班级名册中的特殊NPC)
-    for (const npc of this.npcs) {
+    // 2. 补充处理 this.world.npcs (可能包含不在班级名册中的特殊NPC)
+    for (const npc of this.world.npcs) {
       if (npc.role === 'teacher') continue
       
       if (npcSelections[npc.name]) continue
@@ -50,10 +50,10 @@ export const electiveActions = {
     }
 
     // 保存到 Store 状态，以便运行时查询
-    this.npcElectiveSelections = npcSelections
+    this.academic.npcElectiveSelections = npcSelections
 
     // @ts-ignore
-    await updateElectiveWorldbookEntries(this.currentRunId, this.player.selectedElectives, npcSelections, this.player.schedule)
+    await updateElectiveWorldbookEntries(this.meta.currentRunId, this.player.selectedElectives, npcSelections, this.player.schedule)
   },
 
   /**
@@ -73,7 +73,7 @@ export const electiveActions = {
 
     // 使用确定性种子：runId + 选课ID排序后的组合
     const sortedElectives = [...this.player.selectedElectives].sort().join('_')
-    const seedStr = `${this.currentRunId}_elective_schedule_${sortedElectives}`
+    const seedStr = `${this.meta.currentRunId}_elective_schedule_${sortedElectives}`
     let hash = 0
     for (let i = 0; i < seedStr.length; i++) {
       hash = ((hash << 5) - hash) + seedStr.charCodeAt(i)

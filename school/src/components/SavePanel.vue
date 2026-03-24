@@ -45,7 +45,7 @@ const isRestoring = ref(false)
 
 // 获取存档列表（按时间倒序）
 const snapshots = computed(() => {
-  return [...gameStore.saveSnapshots].sort((a, b) => b.timestamp - a.timestamp)
+  return [...gameStore._ui.saveSnapshots].sort((a, b) => b.timestamp - a.timestamp)
 })
 
 // 格式化时间
@@ -237,7 +237,7 @@ const restoreToChatIndex = async (index) => {
     }
 
     // 6. 更新 currentFloor 为截断后的长度，并持久化
-    gameStore.currentFloor = targetIndex + 1
+    gameStore.meta.currentFloor = targetIndex + 1
     gameStore.saveToStorage(true)
 
     emit('restore', restoredSnapshot)

@@ -117,21 +117,85 @@ export const fastClone = <T>(obj: T): T => {
 const BULKY_PLAYER_FIELDS = ['summaries', 'persistentFacts'] as const
 
 /**
+ * Phase 1.2 + Phase 2: 从内联快照中剥离的静态/低频变化字段
+ * 这些字段体积大但很少变化，在 gameState 存档中已完整保存
+ * 从内联基准快照中移除可减少 ~50-100KB/个
+ * Phase 2: 字段路径现在是 {group}.{field} 格式
+ */
+export const STATIC_SNAPSHOT_FIELDS = [
+  // world 下的静态字段
+  { group: 'world', field: 'allClassData' },       // 班级数据，几乎不变（~50KB）
+  { group: 'world', field: 'allClubs' },            // 社团数据，低频变化（~20KB）
+  { group: 'world', field: 'npcRelationships' },    // NPC 关系网，已有独立 IndexedDB 存储（~30KB）
+  { group: 'world', field: 'characterNotes' },      // 用户笔记，低频变化
+  { group: 'world', field: 'graduatedNpcs' },       // 毕业生，仅学年进级时变化
+  // academic 下的静态字段
+  { group: 'academic', field: 'examHistory' },      // 累积数据，只增不减
+  { group: 'academic', field: 'customCoursePool' }, // 课程池数据，设置后不变
+] as const
+
+/** 旧版兼容：扁平字段名列表（用于 v3 格式的快照） */
+export const STATIC_SNAPSHOT_FIELDS_LEGACY = [
+  'allClassData', 'allClubs', 'npcRelationships', 'examHistory',
+  'characterNotes', 'customCoursePool', 'graduatedNpcs'
+] as const
+
+/**
+ * 从内联快照中剥离静态/低频变化字段
+ * 恢复时这些字段会从 gameState 存档或当前 store 中补充
+ * Phase 2: 支持新版分层格式和旧版扁平格式
+ * @param snapshot 游戏状态快照（会被就地修改）
+ * @returns 修改后的快照
+ */
+export function stripStaticFields<T>(snapshot: T): T {
+  if (!snapshot || typeof snapshot !== 'object') return snapshot
+  const s = snapshot as any
+
+  // Phase 2: 新版分层格式
+  for (const { group, field } of STATIC_SNAPSHOT_FIELDS) {
+    if (s[group] && s[group][field] !== undefined) {
+      delete s[group][field]
+    }
+  }
+
+  // 旧版兼容：扁平格式
+  for (const field of STATIC_SNAPSHOT_FIELDS_LEGACY) {
+    if (s[field] !== undefined) {
+      delete s[field]
+    }
+  }
+  return snapshot
+}
+
+/**
  * 从快照中剥离大型累积字段（summaries, persistentFacts）
  * 用于减少内联快照的存储开销
+ * Phase 2: 同时处理 rag.summaries/persistentFacts 和 player.summaries/persistentFacts
  * @param snapshot 游戏状态快照（会被就地修改）
  * @returns 修改后的快照
  */
 export function stripBulkyFields<T>(snapshot: T): T {
   if (!snapshot || typeof snapshot !== 'object') return snapshot
-  const player = (snapshot as any).player
-  if (!player) return snapshot
-  for (const field of BULKY_PLAYER_FIELDS) {
-    if (Array.isArray(player[field])) {
-      // 保留条目数量标记，方便调试和回滚校验
-      // 【修复】即使 length === 0 也设置标记，以区分"被剥离的快照"和"完整存档"
-      player[`_${field}Count`] = player[field].length
-      player[field] = []
+  const s = snapshot as any
+
+  // Phase 2: 新版 rag 分组
+  if (s.rag) {
+    for (const field of BULKY_PLAYER_FIELDS) {
+      if (Array.isArray(s.rag[field])) {
+        s.rag[`_${field}Count`] = s.rag[field].length
+        s.rag[field] = []
+      }
+    }
+  }
+
+  // 旧版兼容：player 下的 summaries/persistentFacts
+  const player = s.player
+  if (player) {
+    for (const field of BULKY_PLAYER_FIELDS) {
+      if (Array.isArray(player[field])) {
+        player[`_${field}Count`] = player[field].length
+        player[field] = []
+      }
     }
   }
   return snapshot
@@ -381,24 +445,18 @@ export function computeDelta(
 ): DeltaSnapshot {
   const changes: Record<string, { old: any; new: any }> = {}
 
+  // Phase 2: 分层结构的顶层字段（排除静态字段，这些已被 stripStaticFields 剥离）
+  // 每个字段对应 GameStateData 中的分组
+  const topLevelGroups = [
+    'meta', 'player', 'world', 'academic', 'events', 'notifications', 'rag'
+  ]
+
   // 如果没有旧状态，记录所有字段
   if (!oldState) {
-    // 统一使用完整字段列表
-    const keyFields = [
-      'player', 'gameTime', 'npcs', 'npcRelationships', 'characterNotes', 'worldState',
-      'allClassData', 'allClubs', 'graduatedNpcs', 'lastAcademicYear',
-      'currentRunId', 'currentFloor', 'examHistory', 'electiveAcademicData',
-      'lastExamDate', 'customCoursePool', 'eventChecks', 'clubApplication', 'clubRejection',
-      'clubInvitation', 'npcElectiveSelections',
-      'completedTodoMarkers', 'todoMatchingMode', 'todoMatchingStats',
-      'unviewedExamIds', 'lastViewedWeeklyPreview', 'viewedClubIds',
-      'weeklySnapshot', 'weeklyPreviewData', 'showWeeklyPreview', 'lastWeeklyPreviewWeek'
-    ]
-
-    for (const field of keyFields) {
-      const newVal = getNestedValue(newState, field)
+    for (const group of topLevelGroups) {
+      const newVal = getNestedValue(newState, group)
       if (newVal !== undefined) {
-        changes[field] = { old: undefined, new: newVal }
+        changes[group] = { old: undefined, new: newVal }
       }
     }
 
@@ -411,45 +469,53 @@ export function computeDelta(
   }
 
   // 特殊处理：NPC 数组（使用 ID 匹配）
-  const oldNpcs = oldState.npcs || []
-  const newNpcs = newState.npcs || []
+  const oldNpcs = (oldState as any).world?.npcs || (oldState as any).npcs || []
+  const newNpcs = (newState as any).world?.npcs || (newState as any).npcs || []
   if (oldNpcs.length > 0 || newNpcs.length > 0) {
     compareNpcArray(oldNpcs, newNpcs, changes)
   }
 
-  // 处理其他顶层字段
-  const topLevelFields = [
-    'player', 'gameTime', 'npcRelationships', 'characterNotes', 'worldState',
-    'allClassData', 'allClubs', 'graduatedNpcs', 'lastAcademicYear',
-    'currentRunId', 'currentFloor', 'examHistory', 'electiveAcademicData',
-    'lastExamDate', 'customCoursePool', 'eventChecks', 'clubApplication', 'clubRejection',
-    'clubInvitation', 'npcElectiveSelections',
-    'completedTodoMarkers', 'todoMatchingMode', 'todoMatchingStats',
-    'unviewedExamIds', 'lastViewedWeeklyPreview', 'viewedClubIds',
-    'weeklySnapshot', 'weeklyPreviewData', 'showWeeklyPreview', 'lastWeeklyPreviewWeek'
-  ]
-
-  for (const field of topLevelFields) {
-    const oldVal = getNestedValue(oldState, field)
-    const newVal = getNestedValue(newState, field)
-
-    // 基本类型直接比较
-    if (typeof newVal !== 'object' || newVal === null) {
-      if (oldVal !== newVal) {
-        changes[field] = { old: oldVal, new: newVal }
+  // 处理顶层分组字段（排除已特殊处理的 world.npcs）
+  for (const group of topLevelGroups) {
+    if (group === 'world') {
+      // world 组内逐字段比较（跳过 npcs，已在上面特殊处理）
+      const oldWorld = getNestedValue(oldState, 'world') || {}
+      const newWorld = getNestedValue(newState, 'world') || {}
+      for (const key of Object.keys(newWorld)) {
+        if (key === 'npcs') continue // 已特殊处理
+        const oldVal = oldWorld[key]
+        const newVal = newWorld[key]
+        if (typeof newVal !== 'object' || newVal === null) {
+          if (oldVal !== newVal) {
+            changes[`world.${key}`] = { old: oldVal, new: newVal }
+          }
+        } else if (Array.isArray(newVal)) {
+          if (Array.isArray(oldVal)) {
+            compareArrays(oldVal, newVal, `world.${key}`, changes, 0)
+          } else {
+            changes[`world.${key}`] = { old: oldVal, new: newVal }
+          }
+        } else {
+          compareObjects(oldVal || {}, newVal, `world.${key}`, changes, 0)
+        }
       }
-    }
-    // 数组（非 NPC）
-    else if (Array.isArray(newVal)) {
-      if (Array.isArray(oldVal)) {
-        compareArrays(oldVal, newVal, field, changes, 0)
+    } else {
+      const oldVal = getNestedValue(oldState, group)
+      const newVal = getNestedValue(newState, group)
+
+      if (typeof newVal !== 'object' || newVal === null) {
+        if (oldVal !== newVal) {
+          changes[group] = { old: oldVal, new: newVal }
+        }
+      } else if (Array.isArray(newVal)) {
+        if (Array.isArray(oldVal)) {
+          compareArrays(oldVal, newVal, group, changes, 0)
+        } else {
+          changes[group] = { old: oldVal, new: newVal }
+        }
       } else {
-        changes[field] = { old: oldVal, new: newVal }
+        compareObjects(oldVal || {}, newVal, group, changes, 0)
       }
-    }
-    // 对象
-    else {
-      compareObjects(oldVal || {}, newVal, field, changes, 0)
     }
   }
 
@@ -679,7 +745,7 @@ export function createLightSnapshot(state: GameStateData): object {
       attributes: state.player?.attributes,
       level: state.player?.level
     },
-    gameTime: state.gameTime
+    gameTime: (state as any).world?.gameTime || (state as any).gameTime
   }
 }
 

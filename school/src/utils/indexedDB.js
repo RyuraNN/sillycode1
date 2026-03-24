@@ -672,6 +672,43 @@ export async function getAllSnapshotIds() {
   }
 }
 
+// ==================== 共享 ChatLog (per-run, Phase 1.1) ====================
+
+const SHARED_CHATLOG_PREFIX = 'shared_chatlog_'
+
+/**
+ * 保存共享 chatLog（增量分片存储）
+ * 同一 runId 下所有存档共享同一份 chatLog，避免重复存储
+ * @param {string} runId 运行ID
+ * @param {Array} chatLog 聊天记录数组
+ * @param {Object} [options] 同 saveChunkedChatLog
+ * @returns {Promise<void>}
+ */
+export async function saveSharedChatLog(runId, chatLog, options = {}) {
+  if (!runId) return
+  return saveChunkedChatLog(`${SHARED_CHATLOG_PREFIX}${runId}`, chatLog, options)
+}
+
+/**
+ * 加载共享 chatLog
+ * @param {string} runId 运行ID
+ * @returns {Promise<Array|null>}
+ */
+export async function loadSharedChatLog(runId) {
+  if (!runId) return null
+  return loadChunkedChatLog(`${SHARED_CHATLOG_PREFIX}${runId}`)
+}
+
+/**
+ * 删除共享 chatLog
+ * @param {string} runId 运行ID
+ * @returns {Promise<void>}
+ */
+export async function removeSharedChatLog(runId) {
+  if (!runId) return
+  return removeChunkedChatLog(`${SHARED_CHATLOG_PREFIX}${runId}`)
+}
+
 // ==================== Phase 2: 记忆池 & 实体索引持久化 ====================
 
 const MEMORY_POOL_PREFIX = 'mem_pool:'

@@ -15,7 +15,7 @@ import { getCurrentBookName } from './worldbookHelper'
  * @returns {string} 注入文本
  */
 export function generateAcademicWorldbookText(store) {
-  const examHistory = store.examHistory || []
+  const examHistory = store.academic.examHistory || []
   if (examHistory.length === 0) return ''
 
   // 只取最近一次考试
@@ -86,7 +86,7 @@ export function generateAcademicWorldbookText(store) {
  * @returns {string} 简短的学业描述
  */
 export function generateNpcAcademicBrief(npcName, store) {
-  const examHistory = store.examHistory || []
+  const examHistory = store.academic.examHistory || []
   if (examHistory.length === 0) return ''
 
   const latestExam = examHistory[examHistory.length - 1]

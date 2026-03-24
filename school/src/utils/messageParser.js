@@ -5,7 +5,7 @@ import { removeThinking } from './summaryManager'
 // 获取游戏内时间字符串 (HH:mm)
 function getGameTimeString() {
   const gameStore = useGameStore()
-  const { hour, minute } = gameStore.gameTime
+  const { hour, minute } = gameStore.world.gameTime
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
 import { saveForumToWorldbook, generatePostId } from './forumWorldbook'
@@ -74,7 +74,7 @@ function findSocialTarget(identifier, gameStore) {
   let friend = gameStore.player.social.friends.find(f => f.id === identifier)
   if (friend) return { id: friend.id, name: friend.name, type: 'friend' }
 
-  let npc = gameStore.npcs.find(n => n.id === identifier)
+  let npc = gameStore.world.npcs.find(n => n.id === identifier)
   if (npc) return { id: npc.id, name: npc.name, type: 'npc' }
 
   // 2. 尝试匹配名称 (模糊匹配，忽略全角半角)
@@ -84,7 +84,7 @@ function findSocialTarget(identifier, gameStore) {
   friend = gameStore.player.social.friends.find(f => normalizeText(f.name) === normId)
   if (friend) return { id: friend.id, name: friend.name, type: 'friend' }
 
-  npc = gameStore.npcs.find(n => normalizeText(n.name) === normId)
+  npc = gameStore.world.npcs.find(n => normalizeText(n.name) === normId)
   if (npc) return { id: npc.id, name: npc.name, type: 'npc' }
 
   // 3. 增强匹配：针对群组的模糊匹配
@@ -229,12 +229,12 @@ async function processMessage(match, type, gameStore) {
     content: content,
     sender: sender, 
     time: time,
-    floor: gameStore.currentFloor
+    floor: gameStore.meta.currentFloor
   })
   data.unreadCount = (data.unreadCount || 0) + 1
 
   // 保存到世界书
-  await saveSocialData(id, name, data, [], gameStore.currentFloor)
+  await saveSocialData(id, name, data, [], gameStore.meta.currentFloor)
 
   // 更新 Store
   const isFriend = gameStore.player.social.friends.some(f => f.id === id)
@@ -353,7 +353,7 @@ export async function parseSocialTags(rawText) {
       } else {
         id = generateCharId(name)
         // 如果是全新角色，确保添加到 NPCs (虽然添加好友会自动显示，但最好保持一致)
-        const npcExists = gameStore.npcs.some(n => n.id === id)
+        const npcExists = gameStore.world.npcs.some(n => n.id === id)
         if (!npcExists) {
             gameStore.addNpc({
                 id,
@@ -388,7 +388,7 @@ export async function parseSocialTags(rawText) {
         status: 'online',
         unreadCount: 0
       })
-      await saveSocialData(id, name, { messages: [], unreadCount: 0 }, [], gameStore.currentFloor)
+      await saveSocialData(id, name, { messages: [], unreadCount: 0 }, [], gameStore.meta.currentFloor)
     }
   }
 
@@ -760,7 +760,7 @@ export async function parseSocialTags(rawText) {
         
         // 如果找不到，生成新 ID 并注册为 NPC
         const newId = generateCharId(name)
-        const npcExists = gameStore.npcs.some(n => n.id === newId)
+        const npcExists = gameStore.world.npcs.some(n => n.id === newId)
         if (!npcExists) {
             gameStore.addNpc({
                 id: newId,
@@ -796,7 +796,7 @@ export async function parseSocialTags(rawText) {
       if (memberId === 'player') return gameStore.player.name
       const friend = gameStore.player.social.friends.find(f => f.id === memberId)
       if (friend) return friend.name
-      const npc = gameStore.npcs.find(n => n.id === memberId)
+      const npc = gameStore.world.npcs.find(n => n.id === memberId)
       if (npc) return npc.name
       return memberId 
     })
@@ -804,7 +804,7 @@ export async function parseSocialTags(rawText) {
     await saveSocialData(group.id, group.name, {
       messages: group.messages || [],
       unreadCount: group.unreadCount || 0
-    }, finalMemberNames, gameStore.currentFloor)
+    }, finalMemberNames, gameStore.meta.currentFloor)
 
     const welcomePrompt = `[系统提示] ${gameStore.player.name} 加入了 ${groupName}，群内成员有 ${finalMemberNames.join('、')}，大家欢迎一下吧。`
     gameStore.addCommand({
@@ -936,11 +936,11 @@ export async function parseSocialTags(rawText) {
           content: content,
           replies: [],
           timestamp: Date.now(),
-          floor: gameStore.currentFloor,
+          floor: gameStore.meta.currentFloor,
           likes: []
         }
         gameStore.player.forum.posts.unshift(newPost)
-        await saveForumToWorldbook(gameStore.player.forum.posts, gameStore.currentRunId, gameStore.settings.forumWorldbookLimit)
+        await saveForumToWorldbook(gameStore.player.forum.posts, gameStore.meta.currentRunId, gameStore.settings.forumWorldbookLimit)
       } else {
         const reason = isExactDuplicate ? 'exact' : isTitleAuthorDuplicate ? 'title+author' : 'content-similar'
         console.log(`[MessageParser] Duplicate forum post detected (${reason}), skipping: ${attrs.title}`)
@@ -1024,7 +1024,7 @@ export async function parseSocialTags(rawText) {
 
   // 回复和点赞统一保存一次
   if (forumChanged) {
-    await saveForumToWorldbook(gameStore.player.forum.posts, gameStore.currentRunId, gameStore.settings.forumWorldbookLimit)
+    await saveForumToWorldbook(gameStore.player.forum.posts, gameStore.meta.currentRunId, gameStore.settings.forumWorldbookLimit)
   }
 
   // 清理过期提醒
@@ -1053,7 +1053,7 @@ export async function parseSocialTags(rawText) {
       gameStore.addSummary({
         type: 'minor',
         content: content,
-        floor: gameStore.currentFloor
+        floor: gameStore.meta.currentFloor
       })
     }
   }
@@ -1164,7 +1164,7 @@ export function processNpcMoodUpdate(data) {
     }
 
     // 查找 NPC
-    const npc = gameStore.npcs.find(n => n.name === name)
+    const npc = gameStore.world.npcs.find(n => n.name === name)
     if (!npc) {
       console.warn(`[MessageParser] NPC not found for mood update: ${name}`)
       return

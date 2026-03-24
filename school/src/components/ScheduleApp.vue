@@ -422,7 +422,7 @@
                 <span class="status-icon">⏳</span>
                 <div class="status-text">
                   <div class="status-title">申请审核中...</div>
-                  <div class="status-hint">社长正在审核，请继续剧情对话 (剩余: {{ gameStore.clubApplication.remainingTurns }}回合)</div>
+                  <div class="status-hint">社长正在审核，请继续剧情对话 (剩余: {{ gameStore.events.clubApplication.remainingTurns }}回合)</div>
                 </div>
               </div>
             </template>
@@ -436,7 +436,7 @@
                 <span class="status-icon">🔒</span>
                 <div class="status-text">
                   <div class="status-title">暂时无法加入</div>
-                  <div class="status-hint" v-if="gameStore.clubApplication">正在申请其他社团</div>
+                  <div class="status-hint" v-if="gameStore.events.clubApplication">正在申请其他社团</div>
                   <div class="status-hint" v-else>已加入社团，需通过成员邀请加入更多</div>
                 </div>
               </div>
@@ -607,16 +607,16 @@
 
       <!-- 拒绝通知弹窗 -->
       <Teleport to="body">
-      <div v-if="gameStore.clubRejection" class="club-modal-overlay" @click.self="gameStore.confirmClubRejection()">
+      <div v-if="gameStore.events.clubRejection" class="club-modal-overlay" @click.self="gameStore.confirmClubRejection()">
         <div class="rejection-modal">
           <div class="rejection-icon">❌</div>
           <div class="rejection-title">申请被拒绝</div>
           <div class="rejection-info">
-            <div class="rejection-club">{{ gameStore.clubRejection.clubName }}</div>
-            <div class="rejection-from">来自: {{ gameStore.clubRejection.from }}</div>
+            <div class="rejection-club">{{ gameStore.events.clubRejection.clubName }}</div>
+            <div class="rejection-from">来自: {{ gameStore.events.clubRejection.from }}</div>
           </div>
           <div class="rejection-reason">
-            "{{ gameStore.clubRejection.reason }}"
+            "{{ gameStore.events.clubRejection.reason }}"
           </div>
           <button class="confirm-btn" @click="gameStore.confirmClubRejection()">
             确定
@@ -846,12 +846,12 @@ const activeTab = ref('schedule')
 // 红点清除：切换到社团 tab 时标记所有社团为已查看，切换到成绩 tab 时清除考试红点，切换到论坛 tab 时清除论坛红点
 watch(activeTab, (val) => {
   if (val === 'clubs') {
-    const allClubs = gameStore.allClubs || {}
-    gameStore.viewedClubIds = Object.keys(allClubs)
+    const allClubs = gameStore.world.allClubs || {}
+    gameStore.notifications.viewedClubIds = Object.keys(allClubs)
   }
   if (val === 'grades') {
-    if (gameStore.unviewedExamIds?.length) {
-      gameStore.unviewedExamIds = []
+    if (gameStore.notifications.unviewedExamIds?.length) {
+      gameStore.notifications.unviewedExamIds = []
     }
   }
   if (val === 'forum') {
@@ -896,7 +896,7 @@ const periods = TIME_SLOTS.map(slot => ({
 
 // 获取学期信息
 const termInfo = computed(() => {
-  const { year, month, day } = gameStore.gameTime
+  const { year, month, day } = gameStore.world.gameTime
   return getTermInfo(year, month, day)
 })
 
@@ -923,13 +923,13 @@ const termName = computed(() => termInfo.value.termName || '')
 
 // 是否有新考试（用于tab badge）
 const hasNewExam = computed(() => {
-  const history = gameStore.examHistory || []
+  const history = gameStore.academic.examHistory || []
   return history.length > 0
 })
 
 // 计算本周每一天的日期
 const weekDateMap = computed(() => {
-  const { year, month, day, weekday } = gameStore.gameTime
+  const { year, month, day, weekday } = gameStore.world.gameTime
   const currentWeekdayEn = getWeekdayEnglish(weekday)
   
   const weekdayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -1006,12 +1006,12 @@ const admissionYear = computed(() => {
   if (gameStore.player.academicYear) {
     return gameStore.player.academicYear - (gameStore.player.gradeYear - 1)
   }
-  return gameStore.gameTime.year - (gameStore.player.gradeYear - 1)
+  return gameStore.world.gameTime.year - (gameStore.player.gradeYear - 1)
 })
 
 // 学生证号（生成一个模拟的）
 const studentId = computed(() => {
-  const base = gameStore.currentRunId.substring(0, 4).toUpperCase()
+  const base = gameStore.meta.currentRunId.substring(0, 4).toUpperCase()
   return `TH${admissionYear.value}${base}01`
 })
 
@@ -1051,7 +1051,7 @@ const pendingForumCount = computed(() => {
 
 // 是否有新社团通知（邀请或申请结果）
 const hasNewClubNotification = computed(() => {
-  return !!(gameStore.clubInvitation || gameStore.clubRejection)
+  return !!(gameStore.events.clubInvitation || gameStore.events.clubRejection)
 })
 
 // 已加入社团数量
@@ -1060,13 +1060,13 @@ const joinedClubsCount = computed(() => gameStore.player.joinedClubs.length)
 // 已加入的社团列表
 const joinedClubs = computed(() => {
   return gameStore.player.joinedClubs
-    .map(id => gameStore.allClubs[id])
+    .map(id => gameStore.world.allClubs[id])
     .filter(club => club)
 })
 
 // 可加入的社团（未加入的）
 const availableClubs = computed(() => {
-  return Object.values(gameStore.allClubs).filter(
+  return Object.values(gameStore.world.allClubs).filter(
     club => !gameStore.player.joinedClubs.includes(club.id)
   )
 })
@@ -1074,7 +1074,7 @@ const availableClubs = computed(() => {
 // 已被占用的活动室名称列表
 const occupiedLocations = computed(() => {
   const locations = []
-  Object.values(gameStore.allClubs).forEach(club => {
+  Object.values(gameStore.world.allClubs).forEach(club => {
     if (club.location && club.location.trim()) {
       locations.push(club.location.trim())
     }
@@ -1086,8 +1086,8 @@ const occupiedLocations = computed(() => {
 const allTeachers = computed(() => {
   const teacherMap = new Map();
   
-  if (gameStore.allClassData) {
-    for (const [classId, classData] of Object.entries(gameStore.allClassData)) {
+  if (gameStore.world.allClassData) {
+    for (const [classId, classData] of Object.entries(gameStore.world.allClassData)) {
       if (classData.headTeacher && classData.headTeacher.name) {
         if (!teacherMap.has(classData.headTeacher.name)) {
           teacherMap.set(classData.headTeacher.name, {
@@ -1114,21 +1114,21 @@ const allTeachers = computed(() => {
 })
 
 function isApplyingTo(clubId) {
-  return gameStore.clubApplication && gameStore.clubApplication.clubId === clubId
+  return gameStore.events.clubApplication && gameStore.events.clubApplication.clubId === clubId
 }
 
 function canJoinClub(clubId) {
   if (gameStore.player.role === 'teacher') {
     if (gameStore.player.joinedClubs.includes(clubId)) return false
-    const club = gameStore.allClubs[clubId]
+    const club = gameStore.world.allClubs[clubId]
     if (club && club.advisor) return false
     return true
   }
 
-  const club = gameStore.allClubs[clubId]
+  const club = gameStore.world.allClubs[clubId]
   if (club?.mode === 'restricted' || clubId === 'student_council') return false
   if (gameStore.player.joinedClubs.includes(clubId)) return false
-  if (gameStore.clubApplication) return false
+  if (gameStore.events.clubApplication) return false
   if (gameStore.player.joinedClubs.length === 0) return true
   return false
 }
@@ -1199,14 +1199,14 @@ async function handleJoinClub(clubId) {
 }
 
 function isToday(dayEn) {
-  const todayEn = getWeekdayEnglish(gameStore.gameTime.weekday)
+  const todayEn = getWeekdayEnglish(gameStore.world.gameTime.weekday)
   return todayEn === dayEn
 }
 
 function isCurrentClass(dayEn, periodNum) {
   if (!isToday(dayEn)) return false
   
-  const { hour, minute } = gameStore.gameTime
+  const { hour, minute } = gameStore.world.gameTime
   const currentMinutes = hour * 60 + minute
   
   const slot = TIME_SLOTS.find(s => s.period === periodNum)
@@ -1238,9 +1238,9 @@ function isEmptySlot(dayEn, periodNum) {
 }
 
 function calculateAffinity(npcName) {
-  const relationData = gameStore.npcRelationships?.[npcName]?.relations?.[gameStore.player.name]
+  const relationData = gameStore.world.npcRelationships?.[npcName]?.relations?.[gameStore.player.name]
   if (!relationData) {
-    const reverseRelation = gameStore.npcRelationships?.[gameStore.player.name]?.relations?.[npcName]
+    const reverseRelation = gameStore.world.npcRelationships?.[gameStore.player.name]?.relations?.[npcName]
     if (reverseRelation) {
       const { intimacy = 0, trust = 0, passion = 0, hostility = 0 } = reverseRelation
       return Math.round((intimacy + trust + passion - hostility) / 3)
@@ -1253,10 +1253,10 @@ function calculateAffinity(npcName) {
 
 const availableNpcs = computed(() => {
   if (!selectedClub.value) return []
-  return gameStore.npcs
+  return gameStore.world.npcs
     .filter(npc => {
-      const hasRelation = gameStore.npcRelationships[npc.name] || 
-                          gameStore.npcRelationships[gameStore.player.name]?.relations?.[npc.name]
+      const hasRelation = gameStore.world.npcRelationships[npc.name] || 
+                          gameStore.world.npcRelationships[gameStore.player.name]?.relations?.[npc.name]
       if (!hasRelation) return false
       if (selectedClub.value.members && selectedClub.value.members.includes(npc.name)) return false
       return true
@@ -1347,7 +1347,7 @@ async function handleInviteMember() {
 }
 
 onMounted(async () => {
-  if (Object.keys(gameStore.allClubs).length === 0) {
+  if (Object.keys(gameStore.world.allClubs).length === 0) {
     loading.value = true
     await gameStore.loadClubData()
     loading.value = false

@@ -35,31 +35,31 @@ export const eventWeatherActions = {
     const triggers = await loadEventTriggersFromWorldbook()
     
     if (library) {
-      this.eventLibrary = library
+      this.events.library = library
     } else {
       console.warn('[GameStore] Failed to load event library')
-      this.eventLibrary = new Map()
+      this.events.library = new Map()
     }
 
     if (triggers) {
-      this.eventTriggers = triggers
+      this.events.triggers = triggers
     } else {
       console.warn('[GameStore] Failed to load event triggers')
-      this.eventTriggers = []
+      this.events.triggers = []
     }
     
-    console.log(`[GameStore] Loaded ${this.eventLibrary.size} events and ${this.eventTriggers.length} triggers`)
+    console.log(`[GameStore] Loaded ${this.events.library.size} events and ${this.events.triggers.length} triggers`)
   },
 
   /**
    * 检查并处理事件触发（每次时间推进后调用）
    */
   checkEventTriggers(this: any) {
-    if (this.eventLibrary.size === 0 || this.eventTriggers.length === 0) {
+    if (this.events.library.size === 0 || this.events.triggers.length === 0) {
       return
     }
     
-    const { year, month, day } = this.gameTime
+    const { year, month, day } = this.world.gameTime
     const currentDateKey = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
     const termInfo = this.getTermInfo() as any
     const currentWeekKey = `${year}-W${termInfo?.weekNumber || 1}`
@@ -68,15 +68,15 @@ export const eventWeatherActions = {
     const allTriggered: any[] = []
     
     // 1. 检查每日触发器
-    if (this.eventChecks.lastDaily !== currentDateKey) {
-      const dailyTriggered = checkDailyTriggers(this, this.eventTriggers, this.eventLibrary)
+    if (this.events.checks.lastDaily !== currentDateKey) {
+      const dailyTriggered = checkDailyTriggers(this, this.events.triggers, this.events.library)
       allTriggered.push(...dailyTriggered)
-      this.eventChecks.lastDaily = currentDateKey
+      this.events.checks.lastDaily = currentDateKey
     }
     
     // 2. 检查每周触发器（周一检查）
-    if (this.gameTime.weekday === 'Monday' && this.eventChecks.lastWeekly !== currentWeekKey) {
-      const weeklyTriggered = checkWeeklyTriggers(this, this.eventTriggers, this.eventLibrary)
+    if (this.world.gameTime.weekday === 'Monday' && this.events.checks.lastWeekly !== currentWeekKey) {
+      const weeklyTriggered = checkWeeklyTriggers(this, this.events.triggers, this.events.library)
       for (const triggered of weeklyTriggered) {
         this.player.scheduledEvents.push({
           eventId: triggered.event.id,
@@ -84,12 +84,12 @@ export const eventWeatherActions = {
           event: triggered.event
         })
       }
-      this.eventChecks.lastWeekly = currentWeekKey
+      this.events.checks.lastWeekly = currentWeekKey
     }
     
     // 3. 检查每月触发器（1日检查）
-    if (day === 1 && this.eventChecks.lastMonthly !== currentMonthKey) {
-      const monthlyTriggered = checkMonthlyTriggers(this, this.eventTriggers, this.eventLibrary)
+    if (day === 1 && this.events.checks.lastMonthly !== currentMonthKey) {
+      const monthlyTriggered = checkMonthlyTriggers(this, this.events.triggers, this.events.library)
       for (const triggered of monthlyTriggered) {
         this.player.scheduledEvents.push({
           eventId: triggered.event.id,
@@ -112,15 +112,15 @@ export const eventWeatherActions = {
         this.addCommand(`[工资发放] 本月教师工资 ${teacherSalary.toLocaleString()} 日元已到账！`)
       }
 
-      this.eventChecks.lastMonthly = currentMonthKey
+      this.events.checks.lastMonthly = currentMonthKey
     }
     
     // 4. 检查变量触发器
-    const variableTriggered = checkVariableTriggers(this, this.eventTriggers, this.eventLibrary)
+    const variableTriggered = checkVariableTriggers(this, this.events.triggers, this.events.library)
     allTriggered.push(...variableTriggered)
     
     // 5. 检查复合触发器
-    const compositeTriggered = checkCompositeTriggers(this, this.eventTriggers, this.eventLibrary)
+    const compositeTriggered = checkCompositeTriggers(this, this.events.triggers, this.events.library)
     allTriggered.push(...compositeTriggered)
     
     // 6. 检查预定事件是否到期
@@ -171,7 +171,7 @@ export const eventWeatherActions = {
   getActiveEventsForBanner(this: any): Array<ActiveEvent & { remainingDays: number }> {
     if (this.player.activeEvents.length === 0) return []
     
-    const currentDay = calculateTotalDays(this.gameTime)
+    const currentDay = calculateTotalDays(this.world.gameTime)
     
     const sortedEvents = [...this.player.activeEvents].sort((a: ActiveEvent, b: ActiveEvent) => {
       if (a.isGhost === b.isGhost) return 0
@@ -210,17 +210,17 @@ export const eventWeatherActions = {
    * 初始化/更新天气预报
    */
   updateWeatherForecast(this: any) {
-    const { year, month, day } = this.gameTime
+    const { year, month, day } = this.world.gameTime
     const currentDateKey = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
     
-    if (this.worldState.weather.lastUpdateDate !== currentDateKey) {
+    if (this.world.worldState.weather.lastUpdateDate !== currentDateKey) {
       console.log('[GameStore] Updating weather forecast for:', currentDateKey)
       
       let previousWeather = null
       let lastWeatherOfPreviousDay = null
       
-      if (this.worldState.weather.forecast.length > 0) {
-        const todayInForecast = this.worldState.weather.forecast.find((f: any) => 
+      if (this.world.worldState.weather.forecast.length > 0) {
+        const todayInForecast = this.world.worldState.weather.forecast.find((f: any) => 
           f.year === year && f.month === month && f.day === day
         )
         if (todayInForecast) {
@@ -232,7 +232,7 @@ export const eventWeatherActions = {
         const yMonth = yesterdayDate.getMonth() + 1
         const yDay = yesterdayDate.getDate()
 
-        const yesterdayForecast = this.worldState.weather.forecast.find((f: any) => 
+        const yesterdayForecast = this.world.worldState.weather.forecast.find((f: any) => 
            f.year === yYear && f.month === yMonth && f.day === yDay
         )
 
@@ -247,21 +247,21 @@ export const eventWeatherActions = {
 
       // fallback：存档恢复等场景下 forecast 中无昨天数据，用当前天气保持连续性
       if (!lastWeatherOfPreviousDay && !previousWeather) {
-        lastWeatherOfPreviousDay = this.worldState.weather.current?.weather || null
+        lastWeatherOfPreviousDay = this.world.worldState.weather.current?.weather || null
       }
 
       const weatherData = generateWeatherForecast(year, month, day, previousWeather as any, lastWeatherOfPreviousDay as any) as any
       
-      this.worldState.weather = {
+      this.world.worldState.weather = {
         current: weatherData.current,
         forecast: weatherData.forecast,
         lastUpdateDate: currentDateKey,
         season: weatherData.season,
-        previousHour: this.gameTime.hour,
+        previousHour: this.world.gameTime.hour,
         lastChangeInfo: null
       }
       
-      console.log('[GameStore] Weather updated:', this.worldState.weather.current.weatherName)
+      console.log('[GameStore] Weather updated:', this.world.worldState.weather.current.weatherName)
     }
   },
 
@@ -269,8 +269,8 @@ export const eventWeatherActions = {
    * 更新当前时刻的天气（基于每两小时预报）
    */
   updateCurrentWeather(this: any) {
-    const { hour } = this.gameTime
-    const weatherData = this.worldState.weather
+    const { hour } = this.world.gameTime
+    const weatherData = this.world.worldState.weather
     
     if (!weatherData.forecast || weatherData.forecast.length === 0) {
       return
@@ -278,7 +278,7 @@ export const eventWeatherActions = {
     
     const currentWeatherInfo = getCurrentWeatherAtHour(weatherData, hour) as any
     if (currentWeatherInfo) {
-      this.worldState.weather.current = {
+      this.world.worldState.weather.current = {
         weather: currentWeatherInfo.weather,
         weatherName: currentWeatherInfo.weatherName,
         icon: currentWeatherInfo.icon,
@@ -293,21 +293,21 @@ export const eventWeatherActions = {
    * 检测并返回天气变化信息（用于生成提示词）
    */
   checkWeatherChange(this: any) {
-    const { hour } = this.gameTime
-    const previousHour = this.worldState.weather.previousHour
+    const { hour } = this.world.gameTime
+    const previousHour = this.world.worldState.weather.previousHour
     
     if (previousHour === hour) {
       return
     }
     
-    const changeInfo = detectWeatherChange(this.worldState.weather, previousHour, hour)
+    const changeInfo = detectWeatherChange(this.world.worldState.weather, previousHour, hour)
     
-    this.worldState.weather.previousHour = hour
+    this.world.worldState.weather.previousHour = hour
     
     if (changeInfo) {
-      this.worldState.weather.lastChangeInfo = changeInfo
+      this.world.worldState.weather.lastChangeInfo = changeInfo
     } else {
-      this.worldState.weather.lastChangeInfo = null
+      this.world.worldState.weather.lastChangeInfo = null
     }
   },
 
@@ -315,14 +315,14 @@ export const eventWeatherActions = {
    * 获取天气预报数据（供组件使用）
    */
   getWeatherData(this: any) {
-    return this.worldState.weather
+    return this.world.worldState.weather
   },
 
   /**
    * 获取当前天气描述（用于提示词）
    */
   getCurrentWeatherDescription(this: any): string {
-    const weather = this.worldState.weather.current as any
+    const weather = this.world.worldState.weather.current as any
     return `${weather.icon} ${weather.weatherName}，气温${weather.temperature}°C`
   }
 }

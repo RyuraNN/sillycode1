@@ -73,7 +73,7 @@ const fixedEventMap = new Map()
 
 onMounted(async () => {
   // 确保事件数据已加载
-  if (gameStore.eventLibrary.size === 0) {
+  if (gameStore.events.library.size === 0) {
     await gameStore.loadEventData()
   }
   processFixedEvents()
@@ -114,7 +114,7 @@ const processFixedEvents = () => {
 }
 
 const refreshData = () => {
-  const libEvents = Array.from(gameStore.eventLibrary.values())
+  const libEvents = Array.from(gameStore.events.library.values())
   const libEventIds = new Set(libEvents.map(e => e.id))
   
   // 合并固定事件（如果 Library 中没有）
@@ -135,7 +135,7 @@ const refreshData = () => {
   }
   
   events.value = allEvents
-  triggers.value = gameStore.eventTriggers
+  triggers.value = gameStore.events.triggers
 }
 
 const filteredEvents = computed(() => {
@@ -272,11 +272,11 @@ const saveEvent = () => {
   delete newEvent._fixedDesc
   
   newEvent.duration = parseInt(newEvent.duration) || 1
-  gameStore.eventLibrary.set(eventId, newEvent)
+  gameStore.events.library.set(eventId, newEvent)
   
   // 2. 更新 store 中的 eventTriggers
   // 先移除该事件旧的所有触发器
-  const otherTriggers = gameStore.eventTriggers.filter(t => t.eventId !== eventId && t.eventId !== selectedEvent.value?.id)
+  const otherTriggers = gameStore.events.triggers.filter(t => t.eventId !== eventId && t.eventId !== selectedEvent.value?.id)
   
   // 准备新的触发器数据
   let hasFixedDate = false
@@ -311,7 +311,7 @@ const saveEvent = () => {
       if (trigger.isRecurring) {
         trigger.condition = `${m}-${d}`
       } else {
-        const y = trigger.year || gameStore.gameTime.year
+        const y = trigger.year || gameStore.world.gameTime.year
         trigger.condition = `${y}-${m}-${d}`
       }
       
@@ -335,7 +335,7 @@ const saveEvent = () => {
   })
   
   // 合并
-  gameStore.eventTriggers = [...otherTriggers, ...newTriggers]
+  gameStore.events.triggers = [...otherTriggers, ...newTriggers]
   
   // 3. 同步到日历 (如果存在固定日期触发器)
   const calendarEventId = `calendar_link_${eventId}`
@@ -348,7 +348,7 @@ const saveEvent = () => {
       id: calendarEventId,
       name: newEvent.name,
       date: fixedDateTrigger.condition, // 使用 MM-DD 或 YYYY-MM-DD
-      isRecurring: !fixedDateTrigger.condition.includes(gameStore.gameTime.year + '-'), // 简单判断: 如果不含当前年份则为循环? 不太严谨。直接看格式
+      isRecurring: !fixedDateTrigger.condition.includes(gameStore.world.gameTime.year + '-'), // 简单判断: 如果不含当前年份则为循环? 不太严谨。直接看格式
       description: newEvent.description,
       createdAt: Date.now()
     }
@@ -397,9 +397,9 @@ const deleteEvent = () => {
   if (!confirm(`确定要删除事件 "${selectedEvent.value.name}" 吗?`)) return
   
   const eventId = selectedEvent.value.id
-  gameStore.eventLibrary.delete(eventId)
+  gameStore.events.library.delete(eventId)
   // 删除相关触发器
-  gameStore.eventTriggers = gameStore.eventTriggers.filter(t => t.eventId !== eventId)
+  gameStore.events.triggers = gameStore.events.triggers.filter(t => t.eventId !== eventId)
   
   // 删除关联的日历事件
   const calendarEventId = `calendar_link_${eventId}`

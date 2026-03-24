@@ -247,7 +247,7 @@ export async function generateMinorSummary(content, floor, useAssistant = true, 
 
   // 1. 如果有预生成的小总结，直接使用
   if (preGeneratedSummary) {
-    const { year, month, day } = gameStore.gameTime
+    const { year, month, day } = gameStore.world.gameTime
     const gameDate = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`
     const summary = {
       floor,
@@ -296,7 +296,7 @@ export async function generateMinorSummary(content, floor, useAssistant = true, 
       return { success: false, error: '无法从AI响应中提取小总结' }
     }
 
-    const { year, month, day } = gameStore.gameTime
+    const { year, month, day } = gameStore.world.gameTime
     const gameDate = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`
     const summary = {
       floor,
@@ -754,7 +754,7 @@ export async function processPostReply(content, floor, preGeneratedMinorSummary 
   if (settings.useAssistantForSummary && gameStore.settings.assistantAI?.enabled) {
     setTimeout(async () => {
       try {
-        const { year, month, day } = gameStore.gameTime
+        const { year, month, day } = gameStore.world.gameTime
         const currentDate = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`
         const diaryCheck = checkDiaryNeeded(currentDate)
         for (const date of diaryCheck) {

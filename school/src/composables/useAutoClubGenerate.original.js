@@ -318,7 +318,7 @@ ${teacherList}
 
     for (const club of clubs) {
       try {
-        const existing = gameStore.allClubs?.[club.id]
+        const existing = gameStore.world.allClubs?.[club.id]
         if (existing) {
           // ID冲突：合并成员到现有社团
           const newMembers = (club.members || []).filter(m => !(existing.members || []).includes(m))
@@ -334,8 +334,8 @@ ${teacherList}
         }
 
         await createClubFn(club, runId)
-        if (!gameStore.allClubs) gameStore.allClubs = {}
-        gameStore.allClubs[club.id] = {
+        if (!gameStore.world.allClubs) gameStore.world.allClubs = {}
+        gameStore.world.allClubs[club.id] = {
           name: club.name,
           advisor: club.advisor,
           president: club.president,
@@ -354,7 +354,7 @@ ${teacherList}
 
     for (const addition of additions) {
       try {
-        const existingClub = gameStore.allClubs?.[addition.clubId]
+        const existingClub = gameStore.world.allClubs?.[addition.clubId]
         if (existingClub) {
           for (const memberName of addition.members) {
             await addMemberFn(addition.clubId, memberName, existingClub, runId)

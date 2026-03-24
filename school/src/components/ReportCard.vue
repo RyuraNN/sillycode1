@@ -31,11 +31,11 @@ const examTypeNames = { monthly: '月考', midterm: '期中考试', final: '期�
 const examTypeIcons = { monthly: '📝', midterm: '📋', final: '📊' }
 
 const isTeacher = computed(() => gameStore.player.role === 'teacher')
-const examHistory = computed(() => gameStore.examHistory || [])
+const examHistory = computed(() => gameStore.academic.examHistory || [])
 
 // 假期识别
 const currentTermInfo = computed(() => {
-  const { year, month, day } = gameStore.gameTime
+  const { year, month, day } = gameStore.world.gameTime
   return getTermInfo(year, month, day)
 })
 const isVacation = computed(() => currentTermInfo.value?.isVacation === true)
@@ -326,10 +326,10 @@ function selectStudent(name) {
 
     <template v-else>
       <!-- 周报入口卡片 -->
-      <div v-if="gameStore.weeklyPreviewData && gameStore.lastWeeklyPreviewWeek > (gameStore.lastViewedWeeklyPreview || 0)"
-        class="weekly-entry-card" @click="gameStore.showWeeklyPreview = true; gameStore.lastViewedWeeklyPreview = gameStore.lastWeeklyPreviewWeek">
+      <div v-if="gameStore.notifications.weeklyPreviewData && gameStore.notifications.lastWeeklyPreviewWeek > (gameStore.notifications.lastViewedWeeklyPreview || 0)"
+        class="weekly-entry-card" @click="gameStore.notifications.showWeeklyPreview = true; gameStore.notifications.lastViewedWeeklyPreview = gameStore.notifications.lastWeeklyPreviewWeek">
         <span class="weekly-entry-icon">📅</span>
-        <span class="weekly-entry-text">第 {{ gameStore.lastWeeklyPreviewWeek }} 周学业回顾</span>
+        <span class="weekly-entry-text">第 {{ gameStore.notifications.lastWeeklyPreviewWeek }} 周学业回顾</span>
         <span class="weekly-entry-badge">NEW</span>
       </div>
 

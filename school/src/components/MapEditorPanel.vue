@@ -121,15 +121,15 @@ const currentItems = computed(() => {
 })
 
 const availableEvents = computed(() => {
-  return Array.from(gameStore.eventLibrary.values()).map(e => ({
+  return Array.from(gameStore.events.library.values()).map(e => ({
     id: e.id,
     name: e.name
   }))
 })
 
 const availableClubs = computed(() => {
-  if (!gameStore.allClubs) return []
-  return Object.entries(gameStore.allClubs).map(([id, club]) => ({
+  if (!gameStore.world.allClubs) return []
+  return Object.entries(gameStore.world.allClubs).map(([id, club]) => ({
     id,
     name: club.name || id
   }))
@@ -138,7 +138,7 @@ const availableClubs = computed(() => {
 // 初始化
 onMounted(async () => {
   // 确保事件数据已加载
-  if (gameStore.eventLibrary.size === 0) {
+  if (gameStore.events.library.size === 0) {
     await gameStore.loadEventData()
   }
 

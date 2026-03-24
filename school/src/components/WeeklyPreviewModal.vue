@@ -5,7 +5,7 @@ import { SUBJECT_MAP } from '../data/academicData'
 
 const gameStore = useGameStore()
 const isTeacher = computed(() => gameStore.player.role === 'teacher')
-const data = computed(() => gameStore.weeklyPreviewData)
+const data = computed(() => gameStore.notifications.weeklyPreviewData)
 
 const subjectNames = {
   literature: '语文', math: '数学', english: '英语',
@@ -17,8 +17,8 @@ const subjectIcons = {
 }
 
 function close() {
-  gameStore.showWeeklyPreview = false
-  gameStore.lastViewedWeeklyPreview = gameStore.lastWeeklyPreviewWeek
+  gameStore.notifications.showWeeklyPreview = false
+  gameStore.notifications.lastViewedWeeklyPreview = gameStore.notifications.lastWeeklyPreviewWeek
 }
 
 function getDeltaColor(d) {
@@ -34,7 +34,7 @@ function getDeltaArrow(d) {
 </script>
 
 <template>
-  <div v-if="gameStore.showWeeklyPreview && data" class="weekly-overlay" @click.self="close">
+  <div v-if="gameStore.notifications.showWeeklyPreview && data" class="weekly-overlay" @click.self="close">
     <div class="weekly-modal">
       <div class="weekly-header">
         <span class="weekly-title">📅 第 {{ data.week }} 周学业回顾</span>

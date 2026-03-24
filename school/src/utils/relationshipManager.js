@@ -31,9 +31,9 @@ function debounceSaveSocialData(_partialData) {
     _debounceSaveTimer = null
     try {
       const gameStore = useGameStore()
-      const runId = gameStore.currentRunId
-      if (runId && runId !== 'temp_editing' && gameStore.npcRelationships) {
-        const snapshot = JSON.parse(JSON.stringify(gameStore.npcRelationships))
+      const runId = gameStore.meta.currentRunId
+      if (runId && runId !== 'temp_editing' && gameStore.world.npcRelationships) {
+        const snapshot = JSON.parse(JSON.stringify(gameStore.world.npcRelationships))
         saveNpcRelationships(runId, snapshot).catch(e =>
           console.error('[RelationshipManager] IndexedDB save failed:', e)
         )
@@ -56,9 +56,9 @@ export async function flushPendingSocialData() {
   }
   try {
     const gameStore = useGameStore()
-    const runId = gameStore.currentRunId
-    if (runId && runId !== 'temp_editing' && gameStore.npcRelationships) {
-      const snapshot = JSON.parse(JSON.stringify(gameStore.npcRelationships))
+    const runId = gameStore.meta.currentRunId
+    if (runId && runId !== 'temp_editing' && gameStore.world.npcRelationships) {
+      const snapshot = JSON.parse(JSON.stringify(gameStore.world.npcRelationships))
       await saveNpcRelationships(runId, snapshot)
     }
   } catch (e) {
@@ -88,8 +88,8 @@ export function lookupGender(charName, gameStore) {
     try { gameStore = useGameStore() } catch (e) { return 'unknown' }
   }
   
-  if (gameStore.allClassData) {
-    for (const classData of Object.values(gameStore.allClassData)) {
+  if (gameStore.world.allClassData) {
+    for (const classData of Object.values(gameStore.world.allClassData)) {
       // 检查班主任
       if (classData.headTeacher && classData.headTeacher.name === charName && classData.headTeacher.gender) {
         return classData.headTeacher.gender
@@ -108,8 +108,8 @@ export function lookupGender(charName, gameStore) {
   }
   
   // 从 npcs 数组查找
-  if (gameStore.npcs) {
-    const npc = gameStore.npcs.find(n => n.name === charName)
+  if (gameStore.world.npcs) {
+    const npc = gameStore.world.npcs.find(n => n.name === charName)
     if (npc && npc.gender) return npc.gender
   }
   
@@ -128,7 +128,7 @@ export async function initializeRelationships() {
   // 但为了避免覆盖运行时变化，我们只在初始化为空时完整构建，
   // 或者在显式刷新时调用（目前这里是初始化）
   
-  if (gameStore.npcRelationships && Object.keys(gameStore.npcRelationships).length > 0) {
+  if (gameStore.world.npcRelationships && Object.keys(gameStore.world.npcRelationships).length > 0) {
     console.log('[RelationshipManager] Relationships already initialized, supplementing missing gender...')
     // 即使已初始化，也补充缺失的 gender 字段（存档加载后可能丢失）
     _supplementMissingGender(gameStore)
@@ -152,8 +152,8 @@ export async function initializeRelationships() {
     let customPersonality = null
     let charGender = 'female' // 默认为女性
 
-    if (gameStore.allClassData) {
-      for (const classData of Object.values(gameStore.allClassData)) {
+    if (gameStore.world.allClassData) {
+      for (const classData of Object.values(gameStore.world.allClassData)) {
         // 检查班主任
         if (classData.headTeacher && classData.headTeacher.name === charName) {
           if (classData.headTeacher.personality) customPersonality = classData.headTeacher.personality
@@ -223,7 +223,7 @@ export async function initializeRelationships() {
   expandGenericRelationships(relationships, gameStore)
   
   // 保存到gameStore
-  gameStore.npcRelationships = relationships
+  gameStore.world.npcRelationships = relationships
   
   console.log(`[RelationshipManager] Initialized ${allCharacters.length} characters`)
   
@@ -236,11 +236,11 @@ export async function initializeRelationships() {
  * 从 allClassData 中查找并填充
  */
 function _supplementMissingGender(gameStore) {
-  if (!gameStore.npcRelationships) return
+  if (!gameStore.world.npcRelationships) return
   
   let supplemented = 0
-  for (const charName of Object.keys(gameStore.npcRelationships)) {
-    const charData = gameStore.npcRelationships[charName]
+  for (const charName of Object.keys(gameStore.world.npcRelationships)) {
+    const charData = gameStore.world.npcRelationships[charName]
     if (!charData.gender || charData.gender === 'unknown') {
       const gender = lookupGender(charName, gameStore)
       if (gender !== 'unknown') {
@@ -268,7 +268,7 @@ function expandGenericRelationships(relationships, gameStore) {
     // 1. 偶像们 (1-E, 2-E, 3-E 的学生)
     if (groupName === '偶像们') {
       ['1-E', '2-E', '3-E'].forEach(classId => {
-        const classData = gameStore.allClassData[classId]
+        const classData = gameStore.world.allClassData[classId]
         if (classData && classData.students) {
           classData.students.forEach(s => members.add(s.name))
         }
@@ -276,7 +276,7 @@ function expandGenericRelationships(relationships, gameStore) {
     }
     // 2. 学生们 (全校学生)
     else if (groupName === '学生们') {
-      Object.values(gameStore.allClassData).forEach(classData => {
+      Object.values(gameStore.world.allClassData).forEach(classData => {
         if (classData.students) {
           classData.students.forEach(s => members.add(s.name))
         }
@@ -285,7 +285,7 @@ function expandGenericRelationships(relationships, gameStore) {
     // 3. 社团成员 (同一社团的其他成员)
     else if (groupName === '社团成员') {
       // 找到源角色所在的社团
-      Object.values(gameStore.allClubs).forEach(club => {
+      Object.values(gameStore.world.allClubs).forEach(club => {
         if (club.members && club.members.includes(sourceName)) {
           club.members.forEach(m => members.add(m))
         }
@@ -294,7 +294,7 @@ function expandGenericRelationships(relationships, gameStore) {
     // 4. 特定社团/团体
     else {
       // 尝试匹配社团名称
-      const club = Object.values(gameStore.allClubs).find(c => c.name === groupName || c.name.includes(groupName))
+      const club = Object.values(gameStore.world.allClubs).find(c => c.name === groupName || c.name.includes(groupName))
       if (club && club.members) {
         club.members.forEach(m => members.add(m))
       }
@@ -316,7 +316,7 @@ function expandGenericRelationships(relationships, gameStore) {
       }
       if (groupName === '剧团') {
          // 演剧部
-         const dramaClub = Object.values(gameStore.allClubs).find(c => c.name === '演剧部')
+         const dramaClub = Object.values(gameStore.world.allClubs).find(c => c.name === '演剧部')
          if (dramaClub) dramaClub.members.forEach(m => members.add(m))
       }
     }
@@ -380,8 +380,8 @@ export function getAllCharacterNames(gameStore) {
   }
   
   // 从班级数据中收集
-  if (gameStore.allClassData) {
-    for (const classData of Object.values(gameStore.allClassData)) {
+  if (gameStore.world.allClassData) {
+    for (const classData of Object.values(gameStore.world.allClassData)) {
       // 班主任
       if (classData.headTeacher && classData.headTeacher.name) {
         names.add(classData.headTeacher.name)
@@ -402,8 +402,8 @@ export function getAllCharacterNames(gameStore) {
   }
   
   // 从社团数据中收集
-  if (gameStore.allClubs) {
-    for (const club of Object.values(gameStore.allClubs)) {
+  if (gameStore.world.allClubs) {
+    for (const club of Object.values(gameStore.world.allClubs)) {
       if (club.advisor) names.add(club.advisor)
       if (club.president) names.add(club.president)
       if (club.vicePresident) names.add(club.vicePresident)
@@ -416,8 +416,8 @@ export function getAllCharacterNames(gameStore) {
   }
   
   // 从 NPC 列表中收集（作为备选数据源，确保在 allClassData/allClubs 为空时也能获取角色）
-  if (gameStore.npcs && gameStore.npcs.length > 0) {
-    for (const npc of gameStore.npcs) {
+  if (gameStore.world.npcs && gameStore.world.npcs.length > 0) {
+    for (const npc of gameStore.world.npcs) {
       if (npc.name) names.add(npc.name)
     }
   }
@@ -432,7 +432,7 @@ export function getAllCharacterNames(gameStore) {
  */
 export function getCharacterData(charName) {
   const gameStore = useGameStore()
-  return gameStore.npcRelationships?.[charName] || null
+  return gameStore.world.npcRelationships?.[charName] || null
 }
 
 /**
@@ -443,7 +443,7 @@ export function getCharacterData(charName) {
  */
 export function getRelationship(sourceName, targetName) {
   const gameStore = useGameStore()
-  return gameStore.npcRelationships?.[sourceName]?.relations?.[targetName] || null
+  return gameStore.world.npcRelationships?.[sourceName]?.relations?.[targetName] || null
 }
 
 /**
@@ -456,8 +456,8 @@ export function setRelationship(sourceName, targetName, relationData) {
   const gameStore = useGameStore()
   
   // 确保源角色存在
-  if (!gameStore.npcRelationships[sourceName]) {
-    gameStore.npcRelationships[sourceName] = {
+  if (!gameStore.world.npcRelationships[sourceName]) {
+    gameStore.world.npcRelationships[sourceName] = {
       personality: { order: 0, altruism: 0, tradition: 0, peace: 50 },
       goals: { immediate: '', shortTerm: '', longTerm: '' },
       priorities: { academics: 50, social: 50, hobbies: 50, survival: 50, club: 50 },
@@ -488,7 +488,7 @@ export function setRelationship(sourceName, targetName, relationData) {
   }
 
   // 设置关系
-  gameStore.npcRelationships[sourceName].relations[targetName] = newRelation
+  gameStore.world.npcRelationships[sourceName].relations[targetName] = newRelation
   
   // 检查是否需要同步到社交APP
   syncSocialAppFriend(sourceName, targetName, relationData)
@@ -636,14 +636,14 @@ export function removeCharacter(charName, immediate = false) {
   const gameStore = useGameStore()
   
   // 删除该角色的关系数据
-  if (gameStore.npcRelationships[charName]) {
-    delete gameStore.npcRelationships[charName]
+  if (gameStore.world.npcRelationships[charName]) {
+    delete gameStore.world.npcRelationships[charName]
   }
   
   // 删除其他角色对该角色的关系
-  for (const otherName in gameStore.npcRelationships) {
-    if (gameStore.npcRelationships[otherName].relations?.[charName]) {
-      delete gameStore.npcRelationships[otherName].relations[charName]
+  for (const otherName in gameStore.world.npcRelationships) {
+    if (gameStore.world.npcRelationships[otherName].relations?.[charName]) {
+      delete gameStore.world.npcRelationships[otherName].relations[charName]
     }
   }
   
@@ -675,14 +675,14 @@ export function removeRelationship(sourceName, targetName, immediate = true) {
   const gameStore = useGameStore()
   
   // 删除 source -> target 的关系
-  if (gameStore.npcRelationships[sourceName]?.relations?.[targetName]) {
-    delete gameStore.npcRelationships[sourceName].relations[targetName]
+  if (gameStore.world.npcRelationships[sourceName]?.relations?.[targetName]) {
+    delete gameStore.world.npcRelationships[sourceName].relations[targetName]
     console.log(`[RelationshipManager] Removed relation: ${sourceName} -> ${targetName}`)
   }
   
   // 删除 target -> source 的反向关系
-  if (gameStore.npcRelationships[targetName]?.relations?.[sourceName]) {
-    delete gameStore.npcRelationships[targetName].relations[sourceName]
+  if (gameStore.world.npcRelationships[targetName]?.relations?.[sourceName]) {
+    delete gameStore.world.npcRelationships[targetName].relations[sourceName]
     console.log(`[RelationshipManager] Removed reverse relation: ${targetName} -> ${sourceName}`)
   }
   
@@ -737,12 +737,12 @@ function syncSocialAppFriend(sourceName, targetName, relationData) {
  */
 export function updatePersonality(charName, personality) {
   const gameStore = useGameStore()
-  if (gameStore.npcRelationships[charName]) {
+  if (gameStore.world.npcRelationships[charName]) {
     const newPersonality = {
-      ...gameStore.npcRelationships[charName].personality,
+      ...gameStore.world.npcRelationships[charName].personality,
       ...personality
     }
-    gameStore.npcRelationships[charName].personality = newPersonality
+    gameStore.world.npcRelationships[charName].personality = newPersonality
     
     // 使用防抖机制同步到世界书
     const partialData = {}
@@ -756,12 +756,12 @@ export function updatePersonality(charName, personality) {
  */
 export function updateGoals(charName, goals) {
   const gameStore = useGameStore()
-  if (gameStore.npcRelationships[charName]) {
+  if (gameStore.world.npcRelationships[charName]) {
     const newGoals = {
-      ...gameStore.npcRelationships[charName].goals,
+      ...gameStore.world.npcRelationships[charName].goals,
       ...goals
     }
-    gameStore.npcRelationships[charName].goals = newGoals
+    gameStore.world.npcRelationships[charName].goals = newGoals
 
     // 使用防抖机制同步到世界书
     const partialData = {}
@@ -775,12 +775,12 @@ export function updateGoals(charName, goals) {
  */
 export function updatePriorities(charName, priorities) {
   const gameStore = useGameStore()
-  if (gameStore.npcRelationships[charName]) {
+  if (gameStore.world.npcRelationships[charName]) {
     const newPriorities = {
-      ...gameStore.npcRelationships[charName].priorities,
+      ...gameStore.world.npcRelationships[charName].priorities,
       ...priorities
     }
-    gameStore.npcRelationships[charName].priorities = newPriorities
+    gameStore.world.npcRelationships[charName].priorities = newPriorities
 
     // 使用防抖机制同步到世界书
     const partialData = {}
@@ -794,7 +794,7 @@ export function updatePriorities(charName, priorities) {
  */
 export function getCharacterRelationsList(charName) {
   const gameStore = useGameStore()
-  const charData = gameStore.npcRelationships?.[charName]
+  const charData = gameStore.world.npcRelationships?.[charName]
   
   if (!charData || !charData.relations) return []
   
@@ -812,7 +812,7 @@ export function getRelatedCharacters(charName) {
   const related = new Set()
   
   // 该角色对其他角色的关系
-  const charData = gameStore.npcRelationships?.[charName]
+  const charData = gameStore.world.npcRelationships?.[charName]
   if (charData?.relations) {
     for (const targetName of Object.keys(charData.relations)) {
       related.add(targetName)
@@ -820,7 +820,7 @@ export function getRelatedCharacters(charName) {
   }
   
   // 其他角色对该角色的关系
-  for (const [otherName, otherData] of Object.entries(gameStore.npcRelationships || {})) {
+  for (const [otherName, otherData] of Object.entries(gameStore.world.npcRelationships || {})) {
     if (otherName !== charName && otherData.relations?.[charName]) {
       related.add(otherName)
     }
@@ -843,7 +843,7 @@ export function exportRelationshipsForWorldbook() {
   const gameStore = useGameStore()
   const lines = ['# 角色关系网络', '# 格式: 源角色|目标角色|亲密度|信赖度|激情度|敌意度|分组|标签', '']
   
-  for (const [sourceName, charData] of Object.entries(gameStore.npcRelationships || {})) {
+  for (const [sourceName, charData] of Object.entries(gameStore.world.npcRelationships || {})) {
     if (!charData.relations) continue
     
     for (const [targetName, relation] of Object.entries(charData.relations)) {
@@ -890,12 +890,12 @@ export function importRelationshipsFromWorldbook(content) {
 export async function clearAllRelationships() {
   const gameStore = useGameStore()
 
-  if (!gameStore.npcRelationships) return
+  if (!gameStore.world.npcRelationships) return
 
   // 清空所有关系，但保留角色基本信息
-  for (const charName in gameStore.npcRelationships) {
-    if (gameStore.npcRelationships[charName].relations) {
-      gameStore.npcRelationships[charName].relations = {}
+  for (const charName in gameStore.world.npcRelationships) {
+    if (gameStore.world.npcRelationships[charName].relations) {
+      gameStore.world.npcRelationships[charName].relations = {}
     }
   }
 
@@ -914,7 +914,7 @@ export async function clearAllRelationships() {
 export async function syncRelationshipsToWorldbook() {
   try {
     const gameStore = useGameStore()
-    await saveSocialData(gameStore.npcRelationships)
+    await saveSocialData(gameStore.world.npcRelationships)
     console.log('[RelationshipManager] Synced relationships to worldbook')
   } catch (e) {
     console.error('[RelationshipManager] Failed to sync to worldbook:', e)

@@ -18,7 +18,7 @@ import {
 const emit = defineEmits(['close'])
 const gameStore = useGameStore()
 
-const isSelectionMode = computed(() => gameStore.mapSelectionMode)
+const isSelectionMode = computed(() => gameStore._ui.mapSelectionMode)
 
 const currentParentId = ref('tianhua_high_school') // 默认显示天华学园
 const path = ref([]) // 导航路径
@@ -44,7 +44,7 @@ const selectedNpcForTracking = ref(null)
 const npcUpdateTrigger = ref(0) // 用于强制刷新NPC数据的触发器
 
 // 监听游戏时间变化，更新NPC位置
-watch(() => gameStore.gameTime.hour, () => {
+watch(() => gameStore.world.gameTime.hour, () => {
   updateAllNpcLocations(gameStore, true)
   npcUpdateTrigger.value++
 })

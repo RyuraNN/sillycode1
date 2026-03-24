@@ -39,7 +39,7 @@ export const schoolRuleActions = {
       status: 'active' as const,
       targets: rule.targets,
       createdAt: Date.now(),
-      createdFloor: self.currentFloor || 0,
+      createdFloor: self.meta.currentFloor || 0,
       isWeird: rule.isWeird || false
     }
 
@@ -49,7 +49,7 @@ export const schoolRuleActions = {
     self.player.schoolRules.push(newRule)
 
     // 同步世界书
-    saveSchoolRulesToWorldbook(self.player.schoolRules, self.currentRunId)
+    saveSchoolRulesToWorldbook(self.player.schoolRules, self.meta.currentRunId)
 
     // 保存到存储
     self.saveToStorage()
@@ -84,7 +84,7 @@ export const schoolRuleActions = {
     Object.assign(rule, updates)
 
     // 同步世界书
-    saveSchoolRulesToWorldbook(self.player.schoolRules, self.currentRunId)
+    saveSchoolRulesToWorldbook(self.player.schoolRules, self.meta.currentRunId)
 
     // 保存到存储
     self.saveToStorage()
@@ -110,7 +110,7 @@ export const schoolRuleActions = {
     rule.status = rule.status === 'active' ? 'paused' : 'active'
 
     // 同步世界书
-    saveSchoolRulesToWorldbook(self.player.schoolRules, self.currentRunId)
+    saveSchoolRulesToWorldbook(self.player.schoolRules, self.meta.currentRunId)
 
     // 保存到存储
     self.saveToStorage()
@@ -136,7 +136,7 @@ export const schoolRuleActions = {
     self.player.schoolRules.splice(index, 1)
 
     // 同步世界书
-    saveSchoolRulesToWorldbook(self.player.schoolRules, self.currentRunId)
+    saveSchoolRulesToWorldbook(self.player.schoolRules, self.meta.currentRunId)
 
     // 保存到存储
     self.saveToStorage()

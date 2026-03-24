@@ -7,7 +7,7 @@ const MOMENT_PREFIX = '[Moment:'
 // 获取当前运行 ID
 function getCurrentRunId() {
   const gameStore = useGameStore()
-  return gameStore.currentRunId || 'default'
+  return gameStore.meta.currentRunId || 'default'
 }
 
 // 生成条目前缀 [Social:runId:
@@ -233,7 +233,7 @@ export async function saveSocialData(id, name, data, keys = [], floor = 0) {
       const friend = gameStore.player.social.friends.find(f => f.id === memberId)
       if (friend) return friend.name
       // 如果不是好友，尝试从 NPC 列表获取（这里假设 NPC 列表存在且包含所有 NPC）
-      const npc = gameStore.npcs.find(n => n.id === memberId)
+      const npc = gameStore.world.npcs.find(n => n.id === memberId)
       if (npc) return npc.name
       return null
     }).filter(n => n)
@@ -251,7 +251,7 @@ export async function saveSocialData(id, name, data, keys = [], floor = 0) {
       if (memberId === 'player') return gameStore.player.name
       const friend = gameStore.player.social.friends.find(f => f.id === memberId)
       if (friend) return friend.name
-      const npc = gameStore.npcs.find(n => n.id === memberId)
+      const npc = gameStore.world.npcs.find(n => n.id === memberId)
       if (npc) return npc.name
       return null
     }).filter(n => n)
@@ -459,7 +459,7 @@ export async function syncSocialToStore() {
           
           let lastMsg = ''
           let lastTime = ''
-          if (data.messages && data.messages.length > 0) {
+          if (data.messages.length > 0) {
             const last = data.messages[data.messages.length - 1]
             lastMsg = last.content
             // 文本格式丢失了时间，这里可能为空
@@ -527,7 +527,7 @@ export async function saveSocialRelationshipOverview() {
           if (memberId === 'player') return gameStore.player.name
           const friend = gameStore.player.social.friends.find(f => f.id === memberId)
           if (friend) return friend.name
-          const npc = gameStore.npcs.find(n => n.id === memberId)
+          const npc = gameStore.world.npcs.find(n => n.id === memberId)
           if (npc) return npc.name
           return null
         }).filter(n => n)
@@ -659,7 +659,7 @@ export async function restoreWorldbookFromStore() {
   const runId = getCurrentRunId()
   const chatPrefix = getEntryPrefix(runId)
   const momentPrefix = getMomentPrefix(runId)
-  const currentFloor = gameStore.currentFloor || 0
+  const currentFloor = gameStore.meta.currentFloor || 0
 
   console.log(`[SocialWorldbook] Restoring worldbook from store (Floor: ${currentFloor})`)
 
@@ -732,7 +732,7 @@ export async function restoreWorldbookFromStore() {
                   if (memberId === 'player') return gameStore.player.name
                   const friend = gameStore.player.social.friends.find(f => f.id === memberId)
                   if (friend) return friend.name
-                  const npc = gameStore.npcs.find(n => n.id === memberId)
+                  const npc = gameStore.world.npcs.find(n => n.id === memberId)
                   if (npc) return npc.name
                   return null
                 }).filter(n => n)
@@ -780,7 +780,7 @@ export async function restoreWorldbookFromStore() {
                 if (memberId === 'player') return gameStore.player.name
                 const friend = gameStore.player.social.friends.find(f => f.id === memberId)
                 if (friend) return friend.name
-                const npc = gameStore.npcs.find(n => n.id === memberId)
+                const npc = gameStore.world.npcs.find(n => n.id === memberId)
                 if (npc) return npc.name
                 return null
             }).filter(n => n)

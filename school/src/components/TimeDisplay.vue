@@ -12,7 +12,7 @@ const locationName = computed(() => {
 })
 
 const formattedTime = computed(() => {
-  const time = gameStore.gameTime || {}
+  const time = gameStore.world.gameTime || {}
   const year = time.year ?? 2024
   const month = time.month ?? 4
   const day = time.day ?? 1

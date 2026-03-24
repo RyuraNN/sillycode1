@@ -51,7 +51,7 @@ const todoStats = computed(() => getMatchingStats(gameStore))
 
 // 批量补齐小总结
 const startBatchSummaryGeneration = async () => {
-  if (!gameStore.currentChatLog || gameStore.currentChatLog.length === 0) {
+  if (!gameStore._ui.currentChatLog || gameStore._ui.currentChatLog.length === 0) {
     alert('没有聊天记录可供处理')
     return
   }
@@ -68,7 +68,7 @@ const startBatchSummaryGeneration = async () => {
   const shouldEmbed = autoEmbedAfterBatch.value && gameStore.settings.ragSystem?.enabled
 
   try {
-    await generateBatchSummaries(gameStore.currentChatLog, (current, total) => {
+    await generateBatchSummaries(gameStore._ui.currentChatLog, (current, total) => {
       batchProgress.value = { current, total }
     }, { autoEmbed: shouldEmbed })
     alert('小总结补齐完成！')
@@ -244,17 +244,17 @@ const totalUnreadCount = computed(() => {
 const scheduleUnreadCount = computed(() => {
   let count = 0
   // 未查看的考试
-  if (gameStore.unviewedExamIds?.length) {
-    count += gameStore.unviewedExamIds.length
+  if (gameStore.notifications.unviewedExamIds?.length) {
+    count += gameStore.notifications.unviewedExamIds.length
   }
   // 未查看的周报
-  if (gameStore.weeklyPreviewData && gameStore.lastWeeklyPreviewWeek > (gameStore.lastViewedWeeklyPreview || 0)) {
+  if (gameStore.notifications.weeklyPreviewData && gameStore.notifications.lastWeeklyPreviewWeek > (gameStore.notifications.lastViewedWeeklyPreview || 0)) {
     count += 1
   }
   // 未查看的社团（新社团数 - 已查看数）
-  const allClubs = gameStore.allClubs || {}
+  const allClubs = gameStore.world.allClubs || {}
   const allClubIds = Object.keys(allClubs)
-  const viewedClubIds = gameStore.viewedClubIds || []
+  const viewedClubIds = gameStore.notifications.viewedClubIds || []
   const unviewedClubs = allClubIds.filter(id => !viewedClubIds.includes(id))
   if (unviewedClubs.length > 0) {
     count += unviewedClubs.length
@@ -316,8 +316,8 @@ const apps = computed(() => {
 
 // 游戏内时间显示
 const currentTime = computed(() => {
-    const hour = String(gameStore.gameTime.hour || 8).padStart(2, '0')
-    const minute = String(gameStore.gameTime.minute || 0).padStart(2, '0')
+    const hour = String(gameStore.world.gameTime.hour || 8).padStart(2, '0')
+    const minute = String(gameStore.world.gameTime.minute || 0).padStart(2, '0')
     return `${hour}:${minute}`
 })
 
@@ -634,7 +634,7 @@ const handleHomeClick = () => {
                       <h3 class="section-title">待办事项管理</h3>
                       <div class="setting-item">
                         <span class="setting-label">匹配模式</span>
-                        <select v-model="gameStore.todoMatchingMode" @change="gameStore.saveToStorage()" class="mode-select">
+                        <select v-model="gameStore.notifications.todoMatchingMode" @change="gameStore.saveToStorage()" class="mode-select">
                           <option value="keyword">关键词</option>
                           <option value="index">索引</option>
                         </select>
