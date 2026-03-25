@@ -56,7 +56,8 @@ export function createInitialState(): GameState {
       npcRelationships: {},
       graduatedNpcs: [],
       lastAcademicYear: 0,
-      characterNotes: {}
+      characterNotes: {},
+      npcMemories: {}
     },
 
     // ── 玩家数据 ──
@@ -257,10 +258,12 @@ export function createInitialState(): GameState {
       customContentTags: ['content', '正文', 'gametxt', 'game', 'response'],
       assistantAI: {
         enabled: false,
+        provider: 'custom',
         apiUrl: '',
         apiKey: '',
         model: '',
-        temperature: 0.85
+        temperature: 0.85,
+        channelConfigs: {}
       },
       summarySystem: {
         enabled: true,
@@ -322,6 +325,7 @@ export function createInitialState(): GameState {
       mapSelectionCallback: null,
       saveError: null as string | null,
       saveSnapshots: [],
+      mpSaveSnapshots: [],
       currentChatLog: [],
       pendingRestoreLog: null,
       worldbookLoadResults: {

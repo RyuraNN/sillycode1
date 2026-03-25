@@ -7,6 +7,10 @@ import { requestPersistence, clearAllData } from './utils/indexedDB'
 import { loadCoursePoolFromWorldbook } from './data/coursePoolData'
 import { isWorldbookAvailable, getCurrentBookName } from './utils/worldbookHelper'
 import { getErrorMessage } from './utils/errorUtils'
+import { handleAuthCallback, isAuthenticated as checkAuth, getAuthInfo } from './utils/multiplayerAuth'
+
+const isLoggedIn = ref(false)
+const authInfo = ref(null)
 
 const gameStore = useGameStore()
 
@@ -217,6 +221,25 @@ async function onSkipCacheAndContinue() {
 }
 
 onMounted(async () => {
+  // 处理 Discord OAuth 回调
+  const hash = window.location.hash
+  if (hash.includes('mp-auth')) {
+    const params = new URLSearchParams(hash.split('?')[1] || '')
+    const token = params.get('token')
+    const authError = params.get('error')
+    if (token) {
+      handleAuthCallback(token)
+      console.log('[App] Discord auth token stored')
+    } else if (authError) {
+      console.warn('[App] Discord auth error:', authError)
+    }
+    // 清理 URL hash
+    history.replaceState(null, '', window.location.pathname)
+  }
+  // 初始化登录状态
+  isLoggedIn.value = checkAuth()
+  authInfo.value = getAuthInfo()
+
   // 自动轮询等待世界书就绪（逐步递增间隔，最多约 30 秒）
   // SillyTavern 加载世界书条目内容需要时间，不能仅凭名称就判定就绪
   const pollDelays = [300, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5000]
@@ -316,7 +339,10 @@ watch(() => gameStore.settings.darkMode, (isDark) => {
     <SplashScreen
       v-if="showSplashScreen"
       :load-results="gameStore._ui.worldbookLoadResults"
+      :is-logged-in="isLoggedIn"
+      :auth-info="authInfo"
       @enter="onEnterGame"
+      @auth-change="() => { isLoggedIn = checkAuth(); authInfo = getAuthInfo() }"
     />
 
     <HomeLayout v-if="!showSplashScreen && !isInitializing" />

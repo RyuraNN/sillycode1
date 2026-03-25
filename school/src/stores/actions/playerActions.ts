@@ -6,6 +6,7 @@ import type { PlayerStats, NpcStats, SummaryData } from '../gameStoreTypes'
 import { getIdByName } from '../../data/mapData'
 import { generateCharId } from '../../data/relationshipData'
 import { updatePartTimeWorldbookEntry } from '../../utils/partTimeWorldbook'
+import { syncLocationChange } from '../../utils/multiplayerSync'
 
 export const playerActions = {
   /**
@@ -208,6 +209,7 @@ export const playerActions = {
    */
   setLocation(this: any, locationId: string) {
     this.player.location = locationId
+    syncLocationChange(locationId)
   },
 
   /**
@@ -224,6 +226,7 @@ export const playerActions = {
     if (data.location) {
       const locationId = getIdByName(data.location) || data.location
       this.player.location = locationId
+      syncLocationChange(locationId)
     }
     if (data.time) {
       const current = new Date(

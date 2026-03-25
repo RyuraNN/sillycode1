@@ -1,0 +1,426 @@
+/**
+ * Multiplayer Store - 联机状态管理
+ * 独立于 gameStore，管理所有联机相关的运行时状态
+ */
+import { defineStore } from 'pinia'
+import type {
+  RemotePlayerInfo,
+  RoomInfo,
+  RoomSettings,
+  MultiplayerChatMessage,
+  ConversationGroup,
+  VoteData,
+  TurnAction,
+  TimeWarning,
+  NpcMemoryEntry,
+  WorldbookBackup,
+  ChatLogEntry,
+} from './gameStoreTypes'
+
+export const useMultiplayerStore = defineStore('multiplayer', {
+  state: () => ({
+    // ── 连接状态 ──
+    isConnected: false,
+    isConnecting: false,
+    connectionError: null as string | null,
+
+    // ── 房间信息 ──
+    roomId: null as string | null,
+    roomName: null as string | null,
+    roomSettings: null as RoomSettings | null,
+    isHost: false,
+    hostId: null as string | null,
+    hostName: null as string | null,
+    gameMode: 'normal' as string,
+
+    // ── 玩家 ──
+    players: {} as Record<string, RemotePlayerInfo>,
+    localPlayerId: null as string | null,
+
+    // ── 对话组 ──
+    conversationGroup: null as ConversationGroup | null,
+    pendingTurnActions: [] as TurnAction[],
+    turnPending: false,         // 是否正在等待其他玩家行动
+    turnTimeout: 0,             // 剩余等待秒数
+    turnInitiator: null as string | null, // 发起本轮的玩家
+    typingPlayers: {} as Record<string, string>, // playerId → playerName
+    actionPhase: 'idle' as 'idle' | 'phase1' | 'typing' | 'warning' | 'submitted', // 非 host 行动阶段
+
+    // ── 时间同步 ──
+    roundNumber: 0,
+    roundStatus: 'idle' as 'idle' | 'waiting' | 'in_progress' | 'completed',
+    timeWarning: null as TimeWarning | null,
+
+    // ── 观战 ──
+    isSpectating: false,
+    spectateTarget: null as string | null,
+    spectateLog: [] as ChatLogEntry[],
+    pendingSpectateRequest: null as { playerId: string; playerName: string } | null,
+
+    // ── 聊天 ──
+    worldChat: [] as MultiplayerChatMessage[],
+    unreadCount: 0,
+    chatChannel: 'public' as string,
+
+    // ── 投票 ──
+    activeVote: null as VoteData | null,
+
+    // ── 世界书备份 ──
+    worldbookBackups: [] as WorldbookBackup[],
+    hostWorldbookHash: null as string | null,
+
+    // ── NPC 记忆（联机共享） ──
+    sharedNpcMemories: {} as Record<string, NpcMemoryEntry[]>,
+
+    // ── 同地点玩家 ──
+    playersAtMyLocation: [] as Array<{ playerId: string; playerName: string }>,
+
+    // ── 房主断线 ──
+    hostDisconnected: false,
+    hostDisconnectTime: null as number | null,
+
+    // ── 网络 ──
+    latency: 0,
+
+    // ── 离线玩家追踪 ──
+    offlinePlayers: {} as Record<string, { playerId: string; playerName: string; disconnectedAt: number; lastLocation?: string }>,
+
+    // ── UI 控制 ──
+    showLobby: false,
+    showChat: false,
+    showHUD: true,
+    showSpectateList: false,
+  }),
+
+  getters: {
+    playerCount: (state) => Object.keys(state.players).length,
+
+    playerList: (state) => Object.values(state.players),
+
+    otherPlayers: (state) => {
+      return Object.values(state.players).filter(p => p.playerId !== state.localPlayerId)
+    },
+
+    isInConversationGroup: (state) => !!state.conversationGroup,
+
+    conversationMembers: (state) => {
+      if (!state.conversationGroup) return []
+      return state.conversationGroup.memberIds
+        .map(id => state.players[id])
+        .filter(Boolean)
+    },
+
+    isMultiplayerActive: (state) => state.isConnected && !!state.roomId,
+  },
+
+  actions: {
+    // ── Welcome 处理 ──
+    handleWelcome(data: {
+      roomInfo: RoomInfo
+      players: RemotePlayerInfo[]
+      recentChat: any[]
+      hostWorldbookHash: string | null
+      npcMemories: Record<string, NpcMemoryEntry[]>
+      isHost: boolean
+    }) {
+      this.roomId = data.roomInfo.roomId
+      this.roomName = data.roomInfo.roomName
+      this.roomSettings = data.roomInfo.settings
+      this.isHost = data.isHost
+      this.hostId = data.roomInfo.hostId
+      this.hostName = data.roomInfo.hostName
+      this.gameMode = data.roomInfo.settings?.gameMode || 'normal'
+      this.isConnected = true
+      this.isConnecting = false
+      this.connectionError = null
+      this.hostDisconnected = false
+
+      // 设置玩家列表
+      this.players = {}
+      for (const p of data.players) {
+        this.players[p.playerId] = p
+      }
+
+      // 聊天记录
+      this.worldChat = (data.recentChat || []).map((m: any) => ({
+        playerId: m.player_id,
+        playerName: m.player_name,
+        content: m.content,
+        channel: m.channel || 'public',
+        createdAt: m.created_at,
+      }))
+
+      // 世界书 hash
+      this.hostWorldbookHash = data.hostWorldbookHash
+
+      // NPC 记忆
+      this.sharedNpcMemories = data.npcMemories || {}
+    },
+
+    // ── 玩家加入/离开 ──
+    handlePlayerJoined(data: RemotePlayerInfo) {
+      this.players[data.playerId] = data
+
+      // 如果是重连的离线玩家，计算离线时长并触发成长事件
+      const offline = this.offlinePlayers[data.playerId]
+      if (offline) {
+        const offlineDurationMs = Date.now() - offline.disconnectedAt
+        delete this.offlinePlayers[data.playerId]
+
+        // 发出自定义事件，让 offlineGrowth 处理
+        if (offlineDurationMs > 60_000) { // 至少离线 1 分钟才触发
+          window.dispatchEvent(new CustomEvent('mp:player_reconnected', {
+            detail: {
+              playerId: data.playerId,
+              playerName: data.playerName,
+              offlineDurationMs,
+              lastLocation: offline.lastLocation
+            }
+          }))
+        }
+      }
+    },
+
+    handlePlayerLeft(data: { playerId: string; playerName: string }) {
+      // 记录离线玩家信息
+      const player = this.players[data.playerId]
+      this.offlinePlayers[data.playerId] = {
+        playerId: data.playerId,
+        playerName: data.playerName,
+        disconnectedAt: Date.now(),
+        lastLocation: player?.location
+      }
+
+      delete this.players[data.playerId]
+
+      // 如果在对话组中，移除
+      if (this.conversationGroup) {
+        this.conversationGroup.memberIds = this.conversationGroup.memberIds.filter(
+          id => id !== data.playerId
+        )
+        if (this.conversationGroup.memberIds.length <= 1) {
+          this.conversationGroup = null
+        }
+      }
+    },
+
+    // ── 聊天 ──
+    handleChat(data: { content: string; channel: string }, from: string, fromName: string) {
+      this.worldChat.push({
+        playerId: from,
+        playerName: fromName,
+        content: data.content,
+        channel: data.channel,
+        createdAt: Date.now(),
+      })
+
+      // 限制本地聊天记录条数
+      if (this.worldChat.length > 200) {
+        this.worldChat = this.worldChat.slice(-200)
+      }
+
+      if (!this.showChat) {
+        this.unreadCount++
+      }
+    },
+
+    // ── 玩家 features 更新 ──
+    handleFeatureUpdate(data: { playerId: string; features: { assistantAI: boolean; rag: boolean; summary: boolean } }) {
+      const player = this.players[data.playerId]
+      if (player) {
+        player.features = data.features
+      }
+    },
+
+    // ── 信任等级变更 ──
+    handleTrustLevelChange(data: { playerId: string; trustLevel: string; reason?: string }) {
+      const player = this.players[data.playerId]
+      if (player) {
+        player.trustLevel = data.trustLevel as any
+      }
+    },
+
+    // ── 玩家状态更新 ──
+    handlePlayerUpdate(data: { stats: Partial<RemotePlayerInfo> }, from: string) {
+      const player = this.players[from]
+      if (player) {
+        Object.assign(player, data.stats)
+      }
+    },
+
+    // ── 位置变更 ──
+    handleLocationChange(data: { location: string }, from: string) {
+      const player = this.players[from]
+      if (player) {
+        player.location = data.location
+      }
+    },
+
+    // ── 同地点玩家更新 ──
+    handlePlayersAtLocation(data: { locationId: string; players: Array<{ playerId: string; playerName: string }> }) {
+      this.playersAtMyLocation = data.players.filter(p => p.playerId !== this.localPlayerId)
+    },
+
+    // ── 对话组 ──
+    handleConversationJoined(data: { groupId: string; playerId: string; playerName: string; group: ConversationGroup }) {
+      this.conversationGroup = data.group
+    },
+
+    handleConversationLeft(data: { playerId: string; playerName: string; groupId: string }) {
+      if (this.conversationGroup) {
+        this.conversationGroup.memberIds = this.conversationGroup.memberIds.filter(
+          id => id !== data.playerId
+        )
+        if (this.conversationGroup.memberIds.length <= 1) {
+          this.conversationGroup = null
+        }
+      }
+    },
+
+    // ── 回合 ──
+    handleTurnPending(data: { groupId: string; initiator: string; timeout: number }) {
+      this.turnPending = true
+      this.turnTimeout = data.timeout
+      this.turnInitiator = data.initiator
+    },
+
+    handleTurnAdvance(data: { roundNumber: number }) {
+      this.roundNumber = data.roundNumber
+      this.roundStatus = 'idle'
+      this.timeWarning = null
+    },
+
+    handleTimeWarning(data: TimeWarning) {
+      this.timeWarning = data
+    },
+
+    // ── NPC 记忆 ──
+    handleNpcMemoryUpdate(data: { npcName: string; memory: NpcMemoryEntry }) {
+      if (!this.sharedNpcMemories[data.npcName]) {
+        this.sharedNpcMemories[data.npcName] = []
+      }
+      this.sharedNpcMemories[data.npcName].push(data.memory)
+
+      // 限制每个 NPC 最多 50 条记忆
+      if (this.sharedNpcMemories[data.npcName].length > 50) {
+        this.sharedNpcMemories[data.npcName] = this.sharedNpcMemories[data.npcName].slice(-50)
+      }
+    },
+
+    // ── 投票 ──
+    handleVoteStart(data: VoteData) {
+      this.activeVote = { ...data, myVote: undefined }
+    },
+
+    handleVoteResult(data: { winner: string; counts: Record<string, number>; newHostId?: string; newHostName?: string }) {
+      if (this.activeVote) {
+        this.activeVote.result = data.winner
+        this.activeVote.counts = data.counts
+      }
+
+      // 如果选举了新房主
+      if (data.newHostId) {
+        this.hostId = data.newHostId
+        this.hostName = data.newHostName || null
+        this.isHost = data.newHostId === this.localPlayerId
+        this.hostDisconnected = false
+      }
+
+      // 3 秒后清除投票
+      setTimeout(() => {
+        this.activeVote = null
+      }, 3000)
+    },
+
+    // ── 房主断线 ──
+    handleHostDisconnected() {
+      this.hostDisconnected = true
+      this.hostDisconnectTime = Date.now()
+    },
+
+    handleHostReconnected() {
+      this.hostDisconnected = false
+      this.hostDisconnectTime = null
+    },
+
+    // ── 观战 ──
+    handleSpectateResponse(data: { approved: boolean; targetId: string; targetName: string }) {
+      if (data.approved) {
+        this.isSpectating = true
+        this.spectateTarget = data.targetId
+      }
+    },
+
+    handleSpectateStream(data: { chatLog: ChatLogEntry[] }) {
+      this.spectateLog = data.chatLog
+    },
+
+    // ── 房间设置更新 ──
+    handleRoomUpdate(data: { settings: RoomSettings }) {
+      this.roomSettings = data.settings
+    },
+
+    // ── 重置 ──
+    reset() {
+      this.isConnected = false
+      this.isConnecting = false
+      this.connectionError = null
+      this.roomId = null
+      this.roomName = null
+      this.roomSettings = null
+      this.isHost = false
+      this.hostId = null
+      this.hostName = null
+      this.players = {}
+      this.conversationGroup = null
+      this.pendingTurnActions = []
+      this.turnPending = false
+      this.roundNumber = 0
+      this.roundStatus = 'idle'
+      this.timeWarning = null
+      this.isSpectating = false
+      this.spectateTarget = null
+      this.spectateLog = []
+      this.worldChat = []
+      this.unreadCount = 0
+      this.activeVote = null
+      this.hostDisconnected = false
+      this.hostDisconnectTime = null
+      this.sharedNpcMemories = {}
+      this.playersAtMyLocation = []
+      this.offlinePlayers = {}
+      this.showLobby = false
+      this.latency = 0
+    },
+
+    // ── 世界书备份管理 ──
+    loadBackups() {
+      try {
+        const stored = localStorage.getItem('school_worldbook_backups')
+        if (stored) {
+          this.worldbookBackups = JSON.parse(stored)
+        }
+      } catch (e) {
+        console.error('[MultiplayerStore] Failed to load worldbook backups:', e)
+      }
+    },
+
+    saveBackupMeta(backup: WorldbookBackup) {
+      this.worldbookBackups.push(backup)
+      // 最多保留 20 个备份
+      if (this.worldbookBackups.length > 20) {
+        this.worldbookBackups = this.worldbookBackups.slice(-20)
+      }
+      localStorage.setItem('school_worldbook_backups', JSON.stringify(this.worldbookBackups))
+    },
+
+    removeBackupMeta(backupId: string) {
+      this.worldbookBackups = this.worldbookBackups.filter(b => b.id !== backupId)
+      localStorage.setItem('school_worldbook_backups', JSON.stringify(this.worldbookBackups))
+    },
+
+    hasBackups(): boolean {
+      return this.worldbookBackups.length > 0
+    },
+  }
+})

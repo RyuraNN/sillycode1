@@ -32,7 +32,9 @@ export interface SaveSnapshot {
   }
   location?: string
   cardEdition?: string    // 'elyrene' | 'original' | 'unknown'
-  gameVersion?: string    
+  gameVersion?: string
+  saveMode?: 'single' | 'multiplayer'  // 存档模式：单人 / 联机（仅房主）
+  roomId?: string                       // 联机房间 ID（仅联机存档）
 }
 
 /** 纯游戏状态数据（用于存档序列化，自动排除 settings 和 _ui） */
@@ -847,6 +849,7 @@ export interface GameState {
     graduatedNpcs: GraduatedNpc[]
     lastAcademicYear: number
     characterNotes: Record<string, string>
+    npcMemories: Record<string, NpcMemoryEntry[]>
   }
 
   // ── 玩家数据 ──
@@ -919,10 +922,12 @@ export interface GameState {
     customContentTags: string[]
     assistantAI: {
       enabled: boolean
+      provider: string
       apiUrl: string
       apiKey: string
       model: string
       temperature: number
+      channelConfigs: Record<string, { apiUrl: string; apiKey: string; model: string }>
     }
     summarySystem: SummarySystemSettings
     ragSystem: RAGSettings
@@ -962,6 +967,7 @@ export interface GameState {
     mapSelectionCallback: ((location: string) => void) | null
     saveError: string | null
     saveSnapshots: SaveSnapshot[]
+    mpSaveSnapshots: SaveSnapshot[]
     currentChatLog: ChatLogEntry[]
     pendingRestoreLog: ChatLogEntry[] | null
     worldbookLoadResults: {
@@ -981,5 +987,134 @@ export interface GameState {
   }
 }
 
-/** 联机同步用的公开玩家状态（未来扩展） */
-export type PublicPlayerState = Pick<PlayerStats, 'name' | 'gender' | 'role' | 'level' | 'avatar' | 'classId' | 'location' | 'equipment' | 'outfitSlots'>
+/** 联机同步用的公开玩家状态 */
+export type PublicPlayerState = Pick<PlayerStats, 'name' | 'gender' | 'role' | 'level' | 'avatar' | 'classId' | 'location' | 'equipment' | 'outfitSlots' | 'gameMode'>
+
+// ==================== 联机系统相关 ====================
+
+/** NPC 短期记忆条目 */
+export interface NpcMemoryEntry {
+  time: string           // 游戏内时间字符串，如 "4月1日 14:30"
+  content: string        // 记忆内容（NPC 第一人称）
+  witness: string[]      // 在场玩家名列表
+  floor: number          // 记录时的楼层
+  timestamp?: number     // 真实时间戳
+}
+
+/** 联机模式下的对话组 */
+export interface ConversationGroup {
+  groupId: string
+  hostPlayerId: string   // 使用其 AI 的玩家
+  memberIds: string[]    // 所有成员（含 host）
+  locationId: string
+  sharedNpcs: string[]   // 合并的 isAlive NPC 名字列表
+}
+
+/** 世界书备份条目 */
+export interface WorldbookBackup {
+  id: string
+  timestamp: number
+  source: 'multiplayer_sync' | 'manual' | 'restore_swap' | 'initial'
+  roomId?: string
+  hostName?: string
+  entryCount: number
+  dataKey: string        // IndexedDB 存储 key
+  label?: string         // 用户可读标签
+}
+
+/** 玩家系统功能状态 */
+export interface PlayerFeatures {
+  assistantAI: boolean
+  rag: boolean
+  summary: boolean
+}
+
+/** 信任等级 */
+export type TrustLevel = 'anonymous' | 'logged_in' | 'member' | 'verified'
+
+/** 远程玩家信息（联机 HUD 用） */
+export interface RemotePlayerInfo {
+  playerId: string
+  playerName: string
+  role: 'student' | 'teacher'
+  classId: string
+  avatar: string
+  location: string
+  joinedAt: number
+  trustLevel?: TrustLevel
+  features?: PlayerFeatures
+}
+
+/** 房间设置 */
+export interface RoomSettings {
+  maxPlayers: number
+  isPublic: boolean
+  password: string | null
+  gameMode: string
+  allowSpectators: boolean
+}
+
+/** 房间信息（从服务端返回） */
+export interface RoomInfo {
+  roomId: string
+  roomName: string
+  hostId: string
+  hostName: string
+  createdAt: number
+  settings: RoomSettings
+  gameTime: any | null
+  weekNumber: number
+  playerCount?: number
+  players?: RemotePlayerInfo[]
+}
+
+/** 公开房间列表项 */
+export interface PublicRoomListItem {
+  room_id: string
+  room_name: string
+  host_name: string
+  game_mode: string
+  player_count: number
+  max_players: number
+  game_time: string | null
+  week_number: number
+  host_features: string | null
+  created_at: number
+  updated_at: number
+}
+
+/** 联机聊天消息 */
+export interface MultiplayerChatMessage {
+  id?: number
+  playerId: string
+  playerName: string
+  content: string
+  channel: string        // 'public' | 'whisper:{targetId}' | 'location:{locId}'
+  createdAt: number
+}
+
+/** 投票数据 */
+export interface VoteData {
+  voteId: string
+  type: string
+  options: string[]
+  timeout: number
+  myVote?: string
+  counts?: Record<string, number>
+  result?: string
+}
+
+/** 回合行动（合并对话用） */
+export interface TurnAction {
+  playerId: string
+  playerName: string
+  content: string
+  isSkip: boolean
+}
+
+/** 时间同步警告 */
+export interface TimeWarning {
+  diff: number
+  baseDelta: number
+  yourDelta: number
+}

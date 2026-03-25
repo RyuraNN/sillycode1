@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { fetchModels, IMAGE_ANALYSIS_PROMPT, validateAssistantAIConfig, callAssistantAI } from '../utils/assistantAI'
+import { PROVIDER_PRESETS, getProviderList, fetchProviderModels, switchProviderConfig } from '../utils/aiProviders'
 import { DEFAULT_INSTRUCTIONS_PROMPT, DEFAULT_STYLE_PROMPT, DEFAULT_CORE_RULES_PROMPT, DEFAULT_BANNED_WORDS_PROMPT } from '../utils/prompts'
 import { GAME_VERSION } from '../utils/editionDetector'
 import { getMatchingStats } from '../utils/todoManager'
@@ -195,6 +196,16 @@ const testAssistantAIConfig = async () => {
   }
 }
 
+const providerOptions = getProviderList()
+let previousProvider = gameStore.settings.assistantAI.provider || 'custom'
+
+const onProviderChange = () => {
+  const newProvider = gameStore.settings.assistantAI.provider || 'custom'
+  modelList.value = switchProviderConfig(gameStore.settings.assistantAI, previousProvider, newProvider)
+  previousProvider = newProvider
+  gameStore.saveToStorage()
+}
+
 const loadModels = async () => {
   if (!gameStore.settings.assistantAI.apiUrl || !gameStore.settings.assistantAI.apiKey) {
     alert('请先填写 API 地址和 Key')
@@ -202,7 +213,8 @@ const loadModels = async () => {
   }
   isLoadingModels.value = true
   try {
-    const models = await fetchModels(gameStore.settings.assistantAI.apiUrl, gameStore.settings.assistantAI.apiKey)
+    const provider = gameStore.settings.assistantAI.provider || 'custom'
+    const models = await fetchProviderModels(provider, gameStore.settings.assistantAI.apiUrl, gameStore.settings.assistantAI.apiKey)
     modelList.value = models
     if (models.length > 0 && !gameStore.settings.assistantAI.model) {
       gameStore.settings.assistantAI.model = models[0].id
@@ -760,12 +772,24 @@ const loadRerankModels = async () => {
             <transition name="expand">
               <div v-if="gameStore.settings.assistantAI.enabled" class="sub-settings">
                 <div class="input-group">
+                  <label class="input-label">服务商</label>
+                  <select 
+                    v-model="gameStore.settings.assistantAI.provider" 
+                    class="model-select"
+                    @change="onProviderChange"
+                  >
+                    <option v-for="p in providerOptions" :key="p.key" :value="p.key">{{ p.label }}</option>
+                  </select>
+                </div>
+
+                <div class="input-group">
                   <label class="input-label">API 地址</label>
                   <input 
                     type="text" 
                     v-model="gameStore.settings.assistantAI.apiUrl" 
-                    placeholder="例如: https://api.openai.com/v1" 
+                    :placeholder="PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.baseUrl || 'https://api.openai.com/v1'" 
                     class="text-input"
+                    :disabled="gameStore.settings.assistantAI.provider !== 'custom' && PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.baseUrl"
                     @change="gameStore.saveToStorage()"
                   >
                 </div>
@@ -775,11 +799,15 @@ const loadRerankModels = async () => {
                   <input 
                     type="password" 
                     v-model="gameStore.settings.assistantAI.apiKey" 
-                    placeholder="sk-..." 
+                    :placeholder="PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.placeholder || 'sk-...'" 
                     class="text-input"
                     @change="gameStore.saveToStorage()"
                   >
                 </div>
+
+                <p v-if="PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.note" class="setting-hint" style="color: #d97706; margin: 4px 0 8px;">
+                  {{ PROVIDER_PRESETS[gameStore.settings.assistantAI.provider].note }}
+                </p>
 
                 <div class="input-group">
                   <label class="input-label">模型</label>
@@ -787,7 +815,7 @@ const loadRerankModels = async () => {
                     <input 
                       type="text" 
                       v-model="gameStore.settings.assistantAI.model" 
-                      placeholder="gpt-3.5-turbo" 
+                      :placeholder="PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.models?.[0] || 'model-name'" 
                       class="text-input flex-1"
                       @change="gameStore.saveToStorage()"
                     >
@@ -1541,6 +1569,11 @@ const loadRerankModels = async () => {
   font-size: 0.9rem;
   outline: none;
   margin-top: 8px;
+}
+
+.model-select option {
+  background: #2d2835;
+  color: white;
 }
 
 /* 范围行 */

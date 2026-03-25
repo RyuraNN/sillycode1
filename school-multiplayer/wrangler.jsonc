@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "school-multiplayer",
+  "main": "src/index.js",
+  "compatibility_date": "2025-03-01",
+  "workers_dev": false,
+  "routes": [
+    { "pattern": "mpschool-api.elyreneworks.site", "custom_domain": true }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SCHOOL_ROOM",
+        "class_name": "SchoolRoom"
+      },
+      {
+        "name": "ROOM_INDEX",
+        "class_name": "RoomIndex"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["SchoolRoom", "RoomIndex"]
+    }
+  ]
+}

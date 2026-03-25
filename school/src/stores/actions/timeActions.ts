@@ -4,6 +4,8 @@
 
 import { getTermInfo } from '../../utils/scheduleGenerator'
 import { updateAllNpcLocations, initializeScheduleSystem } from '../../utils/npcScheduleSystem'
+import { useMultiplayerStore } from '../multiplayerStore'
+import { sendTurnComplete } from '../../utils/multiplayerWs'
 
 // 时间推进锁，防止递归调用
 let _isAdvancingTime = false
@@ -121,6 +123,14 @@ export const timeActions = {
           this.addCommand(`[系统] 外卖已送达: ${itemNames}`)
         })
       }
+
+      // 联机模式：报告时间推进
+      try {
+        const mpStore = useMultiplayerStore()
+        if (mpStore.isMultiplayerActive) {
+          sendTurnComplete(minutes, { ...this.world.gameTime })
+        }
+      } catch (_) { /* store not ready */ }
     } finally {
       _isAdvancingTime = false
     }

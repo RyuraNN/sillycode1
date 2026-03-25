@@ -17,18 +17,36 @@ import GameMain from './GameMain.vue'
 import MapEditorPanel from './MapEditorPanel.vue'
 import EventEditorPanel from './EventEditorPanel.vue'
 import NpcScheduleEditorPanel from './NpcScheduleEditorPanel.vue'
+import MultiplayerLobby from './MultiplayerLobby.vue'
+import MultiplayerChat from './MultiplayerChat.vue'
+import MultiplayerHUD from './MultiplayerHUD.vue'
+import WorldbookBackupPanel from './WorldbookBackupPanel.vue'
+import { useMultiplayerStore } from '../stores/multiplayerStore'
+import { sendVote } from '../utils/multiplayerWs'
 
 const gameStore = useGameStore()
-const currentView = ref('menu') // 'menu', 'start', 'load', 'settings', 'game'
+const mpStore = useMultiplayerStore()
+const currentView = ref('menu') // 'menu', 'start', 'load', 'settings', 'multiplayer', 'game'
 const showMapEditor = ref(false)
 const showEventEditor = ref(false)
 const showScheduleEditor = ref(false)
 const showResetModal = ref(false)
 const resetConfirmText = ref('')
 const isResetting = ref(false)
+const showWorldbookBackups = ref(false)
+
+// 加载世界书备份元数据
+mpStore.loadBackups()
 
 const showMenu = () => {
   currentView.value = 'menu'
+}
+
+const handleOpenLobby = () => {
+  // 在游戏中时不切换到大厅（避免中断游戏），仅在非游戏视图允许
+  if (currentView.value !== 'game') {
+    currentView.value = 'multiplayer'
+  }
 }
 
 const startGame = async () => {
@@ -205,6 +223,8 @@ async function resetGame() {
         <button class="menu-btn" @click="currentView = 'start'">开始游戏</button>
         <button class="menu-btn" @click="currentView = 'load'">读取存档</button>
         <button class="menu-btn" @click="currentView = 'settings'">游戏设置</button>
+        <button class="menu-btn mp-btn" @click="currentView = 'multiplayer'">联机模式</button>
+        <button v-if="mpStore.worldbookBackups.length > 0" class="menu-btn wb-restore-btn" @click="showWorldbookBackups = true">恢复世界书</button>
       </div>
 
       <label class="gemini-mode-toggle" :class="{ active: gameStore.settings.useGeminiMode }">
@@ -224,6 +244,11 @@ async function resetGame() {
         @restore="handleRestore"
       />
       <Settings v-if="currentView === 'settings'" @back="showMenu" />
+      <MultiplayerLobby
+        v-if="currentView === 'multiplayer'"
+        @back="showMenu"
+        @enter-game="startGame"
+      />
     </div>
     
     <!-- 地图编辑器层 -->
@@ -241,6 +266,20 @@ async function resetGame() {
       v-if="showScheduleEditor"
       @close="showScheduleEditor = false"
     />
+
+    <!-- 联机 HUD + 聊天：Teleport 到 body，避免被 .home-layout > * 的 position:relative 覆盖 -->
+    <Teleport to="body">
+      <MultiplayerHUD
+        v-if="mpStore.isMultiplayerActive"
+        @open-lobby="handleOpenLobby"
+        @open-chat="() => {}"
+        @vote="(opt) => sendVote(opt)"
+      />
+      <MultiplayerChat v-if="mpStore.isMultiplayerActive && mpStore.showChat" />
+    </Teleport>
+
+    <!-- 世界书备份管理 -->
+    <WorldbookBackupPanel v-if="showWorldbookBackups" @close="showWorldbookBackups = false" />
 
     <!-- 重置确认弹窗 -->
     <div v-if="showResetModal" class="reset-modal-overlay" @click.self="showResetModal = false">
@@ -553,6 +592,47 @@ async function resetGame() {
 
 .gemini-mode-toggle:hover {
   color: rgba(255, 248, 220, 0.8);
+}
+
+.menu-btn.mp-btn {
+  background: linear-gradient(135deg, 
+    rgba(99, 102, 180, 0.3) 0%, 
+    rgba(120, 100, 160, 0.35) 50%,
+    rgba(99, 102, 180, 0.3) 100%);
+  border-color: rgba(180, 170, 220, 0.4);
+}
+
+.menu-btn.mp-btn:hover {
+  background: linear-gradient(135deg, 
+    rgba(120, 115, 200, 0.4) 0%, 
+    rgba(140, 120, 180, 0.45) 50%,
+    rgba(120, 115, 200, 0.4) 100%);
+  border-color: rgba(200, 190, 240, 0.55);
+  box-shadow: 
+    0 8px 30px rgba(120, 115, 200, 0.2),
+    0 4px 15px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.menu-btn.wb-restore-btn {
+  background: linear-gradient(135deg,
+    rgba(80, 130, 110, 0.3) 0%,
+    rgba(90, 150, 120, 0.35) 50%,
+    rgba(80, 130, 110, 0.3) 100%);
+  border-color: rgba(140, 200, 170, 0.4);
+  font-size: 0.85rem;
+}
+
+.menu-btn.wb-restore-btn:hover {
+  background: linear-gradient(135deg,
+    rgba(90, 160, 130, 0.4) 0%,
+    rgba(100, 180, 140, 0.45) 50%,
+    rgba(90, 160, 130, 0.4) 100%);
+  border-color: rgba(150, 210, 180, 0.55);
+  box-shadow:
+    0 8px 30px rgba(90, 160, 130, 0.2),
+    0 4px 15px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 .reset-btn {

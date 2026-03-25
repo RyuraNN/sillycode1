@@ -21,6 +21,18 @@ import {
 import { detectCardEdition, GAME_VERSION } from '../../utils/editionDetector'
 import { getErrorMessage, getErrorName } from '../../utils/errorUtils'
 import { collectGameStateFromStore, applyGameStateToStore, isLegacyGameState, migrateGameStateData } from '../../utils/gameStateMigration'
+import { useMultiplayerStore } from '../multiplayerStore'
+
+/** 检测当前是否为联机房主模式 */
+function getMultiplayerContext(): { isMultiplayer: boolean; roomId: string | null } {
+  try {
+    const mpStore = useMultiplayerStore()
+    if (mpStore.isConnected && mpStore.isHost && mpStore.roomId) {
+      return { isMultiplayer: true, roomId: mpStore.roomId }
+    }
+  } catch { /* store not ready */ }
+  return { isMultiplayer: false, roomId: null }
+}
 
 /**
  * 精简 chatLog 拷贝，移除冗余字段
@@ -120,7 +132,17 @@ export const snapshotActions = {
       gameVersion: GAME_VERSION
     }
 
-    this._ui.saveSnapshots.push(snapshot)
+    // 联机房主存档路由到 mpSaveSnapshots
+    const mpCtx = getMultiplayerContext()
+    if (mpCtx.isMultiplayer) {
+      snapshot.saveMode = 'multiplayer'
+      snapshot.roomId = mpCtx.roomId!
+      snapshot.label = label || `联机存档 ${this._ui.mpSaveSnapshots.length + 1}`
+      this._ui.mpSaveSnapshots.push(snapshot)
+    } else {
+      snapshot.saveMode = 'single'
+      this._ui.saveSnapshots.push(snapshot)
+    }
     this.saveToStorage(true)
 
     // 后台触发自动清理
@@ -176,10 +198,11 @@ export const snapshotActions = {
       const { saveSnapshotData } = await import('../../utils/indexedDB')
       await saveSnapshotData(autoSaveId, { gameState })
 
+      const mpCtx = getMultiplayerContext()
       const snapshot: SaveSnapshot = {
         id: autoSaveId,
         timestamp: Date.now(),
-        label: `自动存档 (${this.player.name})`,
+        label: mpCtx.isMultiplayer ? `联机自动存档 (${this.player.name})` : `自动存档 (${this.player.name})`,
         messageIndex,
         gameTime: {
           year: this.world.gameTime.year,
@@ -190,15 +213,19 @@ export const snapshotActions = {
         },
         location: this.player.location,
         cardEdition: detectCardEdition(),
-        gameVersion: GAME_VERSION
+        gameVersion: GAME_VERSION,
+        saveMode: mpCtx.isMultiplayer ? 'multiplayer' : 'single',
+        roomId: mpCtx.roomId || undefined
       }
 
-      const existingIndex = this._ui.saveSnapshots.findIndex((s: SaveSnapshot) => s.id === autoSaveId)
+      // 联机房主自动存档路由到 mpSaveSnapshots
+      const targetArray = mpCtx.isMultiplayer ? this._ui.mpSaveSnapshots : this._ui.saveSnapshots
+      const existingIndex = targetArray.findIndex((s: SaveSnapshot) => s.id === autoSaveId)
 
       if (existingIndex !== -1) {
-        this._ui.saveSnapshots[existingIndex] = snapshot
+        targetArray[existingIndex] = snapshot
       } else {
-        this._ui.saveSnapshots.unshift(snapshot)
+        targetArray.unshift(snapshot)
       }
 
       this.saveToStorage()

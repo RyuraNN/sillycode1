@@ -17,6 +17,10 @@ import { getCoursePoolState, getElectiveCourses, getRequiredCourses, UNIVERSAL_E
 import { generateIndependentTeacherSchedule, getTermInfo, LOCATION_NAMES } from '../utils/scheduleGenerator'
 import { mapData, setMapData } from '../data/mapData'
 
+const props = defineProps({
+  mode: { type: String, default: 'single' }, // 'single' | 'multiplayer'
+  initialPreset: { type: Object, default: null } // 联机模式下自动加载的预设
+})
 const emit = defineEmits(['back', 'startGame'])
 const gameStore = useGameStore()
 
@@ -29,6 +33,11 @@ onMounted(async () => {
     }
   }
   loadPresetsFromStorage()
+  // 联机模式下自动加载传入的预设
+  if (props.initialPreset?.data) {
+    await nextTick()
+    await applyPreset(props.initialPreset)
+  }
 })
 
 const showProfile = ref(false)
@@ -1160,7 +1169,7 @@ const confirmSignature = async () => {
   <div class="game-start-wrapper">
     <div class="paper-panel">
       <div class="header-section">
-        <div class="header-actions">
+        <div v-if="props.mode !== 'multiplayer'" class="header-actions">
           <button class="action-btn small" @click="showCourseEditor = true">编辑课程表</button>
           <button class="action-btn small" @click="showFilterPanel = true">筛选全校名册</button>
           <button class="action-btn small" @click="showScheduleEditor = true">角色日程编辑器</button>
@@ -1168,7 +1177,7 @@ const confirmSignature = async () => {
           <button class="action-btn small highlight" @click="showTransferPanel = true">导出/导入设置</button>
         </div>
         <img src="https://files.catbox.moe/efg1xe.png" alt="School Logo" class="school-logo" />
-        <h1 class="doc-title">入学通知书</h1>
+        <h1 class="doc-title">{{ props.mode === 'multiplayer' ? '联机角色创建' : '入学通知书' }}</h1>
       </div>
       
       <div class="content-section">

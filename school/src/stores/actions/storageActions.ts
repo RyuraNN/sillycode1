@@ -492,6 +492,21 @@ export const storageActions = {
       // 快照加载失败不影响其他功能
     }
 
+    // Step 1.5: 加载联机存档列表
+    try {
+      const mpSnapshots = await withTimeout(
+        getItem('school_game_mp_snapshots'),
+        5000,
+        'load mp snapshots'
+      )
+      if (mpSnapshots && Array.isArray(mpSnapshots)) {
+        this._ui.mpSaveSnapshots = mpSnapshots
+        console.log(`[GameStore] Loaded ${mpSnapshots.length} multiplayer snapshots`)
+      }
+    } catch (e) {
+      console.warn('[GameStore] Failed to load MP snapshots:', e)
+    }
+
     // Step 2: 加载设置
     try {
       const settings = await withTimeout(
@@ -595,6 +610,10 @@ export const storageActions = {
         await setItem('school_game_snapshots', JSON.parse(JSON.stringify(this._ui.saveSnapshots)))
         await setItem('school_game_settings', JSON.parse(JSON.stringify(this.settings)))
         await setItem('school_game_run_id', this.meta.currentRunId)
+        // 联机存档独立保存
+        if (this._ui.mpSaveSnapshots.length > 0) {
+          await setItem('school_game_mp_snapshots', JSON.parse(JSON.stringify(this._ui.mpSaveSnapshots)))
+        }
       } catch (e) {
         console.error('Failed to save to storage', e)
         this._ui.saveError = getErrorMessage(e, '存档保存失败')

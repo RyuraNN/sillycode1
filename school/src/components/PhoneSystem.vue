@@ -2,6 +2,9 @@
 import { defineEmits, ref, onMounted, onUnmounted, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { fetchModels, IMAGE_ANALYSIS_PROMPT } from '../utils/assistantAI'
+import { PROVIDER_PRESETS, getProviderList, fetchProviderModels, switchProviderConfig } from '../utils/aiProviders'
+import { useMultiplayerStore } from '../stores/multiplayerStore'
+import { disconnect as mpDisconnect } from '../utils/multiplayerWs'
 import { generateBatchSummaries, generateBatchDiaries } from '../utils/summaryManager'
 import { batchEmbedSummaries } from '../utils/ragService'
 import { setVariableParsingWorldbookStatus } from '../utils/worldbookParser'
@@ -23,8 +26,10 @@ import OriginApp from './OriginApp.vue'
 import SchoolRuleApp from './SchoolRuleApp.vue'
 import RagDiagnosticsPanel from './RagDiagnosticsPanel.vue'
 
-const emit = defineEmits(['close', 'open-app', 'variable-modified'])
+const emit = defineEmits(['close', 'open-app', 'variable-modified', 'exit-room'])
 const gameStore = useGameStore()
+const mpStore = useMultiplayerStore()
+const isMultiplayer = computed(() => mpStore.isMultiplayerActive)
 
 const currentApp = ref(null)
 const customWallpaper = ref(null) // 自定义壁纸 Base64
@@ -262,6 +267,16 @@ const scheduleUnreadCount = computed(() => {
   return count
 })
 
+const providerOptions = getProviderList()
+let previousProvider = gameStore.settings.assistantAI.provider || 'custom'
+
+const onProviderChange = () => {
+  const newProvider = gameStore.settings.assistantAI.provider || 'custom'
+  modelList.value = switchProviderConfig(gameStore.settings.assistantAI, previousProvider, newProvider)
+  previousProvider = newProvider
+  gameStore.saveToStorage()
+}
+
 const loadModels = async () => {
   if (!gameStore.settings.assistantAI.apiUrl || !gameStore.settings.assistantAI.apiKey) {
     alert('请先填写 API 地址和 Key')
@@ -269,7 +284,8 @@ const loadModels = async () => {
   }
   isLoadingModels.value = true
   try {
-    const models = await fetchModels(gameStore.settings.assistantAI.apiUrl, gameStore.settings.assistantAI.apiKey)
+    const provider = gameStore.settings.assistantAI.provider || 'custom'
+    const models = await fetchProviderModels(provider, gameStore.settings.assistantAI.apiUrl, gameStore.settings.assistantAI.apiKey)
     modelList.value = models
     if (models.length > 0 && !gameStore.settings.assistantAI.model) {
       gameStore.settings.assistantAI.model = models[0].id
@@ -300,6 +316,9 @@ const allApps = [
   { id: 'exit', name: '主菜单', icon: '🚪', color: 'linear-gradient(135deg, #ff3b30 0%, #ff453a 100%)' }
 ]
 
+// 联机模式下禁用的 APP
+const MP_DISABLED_APPS = ['save', 'load', 'origin']
+
 const apps = computed(() => {
   return allApps.filter(app => {
     // 教师模式隐藏兼职APP
@@ -310,7 +329,17 @@ const apps = computed(() => {
     if (app.id === 'schoolrule' && gameStore.player.role !== 'teacher') {
       return false
     }
+    // 联机模式下隐藏存档/读档/本源
+    if (isMultiplayer.value && MP_DISABLED_APPS.includes(app.id)) {
+      return false
+    }
     return true
+  }).map(app => {
+    // 联机模式下将「主菜单」改为「退出房间」
+    if (isMultiplayer.value && app.id === 'exit') {
+      return { ...app, name: '退出房间', icon: '🚪' }
+    }
+    return app
   })
 })
 
@@ -331,6 +360,15 @@ onUnmounted(() => {
 })
 
 const handleAppClick = (appId) => {
+  // 联机模式下 exit 改为退出房间（带二次确认）
+  if (appId === 'exit' && isMultiplayer.value) {
+    if (confirm('确定要退出当前联机房间吗？退出后将断开与其他玩家的连接。')) {
+      mpDisconnect()
+      emit('close')
+      emit('exit-room')
+    }
+    return
+  }
   if (appId === 'social') {
     currentApp.value = 'social'
   } else if (appId === 'calendar') {
@@ -493,7 +531,7 @@ const handleHomeClick = () => {
                   <PartTimeJobApp @close="currentApp = null" />
                 </div>
                 <div v-else-if="currentApp === 'roster'" class="app-container roster-app-container">
-                  <RosterApp @close="currentApp = null" />
+                  <RosterApp @close="currentApp = null" :readOnly="isMultiplayer" />
                 </div>
                 <div v-else-if="currentApp === 'schoolrule'" class="app-container schoolrule-app-container">
                   <SchoolRuleApp @close="currentApp = null" />
@@ -661,17 +699,23 @@ const handleHomeClick = () => {
                       
                       <div v-if="gameStore.settings.assistantAI.enabled" class="assistant-settings">
                         <div class="input-row">
+                          <label>服务商</label>
+                          <select v-model="gameStore.settings.assistantAI.provider" @change="onProviderChange" class="provider-select">
+                            <option v-for="p in providerOptions" :key="p.key" :value="p.key">{{ p.label }}</option>
+                          </select>
+                        </div>
+                        <div class="input-row">
                           <label>API 地址</label>
-                          <input type="text" v-model="gameStore.settings.assistantAI.apiUrl" placeholder="例如: https://api.openai.com/v1" @change="gameStore.saveToStorage()">
+                          <input type="text" v-model="gameStore.settings.assistantAI.apiUrl" :placeholder="PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.baseUrl || 'https://api.openai.com/v1'" @change="gameStore.saveToStorage()" :disabled="gameStore.settings.assistantAI.provider !== 'custom' && PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.baseUrl">
                         </div>
                         <div class="input-row">
                           <label>API Key</label>
-                          <input type="password" v-model="gameStore.settings.assistantAI.apiKey" placeholder="sk-..." @change="gameStore.saveToStorage()">
+                          <input type="password" v-model="gameStore.settings.assistantAI.apiKey" :placeholder="PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.placeholder || 'sk-...'" @change="gameStore.saveToStorage()">
                         </div>
                         <div class="input-row">
                           <label>模型</label>
                           <div class="model-select">
-                            <input type="text" v-model="gameStore.settings.assistantAI.model" placeholder="gpt-3.5-turbo" @change="gameStore.saveToStorage()">
+                            <input type="text" v-model="gameStore.settings.assistantAI.model" :placeholder="PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.models?.[0] || 'model-name'" @change="gameStore.saveToStorage()">
                             <button class="action-btn secondary small-btn" @click="loadModels" :disabled="isLoadingModels">
                               {{ isLoadingModels ? '...' : '拉取' }}
                             </button>
@@ -682,6 +726,9 @@ const handleHomeClick = () => {
                             <option v-for="m in modelList" :key="m.id" :value="m.id">{{ m.id }}</option>
                           </select>
                         </div>
+                        <p v-if="PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.note" class="hint" style="color: #d97706;">
+                          {{ PROVIDER_PRESETS[gameStore.settings.assistantAI.provider].note }}
+                        </p>
                         <div class="input-row">
                           <label>温度: {{ gameStore.settings.assistantAI.model?.toLowerCase().includes('gpt') ? '1 (GPT固定)' : gameStore.settings.assistantAI.temperature }}</label>
                           <div class="slider-container">
@@ -1809,6 +1856,7 @@ const handleHomeClick = () => {
   border: 1px solid #e5e5ea;
   background: #f2f2f7;
   font-size: 14px;
+  color: #000;
   box-sizing: border-box;
 }
 
@@ -1821,13 +1869,14 @@ const handleHomeClick = () => {
   flex: 1;
 }
 
-.model-list-hint select {
+.provider-select, .model-list-hint select, .mode-select {
   width: 100%;
   padding: 8px;
   border-radius: 8px;
   border: 1px solid #e5e5ea;
   background: #f2f2f7;
   font-size: 14px;
+  color: #000;
 }
 
 .hint {
@@ -2033,7 +2082,8 @@ const handleHomeClick = () => {
 .phone-anchor-name {
   min-width: 55px;
   font-size: 12px;
-  color: #e0e0e0;
+  color: #333;
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2042,10 +2092,10 @@ const handleHomeClick = () => {
   flex: 1;
   font-size: 11px;
   padding: 3px 6px;
-  background: rgba(255,255,255,0.1);
-  border: 1px solid rgba(255,255,255,0.2);
+  background: #f2f2f7;
+  border: 1px solid #e5e5ea;
   border-radius: 4px;
-  color: white;
+  color: #000;
 }
 .phone-anchor-remove {
   background: none;
@@ -2070,10 +2120,10 @@ const handleHomeClick = () => {
 .phone-anchor-add-row input {
   font-size: 11px;
   padding: 3px 6px;
-  background: rgba(255,255,255,0.1);
-  border: 1px solid rgba(255,255,255,0.2);
+  background: #f2f2f7;
+  border: 1px solid #e5e5ea;
   border-radius: 4px;
-  color: white;
+  color: #000;
 }
 .phone-anchor-confirm {
   background: none;

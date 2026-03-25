@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
+import { useMultiplayerStore } from '../stores/multiplayerStore'
 import { getEditionShortLabel, GAME_VERSION } from '../utils/editionDetector'
 import { getErrorMessage } from '../utils/errorUtils'
 
@@ -19,6 +20,10 @@ const props = defineProps({
 const emit = defineEmits(['close', 'restore'])
 
 const gameStore = useGameStore()
+const mpStore = useMultiplayerStore()
+
+// 存档视图模式：单人 / 联机
+const saveViewMode = ref('single') // 'single' | 'multiplayer'
 
 // 编辑标签状态
 const editingId = ref(null)
@@ -43,10 +48,29 @@ const restoreProgress = ref(0)
 const restoreStep = ref('')
 const isRestoring = ref(false)
 
-// 获取存档列表（按时间倒序）
+// 获取存档列表（按时间倒序，按模式过滤）
 const snapshots = computed(() => {
-  return [...gameStore._ui.saveSnapshots].sort((a, b) => b.timestamp - a.timestamp)
+  const source = saveViewMode.value === 'multiplayer'
+    ? gameStore._ui.mpSaveSnapshots
+    : gameStore._ui.saveSnapshots
+  return [...source].sort((a, b) => b.timestamp - a.timestamp)
 })
+
+const hasMpSaves = computed(() => gameStore._ui.mpSaveSnapshots.length > 0)
+
+// 复制联机存档到单人
+const copyToSinglePlayer = (snapshot) => {
+  const copy = {
+    ...JSON.parse(JSON.stringify(snapshot)),
+    id: Date.now().toString(),
+    saveMode: 'single',
+    roomId: undefined,
+    label: `[MP复制] ${snapshot.label}`
+  }
+  gameStore._ui.saveSnapshots.push(copy)
+  gameStore.saveToStorage(true)
+  alert('已复制到单人存档')
+}
 
 // 格式化时间
 const formatTime = (timestamp) => {
@@ -496,6 +520,20 @@ const closeDebugImportPanel = () => {
       </div>
 
       <div class="panel-content">
+        <!-- 存档模式切换（单人/联机） -->
+        <div v-if="hasMpSaves" class="save-mode-toggle">
+          <button
+            class="mode-toggle-btn"
+            :class="{ active: saveViewMode === 'single' }"
+            @click="saveViewMode = 'single'"
+          >单人存档</button>
+          <button
+            class="mode-toggle-btn"
+            :class="{ active: saveViewMode === 'multiplayer' }"
+            @click="saveViewMode = 'multiplayer'"
+          >联机存档</button>
+        </div>
+
         <!-- 存档模式下显示新建存档按钮 -->
         <div v-if="mode === 'save'" class="new-save-section">
           <button class="new-save-btn" @click="createSave">
@@ -593,6 +631,14 @@ const closeDebugImportPanel = () => {
                 title="加载此存档"
               >
                 读取
+              </button>
+              <button
+                v-if="saveViewMode === 'multiplayer'"
+                class="action-btn copy-sp"
+                @click.stop="copyToSinglePlayer(snapshot)"
+                title="复制到单人存档"
+              >
+                复制
               </button>
               <button 
                 class="action-btn delete" 
@@ -709,6 +755,42 @@ const closeDebugImportPanel = () => {
 
 .new-save-section {
   margin-bottom: 20px;
+}
+
+/* ── Save Mode Toggle ── */
+.save-mode-toggle {
+  display: flex;
+  gap: 0;
+  margin-bottom: 16px;
+  border: 1px solid rgba(139, 69, 19, 0.2);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.mode-toggle-btn {
+  flex: 1;
+  padding: 8px 16px;
+  border: none;
+  background: rgba(255, 249, 230, 0.6);
+  color: #8b4513;
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mode-toggle-btn + .mode-toggle-btn {
+  border-left: 1px solid rgba(139, 69, 19, 0.15);
+}
+
+.mode-toggle-btn.active {
+  background: linear-gradient(135deg, rgba(218, 165, 32, 0.25) 0%, rgba(184, 134, 11, 0.2) 100%);
+  color: #5d4037;
+  font-weight: 600;
+}
+
+.mode-toggle-btn:hover:not(.active) {
+  background: rgba(218, 165, 32, 0.1);
 }
 
 .io-section {
@@ -979,6 +1061,16 @@ const closeDebugImportPanel = () => {
 .action-btn.load:hover {
   background: rgba(21, 101, 192, 0.1);
   border-color: rgba(21, 101, 192, 0.6);
+}
+
+.action-btn.copy-sp {
+  color: #2e7d32;
+  border-color: rgba(46, 125, 50, 0.4);
+}
+
+.action-btn.copy-sp:hover {
+  background: rgba(46, 125, 50, 0.1);
+  border-color: rgba(46, 125, 50, 0.6);
 }
 
 .action-btn.delete {

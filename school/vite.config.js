@@ -125,6 +125,10 @@ function rawBuildRenamePlugin() {
 
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    __MP_WS_URL__: JSON.stringify('wss://mpschool-api.elyreneworks.site'),
+    __MP_API_URL__: JSON.stringify('https://mpschool-api.elyreneworks.site'),
+  },
   plugins: [
     vue({
       template: {

@@ -5,6 +5,7 @@ import { getErrorMessage } from './errorUtils'
 import { isTodoCompleted, parseTodoItems } from './todoManager'
 import { toTOON } from './toonSerializer'
 import { SUMMARY_FORMAT_FIELDS } from './summaryConstants'
+import { buildApiRequest, extractReply, PROVIDER_PRESETS } from './aiProviders'
 
 /**
  * 验证辅助AI配置是否完整
@@ -350,26 +351,19 @@ ${mainAIResponse}
     { role: 'user', content: userContent }
   ]
 
-  if (assistantPrefill) {
+  // Claude 不支持 assistant prefill，其他格式可以用
+  const provider = gameStore.settings.assistantAI.provider || 'custom'
+  const preset = PROVIDER_PRESETS[provider] || PROVIDER_PRESETS.custom
+  if (assistantPrefill && preset.format !== 'claude') {
     messages.push({ role: 'assistant', content: assistantPrefill })
   }
 
-  // 处理 API URL (自动补全 /v1/chat/completions 如果需要，或者由用户填写完整)
-  // 任务要求：自动进行补全（例如将/v1补全）
-  // 这里我们假设用户输入的是 base URL，我们需要追加 /chat/completions
-  // 或者用户输入的是 /v1，我们需要追加 /chat/completions
-  // 通常 OpenAI 兼容接口是 POST /v1/chat/completions
+  const { endpoint, fetchOptions } = buildApiRequest(
+    { provider, apiUrl, apiKey, model, temperature },
+    messages
+  )
 
-  let endpoint = apiUrl
-  if (!endpoint.endsWith('/chat/completions')) {
-    if (endpoint.endsWith('/')) {
-      endpoint += 'chat/completions'
-    } else {
-      endpoint += '/chat/completions'
-    }
-  }
-
-  console.log('[AssistantAI] Calling API:', endpoint)
+  console.log('[AssistantAI] Calling API:', endpoint, '(provider:', provider, ')')
 
   // Token 估算调试日志
   if (gameStore.settings.debugMode) {
@@ -378,19 +372,7 @@ ${mainAIResponse}
   }
 
   try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: model,
-        messages: messages,
-        temperature: temperature,
-        stream: false // 暂时不使用流式
-      })
-    })
+    const response = await fetch(endpoint, fetchOptions)
 
     if (!response.ok) {
       const errorText = await response.text()
@@ -398,10 +380,10 @@ ${mainAIResponse}
     }
 
     const data = await response.json()
-    let reply = data.choices[0].message.content
+    let reply = extractReply(provider, data)
 
-    // 仅在变量解析模式下拼接 Prefill
-    return assistantPrefill ? (assistantPrefill + reply) : reply
+    // 仅在变量解析模式下拼接 Prefill（Claude 不使用 prefill）
+    return (assistantPrefill && preset.format !== 'claude') ? (assistantPrefill + reply) : reply
   } catch (error) {
     console.error('[AssistantAI] Request failed:', error)
     // 增强错误信息
@@ -448,46 +430,36 @@ export async function callImageAnalysisAI(storyContent, characterAnchors = {}) {
   }
 
   // 构建请求
+  const provider = gameStore.settings.assistantAI.provider || 'custom'
+  const preset = PROVIDER_PRESETS[provider] || PROVIDER_PRESETS.custom
   const messages = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: userContent },
-    { role: 'assistant', content: ASSISTANT_PREFILL }
   ]
 
-  let endpoint = apiUrl
-  if (!endpoint.endsWith('/chat/completions')) {
-    if (endpoint.endsWith('/')) {
-      endpoint += 'chat/completions'
-    } else {
-      endpoint += '/chat/completions'
-    }
+  // Claude 不使用 assistant prefill
+  if (preset.format !== 'claude') {
+    messages.push({ role: 'assistant', content: ASSISTANT_PREFILL })
   }
 
-  console.log('[ImageAnalysisAI] Analyzing story for images...')
+  const { endpoint, fetchOptions } = buildApiRequest(
+    { provider, apiUrl, apiKey, model, temperature },
+    messages
+  )
+
+  console.log('[ImageAnalysisAI] Analyzing story for images... (provider:', provider, ')')
 
   try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: model,
-        messages: messages,
-        temperature: temperature, // 使用与辅助AI相同的温度
-        stream: false
-      })
-    })
+    const response = await fetch(endpoint, fetchOptions)
 
     if (!response.ok) {
       throw new Error(`API Error: ${response.status}`)
     }
 
     const data = await response.json()
-    const reply = data.choices[0].message.content
+    const reply = extractReply(provider, data)
     console.log('[ImageAnalysisAI] Response:', reply)
-    return ASSISTANT_PREFILL + reply
+    return (preset.format !== 'claude') ? (ASSISTANT_PREFILL + reply) : reply
   } catch (error) {
     console.error('[ImageAnalysisAI] Request failed:', error)
     return '' // 失败时静默返回空字符串，不中断流程

@@ -7,6 +7,9 @@ import { getItem } from '../data/mapData'
 import RelationshipEditModal from './RelationshipEditModal.vue'
 import { setRelationship, removeRelationship } from '../utils/relationshipManager'
 
+const props = defineProps({
+  readOnly: { type: Boolean, default: false }
+})
 const emit = defineEmits(['close'])
 const gameStore = useGameStore()
 
@@ -982,7 +985,7 @@ const closeEditModal = () => {
           <div class="section-title">
             <span class="title-icon">💫</span>
             我的印象
-            <button class="edit-relation-btn" @click="openEditModal(gameStore.player.name)">
+            <button v-if="!readOnly" class="edit-relation-btn" @click="openEditModal(gameStore.player.name)">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                 <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
               </svg>
@@ -1076,6 +1079,7 @@ const closeEditModal = () => {
 
     <!-- 关系编辑模态框 -->
     <RelationshipEditModal
+      v-if="!readOnly"
       :show="showEditModal"
       :sourceName="currentChar?.name"
       :targetName="editingTargetName"

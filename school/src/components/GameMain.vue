@@ -22,6 +22,18 @@ import { getErrorMessage } from '../utils/errorUtils'
 import { parseGameData, applyGameData, mergeGameData, deepMerge, generateDetailedChanges } from '../utils/gameDataParser'
 import { cleanSystemTags, parseInsertImageTags, insertImagesAtAnchors } from '../utils/contentCleaner'
 import { formatDebugContent, parseDebugData, parseDebugTag } from '../utils/debugFormatter'
+import { useMultiplayerStore } from '../stores/multiplayerStore'
+import {
+  isConversationHost,
+  isInConversation,
+  startActionWindow,
+  clearActionWindow,
+  allActionsReceived,
+  mergeActionsIntoMessage,
+  broadcastAiResponse,
+  getConversationContextPrompt,
+} from '../utils/conversationMerge'
+import { sendTurnAction } from '../utils/multiplayerWs'
 
 // Composables
 import { useImageCache, loadImagesFromLog } from '../composables/useImageCache'
@@ -38,6 +50,11 @@ import EquipmentPanel from './EquipmentPanel.vue'
 import MapPanel from './MapPanel.vue'
 import SavePanel from './SavePanel.vue'
 import PhoneSystem from './PhoneSystem.vue'
+
+// 联机游戏内组件
+import ConversationMergePanel from './ConversationMergePanel.vue'
+import TimeSync from './TimeSync.vue'
+import SpectatePanel from './SpectatePanel.vue'
 
 // 新拆分的子组件
 import EventBanner from './game/EventBanner.vue'
@@ -56,6 +73,7 @@ import '../styles/game-main.css'
 
 const emit = defineEmits(['back'])
 const gameStore = useGameStore()
+const mpStore = useMultiplayerStore()
 
 // Composables
 const { imageCacheMap, queueImageLoad, saveAndCache, cleanup: cleanupImageCache } = useImageCache()
@@ -543,6 +561,37 @@ const sendMessage = async () => {
   let finalPrompt = messageContent ? `本次玩家输入：${messageContent}` : ''
   
   if (!finalPrompt && (!gameStore.player.holdMessages || gameStore.player.holdMessages.length === 0)) {
+    isGenerating.value = false
+    return
+  }
+
+  // ── 联机合并对话：host 端等待其他玩家行动 ──
+  if (isConversationHost() && mpStore.conversationGroup?.memberIds.length > 1) {
+    // 开始 10s 行动收集窗口
+    await new Promise((resolve) => {
+      startActionWindow(10000, resolve)
+      // 如果所有行动提前到齐，ConversationMergePanel 的 watch 会 clearActionWindow
+      // 导致 allActionsReceived → emit('merge-ready')，但我们也需要在这里 resolve
+      const checkInterval = setInterval(() => {
+        if (!mpStore.turnPending) {
+          clearInterval(checkInterval)
+          resolve()
+        }
+      }, 200)
+    })
+
+    // 合并所有玩家行动到 prompt
+    finalPrompt = mergeActionsIntoMessage(messageContent)
+
+    // 追加对话组上下文
+    const convCtx = getConversationContextPrompt()
+    if (convCtx) {
+      finalPrompt += '\n' + convCtx
+    }
+  } else if (isInConversation() && !isConversationHost()) {
+    // 非 host：不应走到这里（非 host 通过 ConversationMergePanel 提交行动）
+    // 但防御性处理：将消息作为 turn_action 发送，不自己调 AI
+    sendTurnAction(messageContent)
     isGenerating.value = false
     return
   }
@@ -1503,6 +1552,14 @@ const processAIResponse = async (response) => {
     } else {
       gameStore.createAutoSave(gameLog.value, gameStore.meta.currentFloor)
     }
+
+    // ── 联机合并对话：host 广播 AI 回复给对话组 ──
+    if (isConversationHost() && isInConversation()) {
+      const lastAiLog = gameLog.value[gameLog.value.length - 1]
+      if (lastAiLog?.type === 'ai') {
+        broadcastAiResponse(lastAiLog.content, lastAiLog.rawContent || lastAiLog.content)
+      }
+    }
   }
 }
 
@@ -1571,6 +1628,10 @@ const handleReroll = async () => {
 // 回溯到任意楼层
 const handleRollbackToFloor = async (targetIndex) => {
   if (isGenerating.value || isAssistantProcessing.value) return
+  if (mpStore.isMultiplayerActive) {
+    showDanmaku(['⚠️ 联机模式下无法回溯'])
+    return
+  }
   
   const log = gameLog.value
   if (targetIndex < 0 || targetIndex >= log.length) return
@@ -2033,10 +2094,12 @@ const handlePhoneApp = (appId) => {
       showPhone.value = false
       break
     case 'save':
+      if (mpStore.isMultiplayerActive) return
       openSavePanel('save')
       showPhone.value = false
       break
     case 'load':
+      if (mpStore.isMultiplayerActive) return
       openSavePanel('load')
       showPhone.value = false
       break
@@ -2051,6 +2114,11 @@ const handlePhoneApp = (appId) => {
       emit('back')
       break
   }
+}
+
+const handleExitRoom = () => {
+  showPhone.value = false
+  emit('back')
 }
 
 const handleAttributeSave = () => {
@@ -2084,6 +2152,7 @@ const handleScrollEvent = () => {
 // ==================== 生命周期 ====================
 
 onMounted(async () => {
+  console.log('[GameMain] onMounted: mpStore.isMultiplayerActive =', mpStore.isMultiplayerActive, 'isConnected =', mpStore.isConnected, 'roomId =', mpStore.roomId)
   checkMobile()
   window.addEventListener('resize', checkMobile)
   setupVisualViewport()
@@ -2126,11 +2195,59 @@ onMounted(async () => {
   }
 
   document.addEventListener('click', closeMenu)
+
+  // 联机：监听合并对话 AI 回复（非 host 端接收）
+  window.addEventListener('mp:ai_response', onMpAiResponse)
+
+  // 联机：离线成长事件监听
+  window.addEventListener('mp:player_reconnected', onMpPlayerReconnected)
+  window.addEventListener('mp:offline_growth_applied', onMpOfflineGrowthApplied)
 })
+
+function onMpAiResponse(event) {
+  const data = event.detail
+  if (!data?.content) return
+  // 非 host 才注入（host 已经在本地生成了）
+  if (isConversationHost()) return
+
+  gameLog.value.push({
+    type: 'ai',
+    content: data.content,
+    rawContent: data.rawContent || data.content,
+  })
+  gameStore.meta.currentFloor = gameLog.value.length
+  handleNewContent(contentAreaRef.value)
+  gameStore.createAutoSave(gameLog.value, gameStore.meta.currentFloor)
+}
+
+function onMpPlayerReconnected(event) {
+  import('../utils/offlineGrowth').then(({ handlePlayerReconnected }) => {
+    handlePlayerReconnected(event)
+  }).catch(e => console.warn('[GameMain] Failed to handle player reconnection:', e))
+}
+
+function onMpOfflineGrowthApplied(event) {
+  const data = event.detail
+  if (!data) return
+  // 在聊天中显示离线成长通知
+  const parts = []
+  if (data.xpGain > 0) parts.push(`经验 +${data.xpGain}`)
+  if (data.relationshipChanges?.length > 0) parts.push(`${data.relationshipChanges.length} 位 NPC 好感度提升`)
+  if (parts.length > 0) {
+    gameLog.value.push({
+      type: 'system',
+      content: `[离线成长] 离线 ${data.gameHours} 小时期间：${parts.join('，')}`
+    })
+    handleNewContent(contentAreaRef.value)
+  }
+}
 
 onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)
   document.removeEventListener('click', closeMenu)
+  window.removeEventListener('mp:ai_response', onMpAiResponse)
+  window.removeEventListener('mp:player_reconnected', onMpPlayerReconnected)
+  window.removeEventListener('mp:offline_growth_applied', onMpOfflineGrowthApplied)
   if (inputBarObserver) {
     inputBarObserver.disconnect()
   }
@@ -2444,6 +2561,14 @@ watch(() => gameStore.settings.suggestedReplies, (newValue) => {
     <!-- 弹幕层 -->
     <DanmakuLayer />
 
+    <!-- 联机游戏内面板 -->
+    <ConversationMergePanel
+      v-if="mpStore.isMultiplayerActive"
+      @merge-ready="() => {}"
+    />
+    <TimeSync v-if="mpStore.isMultiplayerActive" />
+    <SpectatePanel v-if="mpStore.isMultiplayerActive" />
+
     <!-- 各种浮层和弹窗 -->
     <Teleport to="body">
       <MapPanel v-if="showMapPanel" @close="showMapPanel = false" />
@@ -2465,6 +2590,7 @@ watch(() => gameStore.settings.suggestedReplies, (newValue) => {
         @close="showPhone = false"
         @open-app="handlePhoneApp"
         @variable-modified="handleVariableModified"
+        @exit-room="handleExitRoom"
       />
     </Teleport>
 

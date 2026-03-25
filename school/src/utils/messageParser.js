@@ -1,6 +1,9 @@
 import { getSocialData, saveSocialData, saveMomentToWorldbook } from './socialWorldbook'
 import { useGameStore } from '../stores/gameStore'
 import { removeThinking } from './summaryManager'
+import { syncNpcMemory, syncLocationChange } from './multiplayerSync'
+import { useMultiplayerStore } from '../stores/multiplayerStore'
+import { sendMessage } from './multiplayerWs'
 
 // 获取游戏内时间字符串 (HH:mm)
 function getGameTimeString() {
@@ -14,7 +17,7 @@ import { getItemType } from './deliveryWorldbook'
 import { generateCharId } from '../data/relationshipData'
 
 // 玩家别名列表，AI 有时会用这些泛称代替实际玩家名
-const PLAYER_ALIASES = ['玩家', 'player', 'Player', '主角', '主人公', 'MC', 'mc']
+const PLAYER_ALIASES = ['玩家', 'player', 'Player', '主角', '主人公', 'MC', 'mc', 'user']
 
 /**
  * 将玩家别名解析为实际玩家名
@@ -1070,6 +1073,84 @@ export async function parseSocialTags(rawText) {
         gameStore.performTeaching(attrs.target, attrs.subject, attrs.quality || 'normal')
       }
     }
+  }
+
+  // ══════ 联机模式指令 ══════
+
+  // 21. NPC 记忆 <npc_memory npc="NPC名" time="时间">记忆内容</npc_memory>
+  const npcMemoryRegex = /<npc_memory\s+([^>]+)>([\s\S]*?)<\/npc_memory>/gs
+  let npcMemMatch
+  while ((npcMemMatch = npcMemoryRegex.exec(text)) !== null) {
+    const attrs = parseAttributes(npcMemMatch[1])
+    const content = npcMemMatch[2].trim()
+    const npcName = attrs.npc || attrs.name
+
+    if (!npcName || !content) continue
+
+    const timeStr = attrs.time || getGameTimeString()
+    const memory = {
+      time: timeStr,
+      content: content,
+      witness: [gameStore.player.name],
+      floor: gameStore.meta.currentFloor,
+      timestamp: Date.now(),
+    }
+
+    syncNpcMemory(npcName, memory)
+    console.log(`[MessageParser] NPC memory recorded: ${npcName} - ${content.slice(0, 40)}...`)
+  }
+
+  // 22. NPC 转移 <transfer_npc npc="NPC名" to="目标玩家" reason="原因" />
+  const transferNpcRegex = /<transfer_npc\s+([^>]+?)\s*\/?>/g
+  let transferMatch
+  while ((transferMatch = transferNpcRegex.exec(text)) !== null) {
+    const attrs = parseAttributes(transferMatch[1])
+    const npcName = attrs.npc || attrs.name
+    const targetPlayer = attrs.to || attrs.target
+    const reason = attrs.reason || ''
+
+    if (!npcName || !targetPlayer) continue
+
+    // 本地处理：NPC 离开当前场景
+    const npc = gameStore.world.npcs.find(n => n.name === npcName)
+    if (npc) {
+      npc.isAlive = false
+    }
+
+    // 联机模式下通知服务端
+    const mpStore = useMultiplayerStore()
+    if (mpStore.isMultiplayerActive) {
+      sendMessage('npc_transfer', { npcName, targetPlayer, reason })
+    }
+
+    console.log(`[MessageParser] NPC transfer: ${npcName} -> ${targetPlayer} (${reason})`)
+  }
+
+  // 23. NPC 跟随 <npc_follow npc="NPC名" action="start|stop" />
+  const npcFollowRegex = /<npc_follow\s+([^>]+?)\s*\/?>/g
+  let followMatch
+  while ((followMatch = npcFollowRegex.exec(text)) !== null) {
+    const attrs = parseAttributes(followMatch[1])
+    const npcName = attrs.npc || attrs.name
+    const action = attrs.action || 'start'
+
+    if (!npcName) continue
+
+    const npc = gameStore.world.npcs.find(n => n.name === npcName)
+    if (npc) {
+      npc.isFollowing = action === 'start'
+      if (action === 'start') {
+        npc.isAlive = true
+      }
+    }
+
+    // 联机模式下通知服务端
+    const mpStore = useMultiplayerStore()
+    if (mpStore.isMultiplayerActive) {
+      sendMessage('npc_follow', { npcName, action })
+    }
+
+    console.log(`[MessageParser] NPC follow: ${npcName} action=${action}`)
   }
 }
 
