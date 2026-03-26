@@ -15,6 +15,8 @@ import {
   getSavedSession,
   clearSavedSessionManual,
   sendGameStart,
+  sendPlayerStatus,
+  sendKick,
 } from '../utils/multiplayerWs'
 import {
   generateWorldbookHash,
@@ -260,12 +262,12 @@ async function handleJoin() {
 // ── 加入者选择预设后进入角色创建（自动加载预设） ──
 function applyPresetAndContinue(preset) {
   selectedPreset.value = preset
-  view.value = 'character_create'
+  goToCharacterCreate()
 }
 
 function skipPresetAndContinue() {
   selectedPreset.value = null
-  view.value = 'character_create'
+  goToCharacterCreate()
 }
 
 function doConnect() {
@@ -433,7 +435,7 @@ function checkPostConnectFlow() {
     if (mpSaves.value.length > 0 || presets.value.length > 0) {
       view.value = 'save_select'
     } else {
-      view.value = 'character_create'
+      goToCharacterCreate()
     }
   } else {
     // 加入者（非房主）
@@ -443,7 +445,7 @@ function checkPostConnectFlow() {
     } else if (presets.value.length > 0) {
       view.value = 'preset'
     } else {
-      view.value = 'character_create'
+      goToCharacterCreate()
     }
   }
 }
@@ -470,11 +472,18 @@ async function selectMpSave(save) {
 /** 房主选择了角色预设（从 save_select 界面）—— 路由到角色创建自动加载 */
 function selectPresetForHost(preset) {
   selectedPreset.value = preset
+  goToCharacterCreate()
+}
+
+function goToCharacterCreate() {
   view.value = 'character_create'
+  sendPlayerStatus('creating')
 }
 
 /** 角色创建返回：根据是否有可选项决定返回哪个视图 */
 function handleCharacterCreateBack() {
+  sendPlayerStatus('not_ready')
+
   if (mpStore.isHost) {
     // 房主：如果有存档/预设可选，回到 save_select；否则回到 waiting_room
     if (mpSaves.value.length > 0 || presets.value.length > 0) {
@@ -515,6 +524,7 @@ function onCharacterCreated() {
   }
 
   view.value = 'waiting_room'
+  sendPlayerStatus('ready')
 }
 
 // ── 存档分发事件处理 ──
@@ -543,6 +553,28 @@ function onSaveTransferFailed(event) {
 async function requestSaveDownload() {
   const { requestSaveFromHost } = await import('../utils/saveDistribution')
   requestSaveFromHost()
+}
+
+// ── 准备状态 ──
+const myLobbyStatus = computed(() => {
+  const me = mpStore.players[mpStore.localPlayerId]
+  return me?.lobbyStatus || 'not_ready'
+})
+
+const unreadyPlayerNames = computed(() => {
+  return mpStore.playerList
+    .filter(p => p.playerId !== mpStore.hostId && !p.spectatorOnly && p.lobbyStatus !== 'ready')
+    .map(p => p.playerName)
+})
+
+const canHostStart = computed(() => {
+  if (!mpStore.isHost) return false
+  return unreadyPlayerNames.value.length === 0
+})
+
+function toggleReady() {
+  const next = myLobbyStatus.value === 'ready' ? 'not_ready' : 'ready'
+  sendPlayerStatus(next)
 }
 
 // ── 断开 ──
@@ -576,7 +608,8 @@ function dismissReconnect() {
 
 function handleBack() {
   if (mpStore.isConnected && !hasEnteredGame.value) {
-    // 还在大厅/等待室，未进入游戏 → 断开连接
+    // 还在大厅/等待室，未进入游戏 → 二次确认后断开连接
+    if (!confirm('当前已连接到房间，确定要返回主菜单吗？')) return
     disconnect()
   }
   emit('back')
@@ -652,6 +685,16 @@ function formatTime(ts) {
               {{ p.playerName }}
             </span>
             <span class="player-role">{{ p.role === 'teacher' ? '教师' : '学生' }}</span>
+            <span v-if="p.playerId === mpStore.hostId" class="status-tag host-tag">房主</span>
+            <span v-else-if="p.lobbyStatus === 'ready'" class="status-tag ready-tag">已准备</span>
+            <span v-else-if="p.lobbyStatus === 'creating'" class="status-tag creating-tag">创建角色中</span>
+            <span v-else class="status-tag not-ready-tag">未准备</span>
+            <button
+              v-if="mpStore.isHost && p.playerId !== mpStore.localPlayerId"
+              class="kick-btn"
+              @click="sendKick(p.playerId, '被房主踢出')"
+              title="踢出玩家"
+            >✕</button>
           </div>
         </div>
 
@@ -676,8 +719,23 @@ function formatTime(ts) {
         </div>
 
         <div class="waiting-actions">
-          <button v-if="mpStore.isHost" class="mp-btn primary full-width" @click="enterGame">开始游戏</button>
-          <button v-else class="mp-btn primary full-width" disabled>等待房主开始游戏...</button>
+          <template v-if="mpStore.isHost">
+            <button
+              class="mp-btn primary full-width"
+              :disabled="!canHostStart"
+              :title="canHostStart ? '' : `未准备: ${unreadyPlayerNames.join('、')}`"
+              @click="enterGame"
+            >开始游戏</button>
+            <span v-if="!canHostStart" class="ready-hint">仍有玩家未准备，无法开始</span>
+          </template>
+          <template v-else>
+            <button
+              class="mp-btn full-width"
+              :class="myLobbyStatus === 'ready' ? 'danger' : 'primary'"
+              @click="toggleReady"
+            >{{ myLobbyStatus === 'ready' ? '取消准备' : '准备' }}</button>
+            <span class="ready-hint">等待房主开始游戏...</span>
+          </template>
           <button class="mp-btn danger full-width" @click="handleDisconnect">断开连接</button>
         </div>
       </div>
@@ -722,7 +780,7 @@ function formatTime(ts) {
           </div>
         </div>
 
-        <button class="mp-btn full-width" @click="view = 'character_create'" style="margin-top: 12px;">
+        <button class="mp-btn full-width" @click="goToCharacterCreate()" style="margin-top: 12px;">
           新建角色
         </button>
       </div>
@@ -860,7 +918,7 @@ function formatTime(ts) {
           </div>
         </div>
 
-        <button class="mp-btn full-width" @click="view = 'character_create'" style="margin-top: 12px;">
+        <button class="mp-btn full-width" @click="goToCharacterCreate()" style="margin-top: 12px;">
           新建角色
         </button>
       </div>
@@ -1091,6 +1149,50 @@ function formatTime(ts) {
   font-weight: 500;
   color: rgba(255, 248, 220, 0.8);
   letter-spacing: 0.5px;
+}
+
+.player-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.1);
+  margin-bottom: 4px;
+}
+
+.status-tag {
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+  margin-left: auto;
+}
+.host-tag { background: rgba(218, 165, 32, 0.3); color: #f0c040; }
+.ready-tag { background: rgba(102, 187, 106, 0.25); color: #81c784; }
+.creating-tag { background: rgba(255, 183, 77, 0.25); color: #ffb74d; }
+.not-ready-tag { background: rgba(255, 255, 255, 0.08); color: rgba(255, 248, 220, 0.5); }
+
+.kick-btn {
+  background: none;
+  border: none;
+  color: rgba(255, 100, 100, 0.6);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.kick-btn:hover {
+  color: #ff5252;
+  background: rgba(255, 82, 82, 0.15);
+}
+
+.ready-hint {
+  text-align: center;
+  font-size: 0.78rem;
+  color: rgba(255, 248, 220, 0.5);
 }
 
 .waiting-actions {

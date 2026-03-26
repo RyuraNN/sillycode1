@@ -250,6 +250,7 @@ export class SchoolRoom extends DurableObject {
       classId,
       avatar,
       location: '',
+      lobbyStatus: 'not_ready', // 'not_ready' | 'creating' | 'ready'
       joinedAt: Date.now(),
       lastMessageTime: 0,
       messageCount: 0,
@@ -312,6 +313,7 @@ export class SchoolRoom extends DurableObject {
           classId: s.classId,
           avatar: s.avatar,
           location: s.location,
+          lobbyStatus: s.lobbyStatus || 'not_ready',
           trustLevel: s.trustLevel || 'anonymous',
           features: s.features || { assistantAI: false, rag: false, summary: false },
           spectatorOnly: s.spectatorOnly || false,
@@ -333,6 +335,7 @@ export class SchoolRoom extends DurableObject {
       type: 'player_joined',
       data: {
         playerId, playerName, role, classId, avatar,
+        lobbyStatus: sessionData.lobbyStatus || 'not_ready',
         trustLevel: sessionData.trustLevel,
         features: sessionData.features,
         spectatorOnly: sessionData.spectatorOnly || false,
@@ -426,6 +429,7 @@ export class SchoolRoom extends DurableObject {
       case 'save_request': this.handleSaveRequest(ws, session, msg.data); break
       case 'save_chunk': this.handleSaveChunk(ws, session, msg.data); break
       case 'offline_growth': this.handleOfflineGrowth(ws, session, msg.data); break
+      case 'player_status': this.handlePlayerStatus(ws, session, msg.data); break
       case 'game_start': this.handleGameStart(ws, session); break
       case 'batch':
         for (const m of (msg.data?.messages || [])) {
@@ -478,11 +482,13 @@ export class SchoolRoom extends DurableObject {
 
   handlePlayerUpdate(ws, session, data) {
     if (!data?.stats) return
-    // 如果包含 playerName，同步更新 session
-    if (data.stats.playerName) {
-      session.playerName = data.stats.playerName
-      ws.serializeAttachment(session)
-    }
+    // 同步更新 session，保证后续 welcome 给新加入玩家的数据是最新的
+    if (data.stats.playerName) session.playerName = data.stats.playerName
+    if (data.stats.role) session.role = data.stats.role
+    if (data.stats.classId !== undefined) session.classId = data.stats.classId
+    if (data.stats.avatar !== undefined) session.avatar = data.stats.avatar
+    ws.serializeAttachment(session)
+
     this.broadcast(JSON.stringify({
       type: 'player_update',
       data: { stats: data.stats },
@@ -531,6 +537,11 @@ export class SchoolRoom extends DurableObject {
         fromName: session.playerName,
         ts: Date.now()
       }), ws)
+
+      // 广播该位置的玩家列表，使对话组加入UI可见
+      if (data.publicState.location) {
+        this.broadcastPlayersAtLocation(data.publicState.location)
+      }
     }
   }
 
@@ -1173,9 +1184,47 @@ export class SchoolRoom extends DurableObject {
     }
   }
 
+  handlePlayerStatus(ws, session, data) {
+    const validStatuses = ['not_ready', 'creating', 'ready']
+    const status = data?.status
+    if (!status || !validStatuses.includes(status)) return
+
+    session.lobbyStatus = status
+    ws.serializeAttachment(session)
+
+    // 广播状态变更给所有玩家
+    this.broadcast(JSON.stringify({
+      type: 'player_status_change',
+      data: {
+        playerId: session.playerId,
+        playerName: session.playerName,
+        lobbyStatus: status,
+      },
+      ts: Date.now()
+    }))
+  }
+
   handleGameStart(ws, session) {
     const config = this.getConfig()
     if (!config || session.playerId !== config.hostId) return // 仅房主可以开始
+
+    const unreadyPlayers = [...this.sessions.values()].filter(s => {
+      if (s.playerId === config.hostId) return false
+      if (s.spectatorOnly) return false
+      return s.lobbyStatus !== 'ready'
+    })
+    if (unreadyPlayers.length > 0) {
+      ws.send(JSON.stringify({
+        type: 'error',
+        data: {
+          code: 'PLAYERS_NOT_READY',
+          message: '仍有玩家未准备，无法开始游戏',
+          players: unreadyPlayers.map(p => ({ playerId: p.playerId, playerName: p.playerName, lobbyStatus: p.lobbyStatus || 'not_ready' }))
+        },
+        ts: Date.now()
+      }))
+      return
+    }
 
     this.gameStarted = true
 

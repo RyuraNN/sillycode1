@@ -17,6 +17,9 @@ let reconnectAttempts = 0
 let currentRoomId = null
 let currentPlayerInfo = null
 const MAX_RECONNECT_ATTEMPTS = 5
+let lastConnectedAt = 0
+let stableResetTimer = null
+let rapidReconnectTimestamps = []
 
 const SAVED_SESSION_KEY = 'mp_saved_session'
 
@@ -197,7 +200,24 @@ export function connectToRoom(roomId, playerInfo) {
 
   ws.onopen = () => {
     console.log('[MultiplayerWs] Connected to room:', roomId)
-    reconnectAttempts = 0
+    lastConnectedAt = Date.now()
+    // Only reset reconnectAttempts after connection is stable for 10s
+    clearTimeout(stableResetTimer)
+    stableResetTimer = setTimeout(() => {
+      reconnectAttempts = 0
+      rapidReconnectTimestamps = []
+    }, 10000)
+    // Rapid reconnect detection: if 3+ connects within 30s, stop
+    rapidReconnectTimestamps.push(Date.now())
+    rapidReconnectTimestamps = rapidReconnectTimestamps.filter(t => Date.now() - t < 30000)
+    if (rapidReconnectTimestamps.length >= 4) {
+      console.error('[MultiplayerWs] Rapid reconnect detected, stopping')
+      clearTimeout(stableResetTimer)
+      mpStore.connectionError = '连接不稳定，请检查网络后重新加入'
+      try { ws.close(1000, 'unstable connection') } catch {}
+      ws = null
+      return
+    }
     startBatchTimer()
     startPingTimer()
     acquireWakeLock()
@@ -246,7 +266,9 @@ export function connectToRoom(roomId, playerInfo) {
  */
 export function disconnect() {
   clearTimeout(reconnectTimer)
+  clearTimeout(stableResetTimer)
   reconnectAttempts = MAX_RECONNECT_ATTEMPTS
+  rapidReconnectTimestamps = []
   stopBatchTimer()
   stopPingTimer()
   releaseWakeLock()
@@ -443,6 +465,10 @@ export function sendFeatureUpdate(features) {
   return sendMessage('feature_update', { features })
 }
 
+export function sendPlayerStatus(status) {
+  return sendMessage('player_status', { status })
+}
+
 export function sendGameStart() {
   return sendMessage('game_start', {})
 }
@@ -481,6 +507,10 @@ function handleMessage(msg) {
       }
       break
     }
+
+    case 'player_status_change':
+      mpStore.handlePlayerStatusChange(msg.data)
+      break
 
     case 'player_left':
       mpStore.handlePlayerLeft(msg.data)

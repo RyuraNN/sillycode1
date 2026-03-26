@@ -86,6 +86,7 @@ export interface GameStateDataLegacy {
   clubInvitation?: any
   npcElectiveSelections?: Record<string, string[]>
   characterNotes?: Record<string, string>
+  npcMemories?: Record<string, any>
   customCoursePool?: any
   unviewedExamIds?: string[]
   lastViewedWeeklyPreview?: number
@@ -347,7 +348,9 @@ export interface CompletedTodoMarker {
   todoKeyword?: string    // 待办关键词（关键词模式使用）
   completedAt: number     // 完成时的楼层号
   completedTimestamp: number  // 完成时间戳
-  matchedBy: 'keyword' | 'index' | 'manual'  // 标记方式
+  matchedBy: 'keyword' | 'index' | 'manual' | 'cancel' | 'duplicate_filter'  // 标记方式
+  todoStatus?: 'completed' | 'cancelled'
+  cancelReason?: string
 }
 
 /** 待办事项匹配统计 */
@@ -1048,6 +1051,7 @@ export interface RemotePlayerInfo {
   classId: string
   avatar: string
   location: string
+  lobbyStatus?: 'not_ready' | 'creating' | 'ready'
   joinedAt: number
   trustLevel?: TrustLevel
   features?: PlayerFeatures

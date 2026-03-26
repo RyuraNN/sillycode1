@@ -223,6 +223,12 @@ export const useMultiplayerStore = defineStore('multiplayer', {
       }
     },
 
+    handlePlayerStatusChange(data: { playerId: string; playerName: string; lobbyStatus: string }) {
+      if (this.players[data.playerId]) {
+        this.players[data.playerId].lobbyStatus = data.lobbyStatus as 'not_ready' | 'creating' | 'ready'
+      }
+    },
+
     handlePlayerLeft(data: { playerId: string; playerName: string }) {
       // 记录离线玩家信息
       const player = this.players[data.playerId]

@@ -568,10 +568,12 @@ export const generateDetailedChanges = (oldState, newState) => {
   }
 
   // 5. 对比 NPC 列表（使用 Map 优化，避免 O(n²)）
-  if (oldState.npcs && newState.npcs) {
-    const oldNpcMap = new Map(oldState.npcs.map(n => [n.id, n]))
+  const oldNpcs = oldState.world?.npcs || oldState.npcs
+  const newNpcs = newState.world?.npcs || newState.npcs
+  if (oldNpcs && newNpcs) {
+    const oldNpcMap = new Map(oldNpcs.map(n => [n.id, n]))
 
-    for (const newNpc of newState.npcs) {
+    for (const newNpc of newNpcs) {
       const oldNpc = oldNpcMap.get(newNpc.id)
       if (oldNpc) {
         // 心情
@@ -598,15 +600,17 @@ export const generateDetailedChanges = (oldState, newState) => {
   }
 
   // 6. 对比 NPC 详细关系（使用直接访问，避免双重循环）
-  if (oldState.npcRelationships && newState.npcRelationships && newState.player?.name) {
+  const oldNpcRels = oldState.world?.npcRelationships || oldState.npcRelationships
+  const newNpcRels = newState.world?.npcRelationships || newState.npcRelationships
+  if (oldNpcRels && newNpcRels && newState.player?.name) {
     const playerName = newState.player.name
 
-    for (const charName in newState.npcRelationships) {
+    for (const charName in newNpcRels) {
       if (charName === playerName) continue // 跳过玩家自己
 
       // 获取该角色对玩家的关系
-      const newRel = newState.npcRelationships[charName]?.relations?.[playerName]
-      const oldRel = oldState.npcRelationships?.[charName]?.relations?.[playerName]
+      const newRel = newNpcRels[charName]?.relations?.[playerName]
+      const oldRel = oldNpcRels?.[charName]?.relations?.[playerName]
 
       if (newRel) {
         // 亲密度/好感

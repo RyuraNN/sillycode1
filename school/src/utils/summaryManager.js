@@ -1,7 +1,7 @@
 import { useGameStore } from '../stores/gameStore'
 import { callAssistantAI } from './assistantAI'
 import { extractKeywordsFromSummary, embedSummary, buildRAGHistory, isRAGReady, summaryNeedsEmbeddingRefresh, updateEntityLookupIncremental } from './ragService'
-import { filterCompletedTodos } from './todoManager'
+import { filterCompletedTodos, dedupeTodoItemsInSummary, cleanupHistoricalTodoDuplicates } from './todoManager'
 import { getErrorMessage } from './errorUtils'
 import { toTOON } from './toonSerializer'
 import { runThematicAggregation } from './thematicSummaryEngine'
@@ -399,21 +399,34 @@ function addSummary(summary) {
       ? [...new Set(summary.coveredFloors)].sort((a, b) => a - b)
       : [summary.floor]
   }
+
+  if ((normalizedSummary.type === 'minor' || normalizedSummary.type === 'diary') && normalizedSummary.content) {
+    normalizedSummary.content = dedupeTodoItemsInSummary(normalizedSummary.content, gameStore, 0.7)
+  }
   
   // 检查是否已存在相同楼层和类型的总结
   const existingIndex = gameStore.player.summaries.findIndex(
     s => s.floor === normalizedSummary.floor && s.type === normalizedSummary.type
   )
   
+  let storedSummary
   if (existingIndex >= 0) {
     // 更新现有的，并保留原对象引用
     Object.assign(gameStore.player.summaries[existingIndex], normalizedSummary)
-    return gameStore.player.summaries[existingIndex]
+    storedSummary = gameStore.player.summaries[existingIndex]
   } else {
     // 添加新的
     gameStore.player.summaries.push(normalizedSummary)
-    return normalizedSummary
+    storedSummary = normalizedSummary
   }
+
+  if (!gameStore._ui.todoBackfillCleanupDone) {
+    const cleanupResult = cleanupHistoricalTodoDuplicates(gameStore, { threshold: 0.7, dryRun: false })
+    gameStore._ui.todoBackfillCleanupDone = true
+    console.log('[SummaryManager] Todo historical cleanup:', cleanupResult)
+  }
+
+  return storedSummary
 }
 
 /**

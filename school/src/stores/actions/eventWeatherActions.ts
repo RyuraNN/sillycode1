@@ -59,6 +59,7 @@ export const eventWeatherActions = {
       return
     }
     
+    if (!this.world?.gameTime?.year) return
     const { year, month, day } = this.world.gameTime
     const currentDateKey = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
     const termInfo = this.getTermInfo() as any

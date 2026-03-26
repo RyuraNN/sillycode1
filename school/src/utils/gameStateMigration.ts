@@ -48,7 +48,8 @@ export function migrateGameStateData(legacy: any): Omit<GameState, 'settings' | 
       npcRelationships: l.npcRelationships || {},
       graduatedNpcs: l.graduatedNpcs || [],
       lastAcademicYear: l.lastAcademicYear || 0,
-      characterNotes: l.characterNotes || {}
+      characterNotes: l.characterNotes || {},
+      npcMemories: l.npcMemories || {}
     },
     player: l.player,
     academic: {
@@ -111,6 +112,7 @@ export function flattenGameStateData(state: any): GameStateDataLegacy {
     electiveAcademicData: state.academic?.electiveAcademicData || {},
     npcElectiveSelections: state.academic?.npcElectiveSelections || {},
     characterNotes: state.world?.characterNotes || {},
+    npcMemories: state.world?.npcMemories || {},
     customCoursePool: state.academic?.customCoursePool ?? null,
     eventChecks: state.events?.checks,
     clubApplication: state.events?.clubApplication || null,
@@ -151,7 +153,8 @@ export function collectGameStateFromStore(store: any): Omit<GameState, 'settings
       npcRelationships: store.world.npcRelationships,
       graduatedNpcs: store.world.graduatedNpcs || [],
       lastAcademicYear: store.world.lastAcademicYear || 0,
-      characterNotes: store.world.characterNotes || {}
+      characterNotes: store.world.characterNotes || {},
+      npcMemories: store.world.npcMemories || {}
     },
     player: store.player,
     academic: {
@@ -234,6 +237,7 @@ export function applyGameStateToStore(store: any, data: any, defaults: any) {
     if (state.world.graduatedNpcs !== undefined) store.world.graduatedNpcs = state.world.graduatedNpcs || []
     if (state.world.lastAcademicYear !== undefined) store.world.lastAcademicYear = state.world.lastAcademicYear || 0
     if (state.world.characterNotes !== undefined) store.world.characterNotes = state.world.characterNotes || {}
+    if (state.world.npcMemories !== undefined) store.world.npcMemories = state.world.npcMemories || {}
   }
 
   // ── academic ──

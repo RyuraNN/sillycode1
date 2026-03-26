@@ -11,46 +11,63 @@ import { useGameStore } from '../stores/gameStore'
  * @returns {Array} 指令数组
  */
 export function extractTodoCompletionCommands(aiResponse) {
+  return extractTodoActionCommands(aiResponse).filter(cmd => cmd.action === 'complete')
+}
+
+/**
+ * 从 AI 回复中提取待办动作指令（完成/取消）
+ * @param {string} aiResponse
+ * @returns {Array<{action:'complete'|'cancel', floor:number, mode:'keyword'|'index', keyword?:string, index?:number, reason?:string}>}
+ */
+export function extractTodoActionCommands(aiResponse) {
   const commands = []
   if (!aiResponse) return commands
 
-  // 兼容属性顺序变化: <complete_todo keyword="..." floor="123" />
-  const tagRegex = /<complete_todo\b([^>]*)\/?>/gi
-  let tagMatch
+  const parseTag = (tagName, action) => {
+    const tagRegex = new RegExp(`<${tagName}\\b([^>]*)\\/?>`, 'gi')
+    let tagMatch
 
-  while ((tagMatch = tagRegex.exec(aiResponse)) !== null) {
-    const attrsText = tagMatch[1] || ''
-    const attrs = {}
-    const attrRegex = /(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g
-    let attrMatch
+    while ((tagMatch = tagRegex.exec(aiResponse)) !== null) {
+      const attrsText = tagMatch[1] || ''
+      const attrs = {}
+      const attrRegex = /(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g
+      let attrMatch
 
-    while ((attrMatch = attrRegex.exec(attrsText)) !== null) {
-      attrs[attrMatch[1].toLowerCase()] = attrMatch[2] ?? attrMatch[3] ?? ''
-    }
+      while ((attrMatch = attrRegex.exec(attrsText)) !== null) {
+        attrs[attrMatch[1].toLowerCase()] = attrMatch[2] ?? attrMatch[3] ?? ''
+      }
 
-    const floor = Number.parseInt(attrs.floor, 10)
-    if (!Number.isInteger(floor)) continue
+      const floor = Number.parseInt(attrs.floor, 10)
+      if (!Number.isInteger(floor)) continue
 
-    if (typeof attrs.keyword === 'string' && attrs.keyword.trim()) {
-      commands.push({
-        floor,
-        keyword: attrs.keyword.trim(),
-        mode: 'keyword'
-      })
-      continue
-    }
-
-    if (attrs.index !== undefined) {
-      const index = Number.parseInt(attrs.index, 10)
-      if (Number.isInteger(index)) {
+      if (typeof attrs.keyword === 'string' && attrs.keyword.trim()) {
         commands.push({
+          action,
           floor,
-          index,
-          mode: 'index'
+          keyword: attrs.keyword.trim(),
+          mode: 'keyword',
+          reason: attrs.reason?.trim?.() || ''
         })
+        continue
+      }
+
+      if (attrs.index !== undefined) {
+        const index = Number.parseInt(attrs.index, 10)
+        if (Number.isInteger(index)) {
+          commands.push({
+            action,
+            floor,
+            index,
+            mode: 'index',
+            reason: attrs.reason?.trim?.() || ''
+          })
+        }
       }
     }
   }
+
+  parseTag('complete_todo', 'complete')
+  parseTag('cancel_todo', 'cancel')
 
   return commands
 }
@@ -95,6 +112,46 @@ export function matchTodoByKeyword(todoText, keyword) {
   }
 
   return false
+}
+
+function normalizeTodoText(text = '') {
+  return String(text)
+    .toLowerCase()
+    .replace(/[\s，。！？、；：,.!?;:'"“”‘’（）()\[\]{}<>《》]/g, '')
+}
+
+function charBigrams(str) {
+  if (!str) return []
+  if (str.length < 2) return [str]
+  const grams = []
+  for (let i = 0; i < str.length - 1; i++) {
+    grams.push(str.slice(i, i + 2))
+  }
+  return grams
+}
+
+export function calculateTodoSimilarity(a, b) {
+  const na = normalizeTodoText(a)
+  const nb = normalizeTodoText(b)
+  if (!na || !nb) return 0
+  if (na === nb || na.includes(nb) || nb.includes(na)) return 1
+
+  const ga = charBigrams(na)
+  const gb = charBigrams(nb)
+  if (ga.length === 0 || gb.length === 0) return 0
+
+  const freq = new Map()
+  for (const g of ga) freq.set(g, (freq.get(g) || 0) + 1)
+  let intersection = 0
+  for (const g of gb) {
+    const count = freq.get(g) || 0
+    if (count > 0) {
+      intersection++
+      freq.set(g, count - 1)
+    }
+  }
+
+  return (2 * intersection) / (ga.length + gb.length)
 }
 
 /**
@@ -143,6 +200,83 @@ export function findSummaryByTodoFloor(gameStore, floor) {
   ) || null
 }
 
+function getTodoMarkerStatus(marker) {
+  if (!marker) return 'pending'
+  if (marker.todoStatus) return marker.todoStatus
+  return 'completed'
+}
+
+export function getTodoStatus(gameStore, floor, todoIndex) {
+  const marker = findTodoMarker(gameStore, floor, todoIndex)
+  return getTodoMarkerStatus(marker)
+}
+
+export function isTodoCancelled(gameStore, floor, todoIndex) {
+  return getTodoStatus(gameStore, floor, todoIndex) === 'cancelled'
+}
+
+function ensureTodoMarkerArray(gameStore) {
+  if (!gameStore.notifications.completedTodoMarkers) {
+    gameStore.notifications.completedTodoMarkers = []
+  }
+}
+
+function upsertTodoMarker(gameStore, summary, floor, todoIndex, payload) {
+  ensureTodoMarkerArray(gameStore)
+  const markerFloor = getTodoMarkerFloor(summary, floor)
+  const candidateFloors = getTodoMarkerCandidateFloors(summary, floor)
+  const existing = gameStore.notifications.completedTodoMarkers.find(
+    m => candidateFloors.includes(m.floor) && m.todoIndex === todoIndex
+  )
+
+  if (existing) {
+    Object.assign(existing, {
+      floor: markerFloor,
+      todoIndex,
+      ...payload
+    })
+    return { marker: existing, created: false }
+  }
+
+  const marker = {
+    floor: markerFloor,
+    todoIndex,
+    ...payload
+  }
+  gameStore.notifications.completedTodoMarkers.push(marker)
+  return { marker, created: true }
+}
+
+function markSummaryCompletedIndex(summary, todoIndex) {
+  if (!summary.completedTodos) summary.completedTodos = []
+  if (!summary.completedTodos.includes(todoIndex)) {
+    summary.completedTodos.push(todoIndex)
+  }
+}
+
+function unmarkSummaryCompletedIndex(summary, todoIndex) {
+  if (summary.completedTodos) {
+    summary.completedTodos = summary.completedTodos.filter(i => i !== todoIndex)
+  }
+}
+
+function findTodoIndexByKeyword(todos, keyword) {
+  const direct = todos.findIndex(todo => matchTodoByKeyword(todo, keyword))
+  if (direct !== -1) return direct
+
+  let bestIndex = -1
+  let bestScore = 0
+  for (let i = 0; i < todos.length; i++) {
+    const score = calculateTodoSimilarity(todos[i], keyword)
+    if (score > bestScore) {
+      bestScore = score
+      bestIndex = i
+    }
+  }
+
+  return bestScore > 0.7 ? bestIndex : -1
+}
+
 export function getTodoMarkerFloor(summary, requestedFloor) {
   if (!summary) return requestedFloor
   return Number.isFinite(summary.floor) ? summary.floor : requestedFloor
@@ -181,51 +315,27 @@ export function markTodoAsCompletedByKeyword(gameStore, floor, keyword, currentF
   }
 
   // 查找匹配的待办
-  const matchedIndex = todos.findIndex(todo => matchTodoByKeyword(todo, keyword))
+  const matchedIndex = findTodoIndexByKeyword(todos, keyword)
   if (matchedIndex === -1) {
     console.warn(`[TodoManager] No todo matched keyword "${keyword}" in floor ${floor}`)
     updateMatchingStats(gameStore, 'keyword', false)
     return false
   }
 
-  // 标记完成
-  if (!gameStore.notifications.completedTodoMarkers) {
-    gameStore.notifications.completedTodoMarkers = []
-  }
+  upsertTodoMarker(gameStore, summary, floor, matchedIndex, {
+    todoKeyword: keyword,
+    completedAt: gameStore.meta.currentFloor,
+    completedTimestamp: Date.now(),
+    matchedBy: 'keyword',
+    todoStatus: 'completed'
+  })
 
-  const markerFloor = getTodoMarkerFloor(summary, floor)
-  const candidateFloors = getTodoMarkerCandidateFloors(summary, floor)
+  markSummaryCompletedIndex(summary, matchedIndex)
 
-  // 检查是否已标记
-  const exists = gameStore.notifications.completedTodoMarkers.some(
-    m => candidateFloors.includes(m.floor) && m.todoIndex === matchedIndex
-  )
-
-  if (!exists) {
-    gameStore.notifications.completedTodoMarkers.push({
-      floor: markerFloor,
-      todoIndex: matchedIndex,
-      todoKeyword: keyword,
-      completedAt: gameStore.meta.currentFloor,
-      completedTimestamp: Date.now(),
-      matchedBy: 'keyword'
-    })
-
-    // 同时更新 SummaryData
-    if (!summary.completedTodos) {
-      summary.completedTodos = []
-    }
-    if (!summary.completedTodos.includes(matchedIndex)) {
-      summary.completedTodos.push(matchedIndex)
-    }
-
-    console.log(`[TodoManager] Marked todo as completed: floor=${floor}, index=${matchedIndex}, keyword="${keyword}"`)
-    updateMatchingStats(gameStore, 'keyword', true)
-    return true
-  }
-
+  console.log(`[TodoManager] Marked todo as completed: floor=${floor}, index=${matchedIndex}, keyword="${keyword}"`)
   updateMatchingStats(gameStore, 'keyword', true)
   return true
+
 }
 
 /**
@@ -251,39 +361,60 @@ export function markTodoAsCompletedByIndex(gameStore, floor, todoIndex, currentF
     return false
   }
 
-  if (!gameStore.notifications.completedTodoMarkers) {
-    gameStore.notifications.completedTodoMarkers = []
-  }
+  upsertTodoMarker(gameStore, summary, floor, todoIndex, {
+    completedAt: gameStore.meta.currentFloor,
+    completedTimestamp: Date.now(),
+    matchedBy: 'index',
+    todoStatus: 'completed'
+  })
 
-  const markerFloor = getTodoMarkerFloor(summary, floor)
-  const candidateFloors = getTodoMarkerCandidateFloors(summary, floor)
+  markSummaryCompletedIndex(summary, todoIndex)
 
-  const exists = gameStore.notifications.completedTodoMarkers.some(
-    m => candidateFloors.includes(m.floor) && m.todoIndex === todoIndex
-  )
-
-  if (!exists) {
-    gameStore.notifications.completedTodoMarkers.push({
-      floor: markerFloor,
-      todoIndex,
-      completedAt: gameStore.meta.currentFloor,
-      completedTimestamp: Date.now(),
-      matchedBy: 'index'
-    })
-
-    if (!summary.completedTodos) {
-      summary.completedTodos = []
-    }
-    if (!summary.completedTodos.includes(todoIndex)) {
-      summary.completedTodos.push(todoIndex)
-    }
-
-    console.log(`[TodoManager] Marked todo as completed: floor=${floor}, index=${todoIndex}`)
-    updateMatchingStats(gameStore, 'index', true)
-    return true
-  }
-
+  console.log(`[TodoManager] Marked todo as completed: floor=${floor}, index=${todoIndex}`)
   updateMatchingStats(gameStore, 'index', true)
+  return true
+
+}
+
+export function markTodoAsCancelledByKeyword(gameStore, floor, keyword, currentFloor, reason = '') {
+  const summary = findSummaryByTodoFloor(gameStore, floor)
+  if (!summary) return false
+
+  const todos = parseTodoItems(summary.content)
+  if (todos.length === 0) return false
+
+  const matchedIndex = findTodoIndexByKeyword(todos, keyword)
+  if (matchedIndex === -1) return false
+
+  upsertTodoMarker(gameStore, summary, floor, matchedIndex, {
+    todoKeyword: keyword,
+    completedAt: gameStore.meta.currentFloor,
+    completedTimestamp: Date.now(),
+    matchedBy: 'cancel',
+    todoStatus: 'cancelled',
+    cancelReason: reason || '剧情取消'
+  })
+
+  unmarkSummaryCompletedIndex(summary, matchedIndex)
+  return true
+}
+
+export function markTodoAsCancelledByIndex(gameStore, floor, todoIndex, currentFloor, reason = '') {
+  const summary = findSummaryByTodoFloor(gameStore, floor)
+  if (!summary) return false
+
+  const todos = parseTodoItems(summary.content)
+  if (todoIndex < 0 || todoIndex >= todos.length) return false
+
+  upsertTodoMarker(gameStore, summary, floor, todoIndex, {
+    completedAt: gameStore.meta.currentFloor,
+    completedTimestamp: Date.now(),
+    matchedBy: 'cancel',
+    todoStatus: 'cancelled',
+    cancelReason: reason || '剧情取消'
+  })
+
+  unmarkSummaryCompletedIndex(summary, todoIndex)
   return true
 }
 
@@ -295,7 +426,108 @@ export function markTodoAsCompletedByIndex(gameStore, floor, todoIndex, currentF
  * @returns {boolean} 是否已完成
  */
 export function isTodoCompleted(gameStore, floor, todoIndex) {
-  return !!findTodoMarker(gameStore, floor, todoIndex)
+  return getTodoStatus(gameStore, floor, todoIndex) === 'completed'
+}
+
+function updateTodoLine(summaryContent, newTodos) {
+  const lines = String(summaryContent || '').split('\n')
+  let replaced = false
+  const output = lines.map(line => {
+    const m = line.match(/^\s*待办事项[|｜](.*)$/)
+    if (!m) return line
+    replaced = true
+    if (!newTodos || newTodos.length === 0) return '待办事项|无'
+    return `待办事项|${newTodos.join('；')}`
+  })
+
+  if (!replaced) {
+    output.push(`待办事项|${newTodos && newTodos.length > 0 ? newTodos.join('；') : '无'}`)
+  }
+
+  return output.join('\n')
+}
+
+function collectPendingTodosFromStore(gameStore) {
+  const pending = []
+  const summaries = gameStore.player?.summaries || []
+  for (const summary of summaries) {
+    if (summary.type !== 'minor' && summary.type !== 'diary') continue
+    const todos = parseTodoItems(summary.content)
+    for (let i = 0; i < todos.length; i++) {
+      if (getTodoStatus(gameStore, summary.floor, i) === 'pending') {
+        pending.push(todos[i])
+      }
+    }
+  }
+  return pending
+}
+
+export function dedupeTodoItemsInSummary(summaryContent, gameStore, similarityThreshold = 0.7) {
+  const rawTodos = parseTodoItems(summaryContent)
+  if (rawTodos.length <= 1 && !gameStore) return summaryContent
+
+  const existingPending = gameStore ? collectPendingTodosFromStore(gameStore) : []
+  const unique = []
+
+  for (const todo of rawTodos) {
+    const duplicatedInSelf = unique.some(existing => calculateTodoSimilarity(existing, todo) > similarityThreshold)
+    if (duplicatedInSelf) continue
+
+    const duplicatedInStore = existingPending.some(existing => calculateTodoSimilarity(existing, todo) > similarityThreshold)
+    if (duplicatedInStore) continue
+
+    unique.push(todo)
+  }
+
+  return updateTodoLine(summaryContent, unique)
+}
+
+export function cleanupHistoricalTodoDuplicates(gameStore, options = {}) {
+  const threshold = Number.isFinite(options.threshold) ? options.threshold : 0.7
+  const dryRun = options.dryRun !== false
+  const summaries = (gameStore.player?.summaries || [])
+    .filter(s => s.type === 'minor' || s.type === 'diary')
+    .sort((a, b) => (a.floor || 0) - (b.floor || 0))
+
+  const canonicalPending = []
+  const duplicates = []
+
+  for (const summary of summaries) {
+    const todos = parseTodoItems(summary.content)
+    for (let i = 0; i < todos.length; i++) {
+      const status = getTodoStatus(gameStore, summary.floor, i)
+      if (status !== 'pending') continue
+
+      const matched = canonicalPending.find(item => calculateTodoSimilarity(item.content, todos[i]) > threshold)
+      if (matched) {
+        duplicates.push({ floor: summary.floor, todoIndex: i, content: todos[i], duplicateOf: matched })
+      } else {
+        canonicalPending.push({ floor: summary.floor, todoIndex: i, content: todos[i] })
+      }
+    }
+  }
+
+  if (!dryRun) {
+    for (const dup of duplicates) {
+      const summary = findSummaryByTodoFloor(gameStore, dup.floor)
+      if (!summary) continue
+      upsertTodoMarker(gameStore, summary, dup.floor, dup.todoIndex, {
+        completedAt: gameStore.meta.currentFloor,
+        completedTimestamp: Date.now(),
+        matchedBy: 'duplicate_filter',
+        todoStatus: 'cancelled',
+        cancelReason: '重复待办自动合并'
+      })
+      unmarkSummaryCompletedIndex(summary, dup.todoIndex)
+    }
+  }
+
+  return {
+    scannedSummaries: summaries.length,
+    canonicalCount: canonicalPending.length,
+    duplicateCount: duplicates.length,
+    duplicates
+  }
 }
 
 /**

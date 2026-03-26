@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { generateDiary } from '../utils/summaryManager'
-import { parseTodoItems, isTodoCompleted, findSummaryByTodoFloor, findTodoMarker, getTodoMarkerFloor } from '../utils/todoManager'
+import { parseTodoItems, getTodoStatus, findSummaryByTodoFloor, findTodoMarker, getTodoMarkerFloor } from '../utils/todoManager'
 import { getErrorMessage } from '../utils/errorUtils'
 
 const emit = defineEmits(['close'])
@@ -14,7 +14,7 @@ const editContent = ref('')
 const isGenerating = ref(false)
 const selectedFloors = ref([]) // 用于批量选择
 const selectionMode = ref(false) // 是否处于选择模式
-const todoFilter = ref('all') // all, pending, completed
+const todoFilter = ref('all') // all, pending, completed, cancelled
 
 const summaries = computed(() => {
   // 获取现有的总结
@@ -277,7 +277,9 @@ const allTodos = computed(() => {
     if (summary.type === 'minor' || summary.type === 'diary') {
       const todoItems = parseTodoItems(summary.content)
       todoItems.forEach((content, index) => {
-        const isCompleted = isTodoCompleted(gameStore, summary.floor, index)
+        const status = getTodoStatus(gameStore, summary.floor, index)
+        const isCompleted = status === 'completed'
+        const isCancelled = status === 'cancelled'
         const marker = findTodoMarker(gameStore, summary.floor, index)
 
         todos.push({
@@ -285,9 +287,12 @@ const allTodos = computed(() => {
           index,
           content,
           gameDate: summary.gameDate || '未知日期',
+          status,
           isCompleted,
+          isCancelled,
           completedAt: marker?.completedAt,
           completedTimestamp: marker?.completedTimestamp,
+          cancelReason: marker?.cancelReason,
           matchedBy: marker?.matchedBy
         })
       })
@@ -296,12 +301,14 @@ const allTodos = computed(() => {
   return todos.sort((a, b) => b.floor - a.floor)
 })
 
-const pendingTodos = computed(() => allTodos.value.filter(t => !t.isCompleted))
+const pendingTodos = computed(() => allTodos.value.filter(t => t.status === 'pending'))
 const completedTodos = computed(() => allTodos.value.filter(t => t.isCompleted))
+const cancelledTodos = computed(() => allTodos.value.filter(t => t.isCancelled))
 
 const filteredTodos = computed(() => {
   if (todoFilter.value === 'pending') return pendingTodos.value
   if (todoFilter.value === 'completed') return completedTodos.value
+  if (todoFilter.value === 'cancelled') return cancelledTodos.value
   return allTodos.value
 })
 
@@ -313,8 +320,8 @@ const toggleTodoCompletion = (todo) => {
     ? summary.coveredFloors
     : [summary.floor]
 
-  if (todo.isCompleted) {
-    // 取消完成标记
+  if (todo.status === 'completed' || todo.status === 'cancelled') {
+    // 取消已完成/已取消标记，恢复为未完成
     gameStore.notifications.completedTodoMarkers = gameStore.notifications.completedTodoMarkers?.filter(
       m => !(m.todoIndex === todo.index && (m.floor === markerFloor || coveredFloors.includes(m.floor)))
     ) || []
@@ -430,6 +437,13 @@ const formatTimestamp = (ts) => {
             >
               已完成 ({{ completedTodos.length }})
             </button>
+            <button
+              :class="{ active: todoFilter === 'cancelled' }"
+              @click="todoFilter = 'cancelled'"
+              class="filter-btn"
+            >
+              已取消 ({{ cancelledTodos.length }})
+            </button>
           </div>
         </div>
 
@@ -438,7 +452,7 @@ const formatTimestamp = (ts) => {
             v-for="todo in filteredTodos"
             :key="`${todo.floor}-${todo.index}`"
             class="todo-item"
-            :class="{ completed: todo.isCompleted }"
+            :class="{ completed: todo.isCompleted, cancelled: todo.isCancelled }"
           >
             <div class="todo-header">
               <span class="todo-floor">楼层 {{ todo.floor }}</span>
@@ -448,14 +462,15 @@ const formatTimestamp = (ts) => {
               </button>
             </div>
             <div class="todo-content">{{ todo.content }}</div>
-            <div v-if="todo.isCompleted" class="todo-completion-info">
-              完成于楼层 {{ todo.completedAt }}
+            <div v-if="todo.isCompleted || todo.isCancelled" class="todo-completion-info">
+              {{ todo.isCancelled ? '取消于楼层' : '完成于楼层' }} {{ todo.completedAt }}
               ({{ formatTimestamp(todo.completedTimestamp) }})
-              <span class="match-badge">{{ todo.matchedBy === 'keyword' ? '关键词' : todo.matchedBy === 'index' ? '索引' : '手动' }}</span>
+              <span class="match-badge">{{ todo.matchedBy === 'keyword' ? '关键词' : todo.matchedBy === 'index' ? '索引' : todo.matchedBy === 'cancel' ? '取消' : todo.matchedBy === 'duplicate_filter' ? '去重' : '手动' }}</span>
+              <span v-if="todo.isCancelled && todo.cancelReason" class="cancel-reason">{{ todo.cancelReason }}</span>
             </div>
           </div>
           <div v-if="filteredTodos.length === 0" class="empty-state">
-            <p>{{ todoFilter === 'pending' ? '暂无未完成的待办事项' : todoFilter === 'completed' ? '暂无已完成的待办事项' : '暂无待办事项' }}</p>
+            <p>{{ todoFilter === 'pending' ? '暂无未完成的待办事项' : todoFilter === 'completed' ? '暂无已完成的待办事项' : todoFilter === 'cancelled' ? '暂无已取消的待办事项' : '暂无待办事项' }}</p>
           </div>
         </div>
       </div>
@@ -1017,6 +1032,12 @@ const formatTimestamp = (ts) => {
   background: #f8f8f8;
 }
 
+.todo-item.cancelled {
+  opacity: 0.75;
+  background: #fff6eb;
+  border: 1px solid #ffd7a6;
+}
+
 .todo-header {
   display: flex;
   align-items: center;
@@ -1075,6 +1096,11 @@ const formatTimestamp = (ts) => {
   color: #8e8e93;
 }
 
+.todo-item.cancelled .todo-content {
+  text-decoration: line-through;
+  color: #b2742d;
+}
+
 .todo-completion-info {
   font-size: 12px;
   color: #8e8e93;
@@ -1091,6 +1117,10 @@ const formatTimestamp = (ts) => {
   color: #333;
   font-size: 11px;
   font-weight: 500;
+}
+
+.cancel-reason {
+  color: #b2742d;
 }
 
 .empty-state {

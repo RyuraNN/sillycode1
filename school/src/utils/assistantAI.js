@@ -2,7 +2,7 @@ import { useGameStore } from '../stores/gameStore'
 import { buildSystemPromptContent } from './prompts'
 import { getAllBookNames } from './worldbookHelper'
 import { getErrorMessage } from './errorUtils'
-import { isTodoCompleted, parseTodoItems } from './todoManager'
+import { isTodoCompleted, isTodoCancelled, parseTodoItems } from './todoManager'
 import { toTOON } from './toonSerializer'
 import { SUMMARY_FORMAT_FIELDS } from './summaryConstants'
 import { buildApiRequest, extractReply, PROVIDER_PRESETS } from './aiProviders'
@@ -238,7 +238,7 @@ function buildPendingTodosContext(gameStore) {
     .map(summary => {
       const pendingTodos = parseTodoItems(summary.content)
         .map((content, index) => ({ content, index }))
-        .filter(todo => !isTodoCompleted(gameStore, summary.floor, todo.index))
+        .filter(todo => !isTodoCompleted(gameStore, summary.floor, todo.index) && !isTodoCancelled(gameStore, summary.floor, todo.index))
 
       if (pendingTodos.length === 0) {
         return ''
@@ -259,24 +259,30 @@ function buildPendingTodosContext(gameStore) {
  */
 const TODO_MANAGEMENT_DATA = {
   title: '待办事项管理',
-  description: '当玩家完成了之前约定的待办事项时，使用以下指令标记为已完成',
-  command: '<complete_todo floor="楼层号" keyword="待办关键词" />',
+  description: '根据剧情进展自动维护待办状态（完成/取消），并避免重复待办反复登记',
+  commands: [
+    '<complete_todo floor="楼层号" keyword="待办关键词" />',
+    '<cancel_todo floor="楼层号" keyword="待办关键词" reason="取消原因" />'
+  ],
   parameters: {
     floor: '待办事项所在的小总结楼层号（从RAG召回或桥接总结中可以看到）',
-    keyword: '待办内容的关键词或部分内容'
+    keyword: '待办内容的关键词或部分内容',
+    reason: '取消原因（可选）'
   },
   example: {
-    scenario: '召回总结显示"[RAG召回 楼层45 | 相关度85%] ... 待办事项|周五放学后在图书馆见面"，玩家完成了这个约定',
+    scenario: '召回总结显示"[RAG召回 楼层45 | 相关度85%] ... 待办事项|周五放学后在图书馆见面"，剧情里该约定要么已完成，要么被取消',
     outputs: [
       '<complete_todo floor="45" keyword="图书馆见面" />',
-      '<complete_todo floor="45" keyword="周五放学后在图书馆见面" />'
+      '<cancel_todo floor="45" keyword="图书馆见面" reason="剧情已取消该安排" />'
     ]
   },
   rules: [
     '只有在玩家明确完成了某个待办时才标记',
+    '如果剧情明确取消/不再执行某个待办，使用 cancel_todo 标记为已取消',
     '不要标记尚未完成或部分完成的待办',
     '关键词应能唯一识别该待办（多个待办时使用更具体的关键词）',
-    '该指令会自动从后续RAG召回中移除该待办',
+    '该指令会自动从后续RAG召回中移除对应待办',
+    '如果新待办与现有未完成待办语义高度相似（>0.7），不要重复登记',
     '反例：待办"周五放学后在图书馆见面"，但正文只是提到了图书馆或周五，并未实际赴约 → 不要标记完成'
   ]
 }

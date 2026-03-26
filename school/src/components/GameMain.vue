@@ -1454,16 +1454,22 @@ const processAIResponse = async (response) => {
       })
     }
 
-    // 新增：处理待办完成指令（仅在辅助AI开启时）
+    // 新增：处理待办动作指令（完成/取消，仅在辅助AI开启时）
     if (gameStore.settings.assistantAI?.enabled) {
       try {
-        const { extractTodoCompletionCommands, markTodoAsCompletedByKeyword, markTodoAsCompletedByIndex } = await import('../utils/todoManager')
+        const {
+          extractTodoActionCommands,
+          markTodoAsCompletedByKeyword,
+          markTodoAsCompletedByIndex,
+          markTodoAsCancelledByKeyword,
+          markTodoAsCancelledByIndex,
+        } = await import('../utils/todoManager')
 
-        const assistantCommands = extractTodoCompletionCommands(assistantRawResponse)
-        const mainCommands = extractTodoCompletionCommands(response)
+        const assistantCommands = extractTodoActionCommands(assistantRawResponse)
+        const mainCommands = extractTodoActionCommands(response)
         const todoCommands = [...assistantCommands, ...mainCommands].filter((cmd, idx, list) => {
-          const key = `${cmd.floor}:${cmd.mode}:${cmd.keyword ?? cmd.index}`
-          return list.findIndex(item => `${item.floor}:${item.mode}:${item.keyword ?? item.index}` === key) === idx
+          const key = `${cmd.action}:${cmd.floor}:${cmd.mode}:${cmd.keyword ?? cmd.index}`
+          return list.findIndex(item => `${item.action}:${item.floor}:${item.mode}:${item.keyword ?? item.index}` === key) === idx
         })
 
         if (todoCommands.length > 0) {
@@ -1471,14 +1477,22 @@ const processAIResponse = async (response) => {
 
           for (const cmd of todoCommands) {
             let success = false
-            if (cmd.mode === 'keyword') {
-              success = markTodoAsCompletedByKeyword(gameStore, cmd.floor, cmd.keyword, currentFloor)
-            } else if (cmd.mode === 'index') {
-              success = markTodoAsCompletedByIndex(gameStore, cmd.floor, cmd.index, currentFloor)
+            if (cmd.action === 'complete') {
+              if (cmd.mode === 'keyword') {
+                success = markTodoAsCompletedByKeyword(gameStore, cmd.floor, cmd.keyword, currentFloor)
+              } else if (cmd.mode === 'index') {
+                success = markTodoAsCompletedByIndex(gameStore, cmd.floor, cmd.index, currentFloor)
+              }
+            } else if (cmd.action === 'cancel') {
+              if (cmd.mode === 'keyword') {
+                success = markTodoAsCancelledByKeyword(gameStore, cmd.floor, cmd.keyword, currentFloor, cmd.reason || '')
+              } else if (cmd.mode === 'index') {
+                success = markTodoAsCancelledByIndex(gameStore, cmd.floor, cmd.index, currentFloor, cmd.reason || '')
+              }
             }
 
             if (success) {
-              console.log(`[GameMain] Todo marked as completed: floor=${cmd.floor}, ${cmd.mode}=${cmd.keyword || cmd.index}`)
+              console.log(`[GameMain] Todo ${cmd.action}: floor=${cmd.floor}, ${cmd.mode}=${cmd.keyword || cmd.index}`)
             }
           }
 

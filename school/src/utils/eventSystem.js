@@ -323,7 +323,9 @@ export function calculateTotalDays(gameTime) {
  * @returns {Array} 触发的事件列表
  */
 export function checkDailyTriggers(gameStore, triggers, eventLibrary) {
-  const { gameTime, eventChecks, player } = gameStore
+  const gameTime = gameStore.world.gameTime
+  const eventChecks = gameStore.events.checks
+  const player = gameStore.player
   const currentDateKey = getDateKey(gameTime)
   
   // 如果今天已经检查过，跳过
@@ -365,7 +367,9 @@ export function checkDailyTriggers(gameStore, triggers, eventLibrary) {
  * @returns {Array}
  */
 export function checkWeeklyTriggers(gameStore, triggers, eventLibrary) {
-  const { gameTime, eventChecks, player } = gameStore
+  const gameTime = gameStore.world.gameTime
+  const eventChecks = gameStore.events.checks
+  const player = gameStore.player
   const currentWeekKey = getWeekKey(gameTime)
   
   // 如果本周已经检查过，跳过
@@ -413,7 +417,9 @@ export function checkWeeklyTriggers(gameStore, triggers, eventLibrary) {
  * @returns {Array}
  */
 export function checkMonthlyTriggers(gameStore, triggers, eventLibrary) {
-  const { gameTime, eventChecks, player } = gameStore
+  const gameTime = gameStore.world.gameTime
+  const eventChecks = gameStore.events.checks
+  const player = gameStore.player
   const currentMonthKey = getMonthKey(gameTime)
   
   if (eventChecks.lastMonthly === currentMonthKey) {
@@ -460,7 +466,8 @@ export function checkMonthlyTriggers(gameStore, triggers, eventLibrary) {
  * @returns {Array}
  */
 export function checkVariableTriggers(gameStore, triggers, eventLibrary) {
-  const { gameTime, player } = gameStore
+  const gameTime = gameStore.world.gameTime
+  const player = gameStore.player
   const triggeredEvents = []
   
   const variableTriggers = triggers.filter(t => t.type === 'variable')
@@ -493,7 +500,8 @@ export function checkVariableTriggers(gameStore, triggers, eventLibrary) {
  * @returns {Array}
  */
 export function checkCompositeTriggers(gameStore, triggers, eventLibrary) {
-  const { gameTime, player } = gameStore
+  const gameTime = gameStore.world.gameTime
+  const player = gameStore.player
   const triggeredEvents = []
   
   const compositeTriggers = triggers.filter(t => t.type === 'composite')
@@ -525,7 +533,7 @@ export function checkCompositeTriggers(gameStore, triggers, eventLibrary) {
  * @param {Object} event 事件数据
  */
 export function activateEvent(gameStore, event) {
-  const { gameTime } = gameStore
+  const gameTime = gameStore.world.gameTime
   
   const activeEvent = {
     id: event.id,
@@ -549,7 +557,8 @@ export function activateEvent(gameStore, event) {
  * @param {Object} gameStore 
  */
 export function updateActiveEvents(gameStore) {
-  const { gameTime, player } = gameStore
+  const gameTime = gameStore.world.gameTime
+  const player = gameStore.player
   const currentTotalDays = calculateTotalDays(gameTime)
   
   // 处理非怪谈类事件

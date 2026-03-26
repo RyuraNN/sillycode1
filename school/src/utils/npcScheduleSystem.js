@@ -2361,7 +2361,7 @@ export function getNpcsAtLocation(locationId, gameStore = null) {
   if (locationNpcIndex.size === 0 && gameStore) updateAllNpcLocations(gameStore)
   const npcIds = locationNpcIndex.get(locationId)
   if (!npcIds || npcIds.size === 0) return []
-  if (gameStore?.npcs) return gameStore.world.npcs.filter(npc => npcIds.has(npc.id))
+  if (gameStore?.world?.npcs) return gameStore.world.npcs.filter(npc => npcIds.has(npc.id))
   return Array.from(npcIds)
 }
 
@@ -2615,7 +2615,7 @@ export async function loadScheduleDataFromWorldbook() {
 
 export async function initializeScheduleSystem(gameStore) {
   await loadScheduleDataFromWorldbook()
-  if (gameStore?.npcs?.length > 0) {
+  if (gameStore?.world?.npcs?.length > 0) {
     updateAllNpcLocations(gameStore, true)
   }
   console.log('[NpcSchedule] Schedule system initialized')
