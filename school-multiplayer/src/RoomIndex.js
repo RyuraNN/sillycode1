@@ -44,12 +44,9 @@ export class RoomIndex extends DurableObject {
       `UPDATE public_rooms SET player_count = ?, updated_at = ? WHERE room_id = ?`,
       count, Date.now(), roomId
     )
-    // 如果人数为 0，等一段时间后清理
+    // 如果人数为 0，设置 alarm 延迟清理
     if (count === 0) {
-      this.ctx.storage.sql.exec(
-        `DELETE FROM public_rooms WHERE room_id = ? AND player_count = 0 AND updated_at < ?`,
-        roomId, Date.now() - 300000 // 5分钟无人则删除
-      )
+      this.scheduleAlarm(Date.now() + 300_000)
     }
   }
 
@@ -66,9 +63,9 @@ export class RoomIndex extends DurableObject {
 
   /** 暂存 OAuth token（供前端轮询，5 分钟 TTL） */
   async storeAuthToken(nonce, data) {
-    await this.ctx.storage.put(`auth:${nonce}`, data)
-    // 5 分钟后自动删除
-    this.ctx.storage.setAlarm(Date.now() + 300000).catch(() => {})
+    await this.ctx.storage.put(`auth:${nonce}`, { ...data, _expiresAt: Date.now() + 300_000 })
+    // 确保 alarm 在 5 分钟后触发（DO 只能有一个 alarm，取最近的时间）
+    this.scheduleAlarm(Date.now() + 300_000)
   }
 
   /** 获取并消费 OAuth token（一次性） */
@@ -79,10 +76,42 @@ export class RoomIndex extends DurableObject {
     return data || null
   }
 
+  /** 确保 alarm 被设置（不覆盖更早的 alarm） */
+  async scheduleAlarm(desiredTime) {
+    try {
+      const current = await this.ctx.storage.getAlarm()
+      if (!current || desiredTime < current) {
+        await this.ctx.storage.setAlarm(desiredTime)
+      }
+    } catch {
+      this.ctx.storage.setAlarm(desiredTime).catch(() => {})
+    }
+  }
+
+  async alarm() {
+    const now = Date.now()
+
+    // 1. 清理空房间（player_count=0 且超过 5 分钟未更新）
+    this.ctx.storage.sql.exec(
+      `DELETE FROM public_rooms WHERE player_count = 0 AND updated_at < ?`, now - 300_000
+    )
+
+    // 2. 清理过期的 OAuth token
+    const allKV = await this.ctx.storage.list({ prefix: 'auth:' })
+    for (const [key, value] of allKV) {
+      if (value?._expiresAt && value._expiresAt < now) {
+        await this.ctx.storage.delete(key)
+      }
+    }
+  }
+
   async listPublicRooms() {
     // 清理超过 24 小时未更新的房间
     const cutoff = Date.now() - 86400000
     this.ctx.storage.sql.exec(`DELETE FROM public_rooms WHERE updated_at < ?`, cutoff)
+    // 兜底：清理超过 5 分钟的空房间
+    const emptyCutoff = Date.now() - 300_000
+    this.ctx.storage.sql.exec(`DELETE FROM public_rooms WHERE player_count = 0 AND updated_at < ?`, emptyCutoff)
 
     return [...this.ctx.storage.sql.exec(
       `SELECT room_id, room_name, host_name, game_mode, player_count, max_players, game_time, week_number, host_features, created_at, updated_at
