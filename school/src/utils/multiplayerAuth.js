@@ -25,7 +25,9 @@ function decodeJWTPayload(token) {
     const parts = token.split('.')
     if (parts.length !== 3) return null
     const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/')
-    return JSON.parse(atob(payload))
+    const binary = atob(payload)
+    const bytes = Uint8Array.from(binary, c => c.charCodeAt(0))
+    return JSON.parse(new TextDecoder().decode(bytes))
   } catch {
     return null
   }
