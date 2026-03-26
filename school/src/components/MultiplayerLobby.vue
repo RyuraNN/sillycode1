@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, onBeforeUnmount, computed, nextTick } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { useMultiplayerStore } from '../stores/multiplayerStore'
 import {
@@ -12,6 +12,9 @@ import {
   sendMessage,
   sendPlayerUpdate,
   sendWorldbookSyncRequest,
+  getSavedSession,
+  clearSavedSessionManual,
+  sendGameStart,
 } from '../utils/multiplayerWs'
 import {
   generateWorldbookHash,
@@ -105,6 +108,13 @@ const playerName = computed(() => {
 // ── 生命周期 ──
 onMounted(() => {
   loadPresets()
+  // 检查是否有上次意外断线的会话
+  const session = getSavedSession()
+  if (session && !mpStore.isConnected) {
+    savedSession.value = session
+  }
+  // 监听游戏开始事件（非房主自动进入游戏）
+  window.addEventListener('mp:game_started', onGameStarted)
   // 监听世界书同步事件
   window.addEventListener('mp:worldbook_data_request', onWorldbookDataRequest)
   window.addEventListener('mp:worldbook_data', onWorldbookDataReceived)
@@ -116,6 +126,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('mp:game_started', onGameStarted)
   window.removeEventListener('mp:worldbook_data_request', onWorldbookDataRequest)
   window.removeEventListener('mp:worldbook_data', onWorldbookDataReceived)
   window.removeEventListener('mp:save_transfer_started', onSaveTransferStarted)
@@ -405,10 +416,15 @@ function skipWorldbookSync() {
 /** 连接成功后根据角色路由到正确视图 */
 function checkPostConnectFlow() {
   if (joinAsSpectator.value) {
-    // 纯观战者：跳过角色创建，直接进入等待大厅并打开观战列表
+    // 纯观战者：跳过角色创建
     mpStore.isSpectatorOnly = true
     mpStore.showSpectateList = true
-    view.value = 'waiting_room'
+    if (mpStore.gameStarted) {
+      // 游戏已在进行，直接进入
+      enterGame()
+    } else {
+      view.value = 'waiting_room'
+    }
     return
   }
   if (mpStore.isHost) {
@@ -420,8 +436,11 @@ function checkPostConnectFlow() {
       view.value = 'character_create'
     }
   } else {
-    // 加入者：检查是否有预设
-    if (presets.value.length > 0) {
+    // 加入者（非房主）
+    if (mpStore.gameStarted) {
+      // 游戏已在进行，跳过等待直接进入游戏
+      enterGame()
+    } else if (presets.value.length > 0) {
       view.value = 'preset'
     } else {
       view.value = 'character_create'
@@ -532,20 +551,61 @@ function handleDisconnect() {
   view.value = 'main'
 }
 
+// 跟踪是否已进入游戏（enterGame 被调用过）
+const hasEnteredGame = ref(false)
+
+// 上次意外断线的会话信息
+const savedSession = ref(null)
+
+/** 重连到上次的房间 */
+function handleReconnect() {
+  const session = savedSession.value
+  if (!session) return
+  savedSession.value = null
+  clearSavedSessionManual()
+  connectToRoom(session.roomId, session.playerInfo)
+  view.value = 'connecting'
+  waitForConnection()
+}
+
+/** 忽略重连提示 */
+function dismissReconnect() {
+  savedSession.value = null
+  clearSavedSessionManual()
+}
+
 function handleBack() {
-  if (mpStore.isConnected) {
-    // 已连接时返回不断开，只是关闭面板
-    emit('back')
-  } else {
-    emit('back')
+  if (mpStore.isConnected && !hasEnteredGame.value) {
+    // 还在大厅/等待室，未进入游戏 → 断开连接
+    disconnect()
   }
+  emit('back')
 }
 
 /** 从等待大厅进入游戏 */
 function enterGame() {
   console.log('[MultiplayerLobby] enterGame: isConnected =', mpStore.isConnected, 'roomId =', mpStore.roomId, 'isMultiplayerActive =', mpStore.isMultiplayerActive)
+  hasEnteredGame.value = true
+  // 房主开始游戏时通知后端
+  if (mpStore.isHost) {
+    sendGameStart()
+  }
   emit('enter-game')
 }
+
+/** 非房主收到 game_started 广播时自动进入游戏 */
+function onGameStarted() {
+  if (!mpStore.isHost && view.value === 'waiting_room') {
+    enterGame()
+  }
+}
+
+// 组件卸载时，如果还在连接且未进入游戏 → 断开
+onBeforeUnmount(() => {
+  if (mpStore.isConnected && !hasEnteredGame.value) {
+    disconnect()
+  }
+})
 
 function formatTime(ts) {
   if (!ts) return '-'
@@ -675,6 +735,21 @@ function formatTime(ts) {
 
       <!-- 主菜单 -->
       <div v-else-if="view === 'main'" class="mp-main">
+        <!-- 断线重连提示 -->
+        <div v-if="savedSession" class="mp-reconnect-banner">
+          <div class="reconnect-info">
+            <span class="reconnect-icon">⚠️</span>
+            <div class="reconnect-text">
+              <strong>检测到上次意外断线</strong>
+              <span class="reconnect-detail">房间 {{ savedSession.roomId }}</span>
+            </div>
+          </div>
+          <div class="reconnect-actions">
+            <button class="mp-btn primary small" @click="handleReconnect">立即重连</button>
+            <button class="mp-btn small" @click="dismissReconnect">忽略</button>
+          </div>
+        </div>
+
         <div class="mp-btn-group">
           <button class="mp-btn primary" @click="view = 'create'">创建房间</button>
           <button class="mp-btn" @click="view = 'join'">加入房间</button>
@@ -805,6 +880,7 @@ function formatTime(ts) {
             <div class="room-list-main">
               <span class="room-list-name">{{ room.room_name }}</span>
               <span class="room-list-id">{{ room.room_id }}</span>
+              <span class="room-status-tag" :class="room.status === 'playing' ? 'status-playing' : 'status-waiting'">{{ room.status === 'playing' ? '游戏中' : '等待中' }}</span>
             </div>
             <div class="room-list-meta">
               <span>房主: {{ room.host_name }}</span>
@@ -956,6 +1032,45 @@ function formatTime(ts) {
 /* ── Content sections ── */
 .mp-main, .mp-form, .mp-waiting-room, .mp-connecting {
   padding: 18px 22px 22px;
+}
+
+/* ── Reconnect Banner ── */
+.mp-reconnect-banner {
+  background: rgba(234, 179, 8, 0.1);
+  border: 1px solid rgba(234, 179, 8, 0.3);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.reconnect-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.reconnect-icon { font-size: 1.2rem; }
+.reconnect-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.85rem;
+  color: #5d4037;
+}
+.reconnect-text strong { font-size: 0.9rem; }
+.reconnect-detail {
+  font-size: 0.78rem;
+  color: #8d6e63;
+  font-family: monospace;
+}
+.reconnect-actions {
+  display: flex;
+  gap: 8px;
+}
+.reconnect-actions .mp-btn.small {
+  padding: 5px 14px;
+  font-size: 0.78rem;
 }
 
 /* ── Waiting Room ── */
@@ -1389,6 +1504,22 @@ function formatTime(ts) {
   font-family: monospace;
   font-size: 0.82rem;
   color: rgba(255, 215, 0, 0.7);
+}
+
+.room-status-tag {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: auto;
+}
+.status-waiting {
+  background: rgba(234, 179, 8, 0.2);
+  color: rgba(234, 179, 8, 0.9);
+}
+.status-playing {
+  background: rgba(34, 197, 94, 0.2);
+  color: rgba(34, 197, 94, 0.9);
 }
 
 .room-list-meta {

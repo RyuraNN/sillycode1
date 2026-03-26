@@ -91,6 +91,9 @@ export const useMultiplayerStore = defineStore('multiplayer', {
     // ── 同地点玩家 ──
     playersAtMyLocation: [] as Array<{ playerId: string; playerName: string }>,
 
+    // ── 游戏状态 ──
+    gameStarted: false, // 房间是否已开始游戏
+
     // ── AFK 状态 ──
     isAfk: false, // 自己是否被标记为 AFK
     afkPlayers: {} as Record<string, boolean>, // playerId → true 表示该玩家 AFK
@@ -143,6 +146,7 @@ export const useMultiplayerStore = defineStore('multiplayer', {
       npcMemories: Record<string, NpcMemoryEntry[]>
       npcChatHistory?: Record<string, NpcChatSnippet[]>
       isHost: boolean
+      gameStarted?: boolean
     }) {
       this.roomId = data.roomInfo.roomId
       this.roomName = data.roomInfo.roomName
@@ -155,6 +159,7 @@ export const useMultiplayerStore = defineStore('multiplayer', {
       this.isConnecting = false
       this.connectionError = null
       this.hostDisconnected = false
+      this.gameStarted = data.gameStarted || false
 
       // 设置玩家列表
       this.players = {}
@@ -489,6 +494,7 @@ export const useMultiplayerStore = defineStore('multiplayer', {
       this.sharedNpcChatHistory = {}
       this.playersAtMyLocation = []
       this.roomGameTime = null
+      this.gameStarted = false
       this.isAfk = false
       this.afkPlayers = {}
       this.offlinePlayers = {}

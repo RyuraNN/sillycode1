@@ -30,6 +30,7 @@ export class SchoolRoom extends DurableObject {
     this.wbCheckNonces = new Map() // nonce → { createdAt, type }
     this.wbCheckCount = 0
     this.roomGameTime = null // 房间最新游戏时间（来自玩家 turn_complete）
+    this.gameStarted = false // 房间是否已开始游戏
     this.spectateMap = new Map() // spectatorId → { targetId, mode, excessTime? }
     this.spectateSettings = new Map() // targetPlayerId → { visibleLayers, lastLayerChange }
     this.pendingSpectateRequests = new Map() // requesterId → { targetId, mode, excessTime }
@@ -322,6 +323,7 @@ export class SchoolRoom extends DurableObject {
         isHost: playerId === config.hostId,
         roomGameTime: this.roomGameTime,
         roundNumber: this.roundNumber,
+        gameStarted: this.gameStarted,
       },
       ts: Date.now()
     }))
@@ -353,6 +355,9 @@ export class SchoolRoom extends DurableObject {
     if (this.sessions.size >= 2 && !this.wbCheckTimer) {
       this.startWorldbookCheckTimer()
     }
+
+    // 更新房间索引人数（加入时也要同步）
+    this.updateRoomIndex()
 
     return new Response(null, { status: 101, webSocket: client })
   }
@@ -421,6 +426,7 @@ export class SchoolRoom extends DurableObject {
       case 'save_request': this.handleSaveRequest(ws, session, msg.data); break
       case 'save_chunk': this.handleSaveChunk(ws, session, msg.data); break
       case 'offline_growth': this.handleOfflineGrowth(ws, session, msg.data); break
+      case 'game_start': this.handleGameStart(ws, session); break
       case 'batch':
         for (const m of (msg.data?.messages || [])) {
           await this.webSocketMessage(ws, JSON.stringify(m))
@@ -1167,6 +1173,28 @@ export class SchoolRoom extends DurableObject {
     }
   }
 
+  handleGameStart(ws, session) {
+    const config = this.getConfig()
+    if (!config || session.playerId !== config.hostId) return // 仅房主可以开始
+
+    this.gameStarted = true
+
+    // 广播游戏开始
+    this.broadcast(JSON.stringify({
+      type: 'game_started',
+      data: { startedBy: session.playerId },
+      ts: Date.now()
+    }))
+
+    // 更新 RoomIndex 状态为 playing
+    if (config.settings?.isPublic) {
+      try {
+        const indexStub = this.env.ROOM_INDEX.get(this.env.ROOM_INDEX.idFromName('global'))
+        indexStub.updateRoomStatus(config.roomId, 'playing')
+      } catch {}
+    }
+  }
+
   // ── WebSocket 关闭/错误 ──
 
   async webSocketClose(ws, code, reason) {
@@ -1635,14 +1663,17 @@ export class SchoolRoom extends DurableObject {
       this.stopWorldbookCheckTimer()
     }
 
-    // 从公共房间索引中移除
+    // 从公共房间索引中移除（先设为0人，再删除，双保险）
     try {
       const config = this.getConfig()
       if (config?.roomId) {
         const indexStub = this.env.ROOM_INDEX.get(this.env.ROOM_INDEX.idFromName('global'))
+        await indexStub.updatePlayerCount(config.roomId, 0)
         await indexStub.removeRoom(config.roomId)
       }
-    } catch {}
+    } catch (e) {
+      console.error('[SchoolRoom] Failed to remove room from index:', e)
+    }
 
     // 清空 DO 内所有 SQLite 数据
     try {

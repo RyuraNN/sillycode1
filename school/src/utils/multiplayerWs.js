@@ -18,6 +18,49 @@ let currentRoomId = null
 let currentPlayerInfo = null
 const MAX_RECONNECT_ATTEMPTS = 5
 
+const SAVED_SESSION_KEY = 'mp_saved_session'
+
+/** 保存当前会话信息到 localStorage（用于意外断线后重连） */
+function saveSessionToStorage() {
+  if (!currentRoomId || !currentPlayerInfo) return
+  try {
+    localStorage.setItem(SAVED_SESSION_KEY, JSON.stringify({
+      roomId: currentRoomId,
+      playerInfo: currentPlayerInfo,
+      wsUrl: WS_BASE_URL,
+      apiUrl: API_BASE_URL,
+      savedAt: Date.now(),
+    }))
+  } catch {}
+}
+
+/** 清除保存的会话信息 */
+function clearSavedSession() {
+  try { localStorage.removeItem(SAVED_SESSION_KEY) } catch {}
+}
+
+/** 获取保存的会话信息（24小时内有效） */
+export function getSavedSession() {
+  try {
+    const raw = localStorage.getItem(SAVED_SESSION_KEY)
+    if (!raw) return null
+    const session = JSON.parse(raw)
+    // 24小时过期
+    if (Date.now() - session.savedAt > 86400000) {
+      clearSavedSession()
+      return null
+    }
+    return session
+  } catch {
+    return null
+  }
+}
+
+/** 手动清除保存的会话 */
+export function clearSavedSessionManual() {
+  clearSavedSession()
+}
+
 // 消息批处理
 let batchQueue = []
 let batchTimer = null
@@ -218,6 +261,9 @@ export function disconnect() {
   currentRoomId = null
   currentPlayerInfo = null
 
+  // 主动断开 → 清除保存的会话（不再提示重连）
+  clearSavedSession()
+
   const mpStore = useMultiplayerStore()
   mpStore.reset()
 }
@@ -397,6 +443,10 @@ export function sendFeatureUpdate(features) {
   return sendMessage('feature_update', { features })
 }
 
+export function sendGameStart() {
+  return sendMessage('game_start', {})
+}
+
 // ── 消息处理 ──
 
 function handleMessage(msg) {
@@ -410,6 +460,8 @@ function handleMessage(msg) {
       if (msg.data.roomGameTime) {
         mpStore.roomGameTime = msg.data.roomGameTime
       }
+      // 保存会话信息（用于意外断线后重连）
+      saveSessionToStorage()
       // 教师模式：将已在房间的学生玩家名注入班级条目
       import('./multiplayerSync').then(({ injectExistingStudentsIntoClassEntries }) => {
         // 延迟执行，确保 welcome 数据已完全处理
@@ -527,6 +579,11 @@ function handleMessage(msg) {
 
     case 'afk_extended':
       window.dispatchEvent(new CustomEvent('mp:toast', { detail: { text: '已延时 2 分钟', type: 'info' } }))
+      break
+
+    case 'game_started':
+      mpStore.gameStarted = true
+      window.dispatchEvent(new CustomEvent('mp:game_started', { detail: msg.data }))
       break
 
     case 'ai_response':
