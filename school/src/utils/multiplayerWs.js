@@ -269,8 +269,8 @@ export function sendLeaveConversation() {
   return sendMessage('leave_conversation', {})
 }
 
-export function sendTurnAction(content) {
-  return sendMessage('turn_action', { content })
+export function sendTurnAction(content, playerInfo) {
+  return sendMessage('turn_action', { content, playerInfo: playerInfo || '' })
 }
 
 export function sendTurnSkip() {
@@ -389,6 +389,7 @@ function handleMessage(msg) {
         playerName: msg.data.playerName,
         content: msg.data.content,
         isSkip: false,
+        playerInfo: msg.data.playerInfo || '',
       })
       break
 

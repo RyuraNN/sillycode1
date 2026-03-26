@@ -1110,6 +1110,7 @@ export interface TurnAction {
   playerName: string
   content: string
   isSkip: boolean
+  playerInfo?: string
 }
 
 /** 时间同步警告 */

@@ -1035,6 +1035,50 @@ export const DEFAULT_CORE_RULES_DATA = {
 export const DEFAULT_CORE_RULES_PROMPT = toTOON(DEFAULT_CORE_RULES_DATA)
 
 /**
+ * 构建精简版玩家个人信息（联机对话组用）
+ * 非 host 玩家提交行动时附带，供 host 注入提示词
+ */
+export const buildCondensedPlayerInfo = (gameState) => {
+  const { player, npcs, npcRelationships } = gameState
+  const parts = []
+  const genderStr = GENDER_MAP[player.gender] || player.gender || '未知'
+  let className = player.classId
+  if (player.role === 'teacher') className = '教师'
+  else if (player.classRoster?.name) className = player.classRoster.name
+  const locObj = getItem(player.location)
+  const locName = locObj ? locObj.name : player.location
+  parts.push(`[玩家: ${player.name}] 性别:${genderStr} ${player.role === 'teacher' ? '教师' : '学生'} 班级:${className} 位置:${locName}`)
+  if (player.attributes) {
+    const a = player.attributes
+    parts.push(`属性: IQ(${a.iq}) EQ(${a.eq}) 体质(${a.physique}) 灵活(${a.flexibility}) 魅力(${a.charm}) 心情(${a.mood})`)
+  }
+  parts.push(`Lv.${player.level || 1} HP:${player.hp}/${player.maxHp} MP:${player.mp}/${player.maxMp}`)
+  if (player.backgroundStory?.trim()) {
+    parts.push(`背景: ${player.backgroundStory.trim()}`)
+  }
+  if (npcRelationships && npcs) {
+    const presentNpcs = getNpcsAtLocation(player.location, gameState)
+      .filter(npc => npc.isAlive)
+      .map(npc => npc.name)
+    const rels = []
+    for (const name of presentNpcs) {
+      const r = npcRelationships[name]?.relations?.[player.name]
+      if (!r) continue
+      const t = []
+      if (r.intimacy > 30) t.push('亲密')
+      else if (r.intimacy < -30) t.push('疏远')
+      if (r.trust > 30) t.push('信任')
+      if (r.passion > 30) t.push('好感')
+      if (r.hostility > 30) t.push('敌意')
+      if (r.tags?.length) t.push(...r.tags)
+      if (t.length > 0) rels.push(`${name}(${t.join(',')})`)
+    }
+    if (rels.length > 0) parts.push(`在场NPC关系: ${rels.join('; ')}`)
+  }
+  return parts.join('\n')
+}
+
+/**
  * 游戏状态提示词模板
  * @param {Object} gameState 游戏状态对象
  * @returns {string} 格式化后的提示词内容

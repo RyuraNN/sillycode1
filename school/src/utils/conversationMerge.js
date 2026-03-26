@@ -23,6 +23,7 @@ import {
   sendTurnTyping,
   sendAiResponse,
 } from './multiplayerWs'
+import { buildCondensedPlayerInfo } from './prompts'
 
 // ── 行动窗口计时器（host 端） ──
 let turnTimer = null
@@ -259,7 +260,12 @@ export function mergeActionsIntoMessage(hostMessage) {
  */
 export function submitAction(content) {
   if (content && content.trim()) {
-    sendTurnAction(content.trim())
+    let playerInfo = ''
+    try {
+      const gameStore = useGameStore()
+      playerInfo = buildCondensedPlayerInfo(gameStore.getGameState())
+    } catch (_) { /* ignore */ }
+    sendTurnAction(content.trim(), playerInfo)
   } else {
     sendTurnSkip()
   }
@@ -318,6 +324,17 @@ export function getConversationContextPrompt() {
 
   const names = members.map(m => m.playerName).join('、')
   let prompt = `\n[合并对话模式] 当前对话组成员：${names}\n`
+
+  // 添加其他玩家的精简个人信息
+  const playerInfos = mpStore.pendingTurnActions
+    .filter(a => a.playerInfo)
+    .map(a => a.playerInfo)
+  if (playerInfos.length > 0) {
+    prompt += '[对话组成员信息]\n'
+    for (const info of playerInfos) {
+      prompt += info + '\n'
+    }
+  }
 
   // 添加已收集的行动
   if (mpStore.pendingTurnActions.length > 0) {

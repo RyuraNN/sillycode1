@@ -591,7 +591,9 @@ const sendMessage = async () => {
   } else if (isInConversation() && !isConversationHost()) {
     // 非 host：不应走到这里（非 host 通过 ConversationMergePanel 提交行动）
     // 但防御性处理：将消息作为 turn_action 发送，不自己调 AI
-    sendTurnAction(messageContent)
+    let playerInfo = ''
+    try { playerInfo = (await import('../utils/prompts')).buildCondensedPlayerInfo(gameStore.getGameState()) } catch (_) {}
+    sendTurnAction(messageContent, playerInfo)
     isGenerating.value = false
     return
   }

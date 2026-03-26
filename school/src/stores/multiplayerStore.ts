@@ -268,6 +268,11 @@ export const useMultiplayerStore = defineStore('multiplayer', {
 
     handleConversationLeft(data: { playerId: string; playerName: string; groupId: string }) {
       if (this.conversationGroup) {
+        // 如果是自己离开（如位置变更导致自动退出），直接清除对话组
+        if (data.playerId === this.localPlayerId) {
+          this.conversationGroup = null
+          return
+        }
         this.conversationGroup.memberIds = this.conversationGroup.memberIds.filter(
           id => id !== data.playerId
         )

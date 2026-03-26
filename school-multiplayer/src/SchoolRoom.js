@@ -454,8 +454,14 @@ export class SchoolRoom extends DurableObject {
 
   handleLocationChange(ws, session, data) {
     if (!data?.location) return
+    const oldLocation = session.location
     session.location = data.location
     ws.serializeAttachment(session)
+
+    // 玩家离开地点时自动退出对话组
+    if (oldLocation !== data.location) {
+      this.handleLeaveConversation(ws, session)
+    }
 
     this.broadcast(JSON.stringify({
       type: 'location_change',
@@ -465,8 +471,11 @@ export class SchoolRoom extends DurableObject {
       ts: Date.now()
     }), ws)
 
-    // 广播该地点的所有玩家列表
+    // 广播新旧地点的玩家列表
     this.broadcastPlayersAtLocation(data.location)
+    if (oldLocation && oldLocation !== data.location) {
+      this.broadcastPlayersAtLocation(oldLocation)
+    }
   }
 
   handlePlayerInit(ws, session, data) {
@@ -580,6 +589,13 @@ export class SchoolRoom extends DurableObject {
 
     group.memberIds = group.memberIds.filter(id => id !== session.playerId)
 
+    // 通知离开的玩家自己（清除客户端对话组状态）
+    this.sendToPlayer(session.playerId, JSON.stringify({
+      type: 'conversation_left',
+      data: { playerId: session.playerId, playerName: session.playerName, groupId: group.groupId },
+      ts: Date.now()
+    }))
+
     // 通知剩余成员
     for (const memberId of group.memberIds) {
       this.sendToPlayer(memberId, JSON.stringify({
@@ -603,7 +619,7 @@ export class SchoolRoom extends DurableObject {
     // 转发给对话组的 host（AI 生成者）
     this.sendToPlayer(group.hostPlayerId, JSON.stringify({
       type: 'turn_action',
-      data: { content: data?.content || '', playerId: session.playerId, playerName: session.playerName },
+      data: { content: data?.content || '', playerInfo: data?.playerInfo || '', playerId: session.playerId, playerName: session.playerName },
       from: session.playerId,
       ts: Date.now()
     }))
