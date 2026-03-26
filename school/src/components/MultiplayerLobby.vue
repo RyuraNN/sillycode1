@@ -470,11 +470,21 @@ function onCharacterCreated() {
 
   // 角色创建后更新服务器上的玩家名（含角色名）
   const newName = playerName.value
+  const newRole = gameStore.player?.role || 'student'
+  const newClassId = gameStore.player?.classId || ''
   sendPlayerUpdate({
     playerName: newName,
-    role: gameStore.player?.role || 'student',
-    classId: gameStore.player?.classId || '',
+    role: newRole,
+    classId: newClassId,
   })
+
+  // 同步更新本地玩家列表（broadcast 不会回传给自己）
+  const localPlayer = mpStore.players[mpStore.localPlayerId]
+  if (localPlayer) {
+    localPlayer.playerName = newName
+    localPlayer.role = newRole
+    localPlayer.classId = newClassId
+  }
 
   view.value = 'waiting_room'
 }

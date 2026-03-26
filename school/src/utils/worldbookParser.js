@@ -794,6 +794,7 @@ export async function batchUpdateClubsInWorldbook(clubs, runId) {
     console.log(`[WorldbookParser] Batch updating ${clubs.length} clubs in worldbook: ${bookName}`)
 
     let updateSuccess = false
+    const broadcastList = []
 
     await window.updateWorldbookWith(bookName, (entries) => {
       const newEntries = [...entries]
@@ -817,20 +818,23 @@ export async function batchUpdateClubsInWorldbook(clubs, runId) {
           ? `[Club:${clubInfo.id}:${runId}] ${clubInfo.name}`
           : `[Club:${clubInfo.id}] ${clubInfo.name}`
 
+        const content = formatClubData(club)
+        const key = [clubInfo.name, clubInfo.president].filter(k => k)
+
         const existingIndex = newEntries.findIndex(e => e.name && e.name.includes(`[Club:${clubInfo.id}`))
         if (existingIndex !== -1) {
           newEntries[existingIndex] = {
             ...newEntries[existingIndex],
             name: entryName,
-            content: formatClubData(club),
-            key: [clubInfo.name, clubInfo.president].filter(k => k),
+            content,
+            key,
             enabled: true
           }
         } else {
           newEntries.push({
             name: entryName,
-            content: formatClubData(club),
-            key: [clubInfo.name, clubInfo.president].filter(k => k),
+            content,
+            key,
             strategy: { type: runId ? 'constant' : 'selective' },
             position: { type: 'before_character_definition', order: 50 },
             probability: 100,
@@ -838,6 +842,8 @@ export async function batchUpdateClubsInWorldbook(clubs, runId) {
             recursion: { prevent_outgoing: true }
           })
         }
+
+        broadcastList.push({ name: entryName, content, key, enabled: true })
       }
 
       updateSuccess = true
@@ -846,6 +852,10 @@ export async function batchUpdateClubsInWorldbook(clubs, runId) {
 
     if (updateSuccess) {
       console.log(`[WorldbookParser] Batch updated ${clubs.length} clubs successfully`)
+      // 联机广播社团条目变更
+      for (const info of broadcastList) {
+        broadcastEntryChange('upsert', bookName, info)
+      }
     }
     return updateSuccess
   } catch (e) {
@@ -1010,6 +1020,8 @@ export async function ensureClubExistsInWorldbook(clubData, runId, useGeminiMode
 
     console.log(`[WorldbookParser] Ensuring club ${clubData.id} exists in worldbook for run ${runId}`)
 
+    let createdEntry = null
+
     await window.updateWorldbookWith(bookName, (entries) => {
       const newEntries = [...entries]
       
@@ -1072,10 +1084,16 @@ export async function ensureClubExistsInWorldbook(clubData, runId, useGeminiMode
         }
         
         newEntries.push(newEntry)
+        createdEntry = newEntry
       }
       
       return newEntries
     })
+
+    // 联机广播新创建的社团条目
+    if (createdEntry) {
+      broadcastEntryChange('upsert', bookName, createdEntry)
+    }
     
     return true
   } catch (e) {
@@ -1107,14 +1125,24 @@ export async function removePlayerFromClubInWorldbook(clubId, playerName, clubDa
     const bookName = clubData._bookName
     console.log(`[WorldbookParser] Removing ${playerName} from club ${clubId} in run ${runId}`)
 
+    let removedEntryName = null
+    let enabledOriginalEntry = null
+
     await window.updateWorldbookWith(bookName, (entries) => {
       // 过滤掉当前 RunID 的副本条目
       const specificEntryNamePrefix = `[Club:${clubId}:${runId}]`
-      const filteredEntries = entries.filter(e => !e.name || !e.name.startsWith(specificEntryNamePrefix))
+      const filteredEntries = entries.filter(e => {
+        if (e.name && e.name.startsWith(specificEntryNamePrefix)) {
+          removedEntryName = e.name
+          return false
+        }
+        return true
+      })
 
       // 找到并启用原始条目
       const updatedEntries = filteredEntries.map(entry => {
         if (entry.name && entry.name.includes(`[Club:${clubId}]`) && !entry.name.includes(`[Club:${clubId}:`)) {
+          enabledOriginalEntry = { ...entry, enabled: true }
           return {
             ...entry,
             enabled: true,
@@ -1129,6 +1157,14 @@ export async function removePlayerFromClubInWorldbook(clubId, playerName, clubDa
 
       return updatedEntries
     })
+
+    // 联机广播：删除 runId 副本 + 启用原始条目
+    if (removedEntryName) {
+      broadcastEntryChange('disable', bookName, null, removedEntryName)
+    }
+    if (enabledOriginalEntry) {
+      broadcastEntryChange('enable', bookName, null, enabledOriginalEntry.name)
+    }
 
     return true
 
@@ -1151,6 +1187,7 @@ export async function removeClubFromWorldbook(clubId, permanent = false) {
 
   try {
     const bookNames = getAllBookNames()
+    const disabledNames = []
     for (const name of bookNames) {
       try {
         await window.updateWorldbookWith(name, (entries) => {
@@ -1158,6 +1195,7 @@ export async function removeClubFromWorldbook(clubId, permanent = false) {
             // 永久删除：过滤掉匹配的条目
             return entries.filter(entry => {
               if (entry.name && (entry.name.includes(`[Club:${clubId}]`) || entry.name.includes(`[Club:${clubId}:`))) {
+                disabledNames.push({ bookName: name, entryName: entry.name })
                 return false
               }
               return true
@@ -1166,6 +1204,7 @@ export async function removeClubFromWorldbook(clubId, permanent = false) {
             // 禁用：设置 enabled: false
             return entries.map(entry => {
               if (entry.name && (entry.name.includes(`[Club:${clubId}]`) || entry.name.includes(`[Club:${clubId}:`))) {
+                disabledNames.push({ bookName: name, entryName: entry.name })
                 return { ...entry, enabled: false }
               }
               return entry
@@ -1175,6 +1214,10 @@ export async function removeClubFromWorldbook(clubId, permanent = false) {
       } catch (e) {
         // skip inaccessible worldbooks
       }
+    }
+    // 联机广播社团移除/禁用
+    for (const info of disabledNames) {
+      broadcastEntryChange('disable', info.bookName, null, info.entryName)
     }
     return true
   } catch (e) {
@@ -1608,6 +1651,8 @@ export async function updateClassDataInWorldbook(classId, classData, excludeAcad
 
     console.log(`[WorldbookParser] Updating class ${classId} in worldbook: ${bookName}`)
 
+    let broadcastInfo = null
+
     await window.updateWorldbookWith(bookName, (entries) => {
       const newEntries = [...entries]
 
@@ -1634,11 +1679,13 @@ export async function updateClassDataInWorldbook(classId, classData, excludeAcad
         const names = extractNamesFromClassData(classData)
         if (!names.includes(classId)) names.push(classId)
         if (classData.name && !names.includes(classData.name)) names.push(classData.name)
+        const content = formatClassData(classData, excludeAcademic)
         newEntries[index] = {
           ...newEntries[index],
-          content: formatClassData(classData, excludeAcademic),
+          content,
           key: names
         }
+        broadcastInfo = { name: newEntries[index].name, content, key: names, enabled: newEntries[index].enabled }
       } else {
         // 创建新条目
         console.log(`[WorldbookParser] Creating new entry for class ${classId}`)
@@ -1648,9 +1695,11 @@ export async function updateClassDataInWorldbook(classId, classData, excludeAcad
         // 确保班级ID也在关键词中
         if (!names.includes(classId)) names.push(classId)
         
+        const entryName = `[Class:${classId}] ${classData.name || classId}`
+        const content = formatClassData(classData, excludeAcademic)
         newEntries.push({
-          name: `[Class:${classId}] ${classData.name || classId}`,
-          content: formatClassData(classData, excludeAcademic),
+          name: entryName,
+          content,
           key: names,
           strategy: {
             type: 'selective',
@@ -1673,9 +1722,15 @@ export async function updateClassDataInWorldbook(classId, classData, excludeAcad
             delay: null
           }
         })
+        broadcastInfo = { name: entryName, content, key: names, enabled: true }
       }
       return newEntries
     })
+
+    // 联机广播班级条目变更
+    if (broadcastInfo) {
+      broadcastEntryChange('upsert', bookName, broadcastInfo)
+    }
     
     return true
 
