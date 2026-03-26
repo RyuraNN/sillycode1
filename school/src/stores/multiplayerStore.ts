@@ -85,8 +85,15 @@ export const useMultiplayerStore = defineStore('multiplayer', {
     // ── NPC 聊天历史（跨玩家交互） ──
     sharedNpcChatHistory: {} as Record<string, NpcChatSnippet[]>,
 
+    // ── 房间游戏时间（用于检测时间差） ──
+    roomGameTime: null as { year: number; month: number; day: number; hour: number; minute: number; weekDay?: number } | null,
+
     // ── 同地点玩家 ──
     playersAtMyLocation: [] as Array<{ playerId: string; playerName: string }>,
+
+    // ── AFK 状态 ──
+    isAfk: false, // 自己是否被标记为 AFK
+    afkPlayers: {} as Record<string, boolean>, // playerId → true 表示该玩家 AFK
 
     // ── 房主断线 ──
     hostDisconnected: false,
@@ -319,10 +326,16 @@ export const useMultiplayerStore = defineStore('multiplayer', {
       this.turnInitiator = data.initiator
     },
 
-    handleTurnAdvance(data: { roundNumber: number }) {
+    handleTurnAdvance(data: { roundNumber: number; roomGameTime?: any }) {
       this.roundNumber = data.roundNumber
       this.roundStatus = 'idle'
       this.timeWarning = null
+      // 新回合开始，清除所有 AFK 状态
+      this.isAfk = false
+      this.afkPlayers = {}
+      if (data.roomGameTime) {
+        this.roomGameTime = data.roomGameTime
+      }
     },
 
     handleTimeWarning(data: TimeWarning) {
@@ -475,6 +488,9 @@ export const useMultiplayerStore = defineStore('multiplayer', {
       this.sharedNpcMemories = {}
       this.sharedNpcChatHistory = {}
       this.playersAtMyLocation = []
+      this.roomGameTime = null
+      this.isAfk = false
+      this.afkPlayers = {}
       this.offlinePlayers = {}
       this.showLobby = false
       this.latency = 0

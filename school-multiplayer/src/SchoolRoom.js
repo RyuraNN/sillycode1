@@ -29,6 +29,7 @@ export class SchoolRoom extends DurableObject {
     this.wbCheckTimer = null
     this.wbCheckNonces = new Map() // nonce → { createdAt, type }
     this.wbCheckCount = 0
+    this.roomGameTime = null // 房间最新游戏时间（来自玩家 turn_complete）
     this.spectateMap = new Map() // spectatorId → { targetId, mode, excessTime? }
     this.spectateSettings = new Map() // targetPlayerId → { visibleLayers, lastLayerChange }
     this.pendingSpectateRequests = new Map() // requesterId → { targetId, mode, excessTime }
@@ -319,6 +320,8 @@ export class SchoolRoom extends DurableObject {
         npcMemories: this.groupNpcMemories(npcMemories),
         npcChatHistory: this.groupNpcChatSnippets(npcChatSnippets),
         isHost: playerId === config.hostId,
+        roomGameTime: this.roomGameTime,
+        roundNumber: this.roundNumber,
       },
       ts: Date.now()
     }))
@@ -399,6 +402,7 @@ export class SchoolRoom extends DurableObject {
       case 'turn_typing': this.handleTurnTyping(ws, session, msg.data); break
       case 'turn_complete': this.handleTurnComplete(ws, session, msg.data); break
       case 'afk_extend': this.handleAfkExtend(ws, session); break
+      case 'activity_ping': this.handleActivityPing(ws, session); break
       case 'time_adjust': this.handleTimeAdjust(ws, session, msg.data); break
       case 'spectate_request': this.handleSpectateRequest(ws, session, msg.data); break
       case 'spectate_response': this.handleSpectateResponse(ws, session, msg.data); break
@@ -749,12 +753,26 @@ export class SchoolRoom extends DurableObject {
   handleTurnComplete(ws, session, data) {
     // 玩家完成回合 → 清除其 AFK 截止时间
     session.afkDeadline = Infinity
+    // 如果之前是 AFK，清除并广播
+    if (session.isAfk) {
+      session.isAfk = false
+      this.broadcast(JSON.stringify({
+        type: 'afk_status_change',
+        data: { playerId: session.playerId, isAfk: false },
+        ts: Date.now()
+      }))
+    }
 
     this.turnState.set(session.playerId, {
       timeDelta: data?.timeDelta || 0,
       gameTime: data?.gameTime || null,
       completed: true,
     })
+
+    // 更新房间游戏时间（取最新提交的非空时间）
+    if (data?.gameTime) {
+      this.roomGameTime = data.gameTime
+    }
 
     // AFK 检查：超过截止时间的玩家自动视为完成
     const now = Date.now()
@@ -766,12 +784,25 @@ export class SchoolRoom extends DurableObject {
 
     for (const s of this.sessions.values()) {
       if (s.afkDeadline && now > s.afkDeadline && !this.turnState.get(s.playerId)?.completed) {
+        // 检查玩家是否最近有活动（浏览历史、滚动等）—— 如果30秒内有活动，自动延期而不是标记AFK
+        if (s.lastActivity && (now - s.lastActivity) < 30000) {
+          s.afkDeadline = now + 60000 // 再给60秒
+          continue
+        }
         this.turnState.set(s.playerId, { timeDelta: 0, gameTime: null, completed: true, afk: true })
+        // 标记会话 AFK 状态
+        s.isAfk = true
         // 通知该玩家被标记为 AFK
         const afkWs = this.findPlayerWs(s.playerId)
         if (afkWs) {
           afkWs.send(JSON.stringify({ type: 'afk_warning', data: { message: '你已被标记为挂机，本回合自动跳过' }, ts: now }))
         }
+        // 广播 AFK 状态变更
+        this.broadcast(JSON.stringify({
+          type: 'afk_status_change',
+          data: { playerId: s.playerId, isAfk: true },
+          ts: now
+        }))
       }
     }
 
@@ -801,7 +832,7 @@ export class SchoolRoom extends DurableObject {
       const advanceTs = Date.now()
       this.broadcast(JSON.stringify({
         type: 'turn_advance',
-        data: { roundNumber: this.roundNumber },
+        data: { roundNumber: this.roundNumber, roomGameTime: this.roomGameTime },
         ts: advanceTs
       }))
 
@@ -815,6 +846,26 @@ export class SchoolRoom extends DurableObject {
 
       // 检查时间差观战者是否应该自动退出
       this.checkTimeGapSpectators(minDelta)
+    }
+  }
+
+  handleActivityPing(ws, session) {
+    // 前端检测到用户活跃（滚动、点击、按键等）时发送
+    // 如果玩家之前是 AFK 状态，清除并广播
+    if (session.isAfk) {
+      session.isAfk = false
+      this.broadcast(JSON.stringify({
+        type: 'afk_status_change',
+        data: { playerId: session.playerId, isAfk: false },
+        ts: Date.now()
+      }))
+    }
+    // 如果有 AFK 截止时间且快到了，自动延期
+    if (session.afkDeadline && session.afkDeadline !== Infinity) {
+      const remaining = session.afkDeadline - Date.now()
+      if (remaining < 30000) {
+        session.afkDeadline = Date.now() + 60000
+      }
     }
   }
 

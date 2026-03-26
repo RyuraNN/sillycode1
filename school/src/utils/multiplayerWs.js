@@ -158,6 +158,7 @@ export function connectToRoom(roomId, playerInfo) {
     startBatchTimer()
     startPingTimer()
     acquireWakeLock()
+    startActivityDetection()
   }
 
   ws.onmessage = (event) => {
@@ -317,6 +318,33 @@ export function sendAfkExtend() {
   return sendMessage('afk_extend', {})
 }
 
+// ── 用户活跃检测（防误判 AFK）──
+let lastActivityPingTime = 0
+const ACTIVITY_PING_INTERVAL = 15000 // 15秒节流
+
+export function sendActivityPing() {
+  const now = Date.now()
+  if (now - lastActivityPingTime < ACTIVITY_PING_INTERVAL) return
+  lastActivityPingTime = now
+  return sendMessage('activity_ping', {})
+}
+
+let _activityListenersAttached = false
+export function startActivityDetection() {
+  if (_activityListenersAttached) return
+  _activityListenersAttached = true
+  const handler = () => sendActivityPing()
+  document.addEventListener('scroll', handler, { passive: true, capture: true })
+  document.addEventListener('click', handler, { passive: true })
+  document.addEventListener('keydown', handler, { passive: true })
+  document.addEventListener('touchstart', handler, { passive: true })
+}
+
+export function stopActivityDetection() {
+  _activityListenersAttached = false
+  // 无法精确 removeEventListener（匿名函数），但断开 WS 后 sendMessage 不会发送
+}
+
 export function sendTurnComplete(timeDelta, gameTime) {
   return sendMessage('turn_complete', { timeDelta, gameTime })
 }
@@ -378,6 +406,10 @@ function handleMessage(msg) {
   switch (msg.type) {
     case 'welcome':
       mpStore.handleWelcome(msg.data)
+      // 存储房间游戏时间（用于检测时间差）
+      if (msg.data.roomGameTime) {
+        mpStore.roomGameTime = msg.data.roomGameTime
+      }
       // 教师模式：将已在房间的学生玩家名注入班级条目
       import('./multiplayerSync').then(({ injectExistingStudentsIntoClassEntries }) => {
         // 延迟执行，确保 welcome 数据已完全处理
@@ -475,7 +507,22 @@ function handleMessage(msg) {
       break
 
     case 'afk_warning':
+      mpStore.isAfk = true
       window.dispatchEvent(new CustomEvent('mp:toast', { detail: { text: msg.data?.message || '你已被标记为挂机', type: 'warn' } }))
+      break
+
+    case 'afk_status_change':
+      if (msg.data?.playerId) {
+        if (msg.data.isAfk) {
+          mpStore.afkPlayers[msg.data.playerId] = true
+        } else {
+          delete mpStore.afkPlayers[msg.data.playerId]
+        }
+        // 如果是自己
+        if (msg.data.playerId === mpStore.localPlayerId) {
+          mpStore.isAfk = msg.data.isAfk
+        }
+      }
       break
 
     case 'afk_extended':

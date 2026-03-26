@@ -133,6 +133,9 @@ function stopSpectating() {
         <span class="hud-count">{{ mpStore.playerCount }}</span>
       </div>
 
+      <!-- AFK 自身提示 -->
+      <span v-if="mpStore.isAfk" class="hud-afk-badge">AFK</span>
+
       <!-- 聊天按钮 -->
       <button class="hud-chat-btn" @click="openChat">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
@@ -153,6 +156,7 @@ function stopSpectating() {
           {{ { verified: '🟢', member: '🟡', logged_in: '⚪', anonymous: '⚫' }[getPlayerTrust(p.playerId)] }}
         </span>
         <span class="hud-dropdown-name">{{ p.playerName }}</span>
+        <span v-if="mpStore.afkPlayers[p.playerId]" class="hud-afk-tag">AFK</span>
         <span class="hud-dropdown-role">{{ p.role === 'teacher' ? '教师' : '学生' }}</span>
       </div>
     </div>
@@ -307,6 +311,36 @@ function stopSpectating() {
   background: rgba(139, 69, 19, 0.15);
   vertical-align: middle;
   margin-right: 8px;
+}
+
+/* ── AFK 标记 ── */
+.hud-afk-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(220, 38, 38, 0.15);
+  color: #dc2626;
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  animation: afk-pulse 2s ease-in-out infinite;
+}
+
+@keyframes afk-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.hud-afk-tag {
+  font-size: 0.6rem;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(220, 38, 38, 0.12);
+  color: #dc2626;
+  margin-left: 2px;
 }
 
 /* ── 玩家列表下拉 ── */
@@ -706,6 +740,15 @@ function stopSpectating() {
 :global(.dark-mode) .loc-label { color: rgba(218, 165, 32, 0.55); }
 :global(.dark-mode) .loc-player { color: rgba(255, 248, 220, 0.85); }
 :global(.dark-mode) .loc-player + .loc-player::before { color: rgba(218, 165, 32, 0.3); }
+:global(.dark-mode) .hud-afk-badge {
+  background: rgba(220, 60, 60, 0.2);
+  border-color: rgba(220, 80, 60, 0.4);
+  color: rgba(255, 140, 120, 0.95);
+}
+:global(.dark-mode) .hud-afk-tag {
+  background: rgba(220, 60, 60, 0.18);
+  color: rgba(255, 140, 120, 0.9);
+}
 :global(.dark-mode) .feat-ai { background: rgba(218, 165, 32, 0.2); color: rgba(255, 215, 0, 0.8); }
 :global(.dark-mode) .feat-rag { background: rgba(139, 69, 19, 0.25); color: rgba(218, 165, 32, 0.8); }
 :global(.dark-mode) .feat-sum { background: rgba(184, 134, 11, 0.2); color: rgba(255, 200, 100, 0.8); }
