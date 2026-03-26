@@ -33,6 +33,11 @@ function broadcastEntryChange(action, bookName, entry, entryName) {
   try {
     const mpStore = useMultiplayerStore()
     if (!mpStore.isMultiplayerActive) return
+
+    // 白名单：仅允许广播班级、社团、论坛条目，私人数据（Social/Moment/Impression/Jobs等）不广播
+    const nameToCheck = (entry?.name) || entryName || ''
+    if (!nameToCheck.startsWith('[Class:') && !nameToCheck.startsWith('[Club:') && !nameToCheck.startsWith('[Forum:')) return
+
     const data = { action, bookName }
     if (action === 'upsert' && entry) {
       data.entry = JSON.parse(JSON.stringify(entry))
@@ -543,6 +548,8 @@ export async function addNpcToClubInWorldbook(clubId, npcName, clubData, runId) 
     const bookName = clubData._bookName
     console.log(`[WorldbookParser] Adding NPC ${npcName} to club ${clubId} in run ${runId}`)
 
+    let broadcastInfo = null // 收集广播信息
+
     await window.updateWorldbookWith(bookName, (entries) => {
       const newEntries = [...entries]
       
@@ -609,6 +616,11 @@ export async function addNpcToClubInWorldbook(clubId, npcName, clubData, runId) 
           ...originalEntry,
           enabled: false
         }
+
+        broadcastInfo = {
+          upsertEntry: { name: specificEntryName, content: formatClubData(currentData), key: newKeys, strategy: { type: 'constant' }, enabled: true },
+          disabledOriginalName: originalEntry.name
+        }
       } else {
         // 直接更新现有的特定 RunID 条目
         newEntries[targetEntryIndex] = {
@@ -616,10 +628,22 @@ export async function addNpcToClubInWorldbook(clubId, npcName, clubData, runId) 
           content: formatClubData(currentData),
           key: newKeys
         }
+
+        broadcastInfo = {
+          upsertEntry: { name: targetEntry.name, content: formatClubData(currentData), key: newKeys, enabled: true }
+        }
       }
 
       return newEntries
     })
+
+    // 联机广播社团成员变更
+    if (broadcastInfo) {
+      broadcastEntryChange('upsert', bookName, broadcastInfo.upsertEntry)
+      if (broadcastInfo.disabledOriginalName) {
+        broadcastEntryChange('disable', bookName, null, broadcastInfo.disabledOriginalName)
+      }
+    }
 
     return true
 
@@ -853,6 +877,8 @@ export async function addPlayerToClubInWorldbook(clubId, playerName, clubData, r
     const bookName = clubData._bookName
     console.log(`[WorldbookParser] Adding ${playerName} to club ${clubId} in run ${runId}`)
 
+    let broadcastInfo = null
+
     await window.updateWorldbookWith(bookName, (entries) => {
       const newEntries = [...entries]
       
@@ -901,6 +927,10 @@ export async function addPlayerToClubInWorldbook(clubId, playerName, clubData, r
           key: newKeys,
           enabled: true
         }
+
+        broadcastInfo = {
+          upsertEntry: { name: targetEntry.name, content: formatClubData(currentData), key: newKeys, enabled: true }
+        }
       } else {
         // 如果是原始条目，需要创建副本并禁用原始条目
         const specificEntryName = `[Club:${clubId}:${runId}]` + (targetEntry.name.split(']')[1] || '')
@@ -931,10 +961,23 @@ export async function addPlayerToClubInWorldbook(clubId, playerName, clubData, r
           ...targetEntry,
           enabled: false
         }
+
+        broadcastInfo = {
+          upsertEntry: { name: specificEntryName, content: formatClubData(currentData), key: newKeys, strategy: { type: 'constant' }, enabled: true },
+          disabledOriginalName: targetEntry.name
+        }
       }
 
       return newEntries
     })
+
+    // 联机广播社团成员变更
+    if (broadcastInfo) {
+      broadcastEntryChange('upsert', bookName, broadcastInfo.upsertEntry)
+      if (broadcastInfo.disabledOriginalName) {
+        broadcastEntryChange('disable', bookName, null, broadcastInfo.disabledOriginalName)
+      }
+    }
 
     return true
 
@@ -2330,6 +2373,8 @@ export async function setupTeacherClassEntries(teachingClasses, homeroomClassIds
 
     console.log(`[WorldbookParser] Setting up teacher class entries for run ${runId}`)
 
+    const broadcastList = [] // 收集广播信息
+
     await window.updateWorldbookWith(bookName, (entries) => {
       const newEntries = [...entries]
 
@@ -2396,12 +2441,13 @@ export async function setupTeacherClassEntries(teachingClasses, homeroomClassIds
 
         // 教师教授的所有班级都设为常驻 (蓝灯)
         const strategyType = 'constant'
+        const content = formatClassData(classData)
 
         const newEntry = {
           ...originalEntry,
           id: undefined, // 清除ID让系统生成
           name: newEntryName,
-          content: formatClassData(classData),
+          content: content,
           key: names,
           strategy: {
             ...originalEntry.strategy,
@@ -2421,19 +2467,35 @@ export async function setupTeacherClassEntries(teachingClasses, homeroomClassIds
         }
 
         // 禁用原始条目
+        let disabledOriginalName = null
         if (originalEntry) {
           const originalIndex = newEntries.findIndex(e => e.name === originalEntry.name)
           if (originalIndex !== -1) {
+            disabledOriginalName = originalEntry.name
             newEntries[originalIndex] = {
               ...newEntries[originalIndex],
               enabled: false
             }
           }
         }
+
+        // 记录广播信息
+        broadcastList.push({
+          upsertEntry: { name: newEntryName, content, key: names, strategy: { type: strategyType }, enabled: true },
+          disabledOriginalName
+        })
       }
 
       return newEntries
     })
+
+    // 联机广播教师班级条目变更
+    for (const info of broadcastList) {
+      broadcastEntryChange('upsert', bookName, info.upsertEntry)
+      if (info.disabledOriginalName) {
+        broadcastEntryChange('disable', bookName, null, info.disabledOriginalName)
+      }
+    }
 
     return true
   } catch (e) {

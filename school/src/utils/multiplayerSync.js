@@ -47,13 +47,15 @@ export function isSyncableEntry(entryName) {
 }
 
 /**
- * 判断世界书条目是否为运行时需要广播的条目（带 roomRunId 的班级/社团）
+ * 判断世界书条目是否为运行时需要广播的条目（带 roomRunId 的班级/社团/论坛）
  */
 export function isRuntimeSyncableEntry(entryName) {
   if (!entryName) return false
   // 带 runId 的班级/社团条目
   if (/^\[Class:[\w.-]+:[\w.-]+\]/.test(entryName)) return true
   if (/^\[Club:[^:\]]+:[^\]]+\]/.test(entryName)) return true
+  // 带 runId 的论坛条目: [Forum:runId] 天华通论坛
+  if (/^\[Forum:[\w.-]+\]/.test(entryName)) return true
   return false
 }
 
@@ -461,6 +463,84 @@ export function syncLocationChange(newLocation) {
   const mpStore = useMultiplayerStore()
   if (!mpStore.isMultiplayerActive) return
   sendLocationChange(newLocation)
+}
+
+// ==================== 学生玩家名注入教师班级条目 ====================
+
+/**
+ * 当有学生玩家加入房间时，如果本地玩家是教师且该学生在自己任教的班级里，
+ * 将学生名字注入 runId 班级条目的学生列表中
+ * @param {Object} remotePlayer { playerName, role, classId }
+ */
+export async function injectStudentIntoClassEntry(remotePlayer) {
+  if (!remotePlayer || remotePlayer.role !== 'student' || !remotePlayer.classId || !remotePlayer.playerName) return
+
+  const gameStore = useGameStore()
+  const mpStore = useMultiplayerStore()
+  if (!mpStore.isMultiplayerActive) return
+
+  // 本地玩家必须是教师
+  if (gameStore.player.role !== 'teacher') return
+
+  // 检查该学生的班级是否在本地教师的任教列表中
+  const teachingClasses = gameStore.player.teachingClasses || []
+  if (!teachingClasses.includes(remotePlayer.classId)) return
+
+  const runId = gameStore.meta.currentRunId
+  if (!runId) return
+
+  console.log(`[MultiplayerSync] Injecting student "${remotePlayer.playerName}" into class ${remotePlayer.classId}`)
+
+  try {
+    const { createRunSpecificClassEntry } = await import('./worldbookParser')
+
+    // 获取当前班级数据
+    const classData = gameStore.world.allClassData?.[remotePlayer.classId]
+    if (!classData) return
+
+    // 检查学生是否已在列表中
+    const students = classData.students || []
+    const alreadyExists = students.some(s => s.name === remotePlayer.playerName)
+    if (alreadyExists) return
+
+    // 添加学生到本地数据
+    if (!classData.students) classData.students = []
+    classData.students.push({
+      name: remotePlayer.playerName,
+      gender: 'unknown',
+      origin: '联机玩家',
+      role: 'student',
+      classId: remotePlayer.classId
+    })
+
+    // 重新创建 runId 班级条目（会自动广播）
+    await createRunSpecificClassEntry(
+      remotePlayer.classId,
+      classData,
+      runId,
+      gameStore.player.classId
+    )
+
+    console.log(`[MultiplayerSync] Student "${remotePlayer.playerName}" injected into class ${remotePlayer.classId} entry`)
+  } catch (e) {
+    console.warn('[MultiplayerSync] Failed to inject student into class entry:', e)
+  }
+}
+
+/**
+ * 批量检查所有已在房间的玩家，注入学生到教师班级条目
+ * 在 welcome 之后调用
+ */
+export async function injectExistingStudentsIntoClassEntries() {
+  const mpStore = useMultiplayerStore()
+  if (!mpStore.isMultiplayerActive) return
+
+  const gameStore = useGameStore()
+  if (gameStore.player.role !== 'teacher') return
+
+  for (const player of Object.values(mpStore.players)) {
+    await injectStudentIntoClassEntry(player)
+  }
 }
 
 // ==================== NPC 聊天历史提取与同步 ====================

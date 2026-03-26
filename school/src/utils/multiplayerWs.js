@@ -350,11 +350,22 @@ function handleMessage(msg) {
   switch (msg.type) {
     case 'welcome':
       mpStore.handleWelcome(msg.data)
+      // 教师模式：将已在房间的学生玩家名注入班级条目
+      import('./multiplayerSync').then(({ injectExistingStudentsIntoClassEntries }) => {
+        // 延迟执行，确保 welcome 数据已完全处理
+        setTimeout(() => injectExistingStudentsIntoClassEntries(), 500)
+      }).catch(() => {})
       break
 
     case 'player_joined':
       mpStore.handlePlayerJoined(msg.data)
       window.dispatchEvent(new CustomEvent('mp:toast', { detail: { text: `${msg.data.playerName} 加入了房间`, type: 'info' } }))
+      // 教师模式：将学生玩家名注入班级条目
+      if (msg.data.role === 'student' && msg.data.classId) {
+        import('./multiplayerSync').then(({ injectStudentIntoClassEntry }) => {
+          injectStudentIntoClassEntry(msg.data)
+        }).catch(() => {})
+      }
       break
 
     case 'player_left':

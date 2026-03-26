@@ -4,7 +4,9 @@
  */
 
 import { useGameStore } from '../stores/gameStore'
+import { useMultiplayerStore } from '../stores/multiplayerStore'
 import { getCurrentBookName } from './worldbookHelper'
+import { sendWorldbookEntrySync } from './multiplayerWs'
 
 // 世界书条目名前缀
 const FORUM_WORLDBOOK_PREFIX = '[Forum:'
@@ -220,6 +222,19 @@ export async function saveForumToWorldbook(posts, runId, limit = 20) {
 
     await replaceWorldbook(primaryWorldbook, worldbook)
     console.log('[ForumWorldbook] Forum worldbook saved successfully')
+
+    // 联机广播论坛条目变更
+    try {
+      const mpStore = useMultiplayerStore()
+      if (mpStore.isMultiplayerActive) {
+        sendWorldbookEntrySync({
+          action: 'upsert',
+          bookName: primaryWorldbook,
+          entry: JSON.parse(JSON.stringify(forumEntry))
+        })
+      }
+    } catch (_) { /* 静默忽略 */ }
+
     return true
   } catch (e) {
     console.error('[ForumWorldbook] Failed to save forum worldbook:', e)
