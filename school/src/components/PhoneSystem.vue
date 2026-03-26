@@ -2,7 +2,7 @@
 import { defineEmits, ref, onMounted, onUnmounted, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { fetchModels, IMAGE_ANALYSIS_PROMPT } from '../utils/assistantAI'
-import { PROVIDER_PRESETS, getProviderList, fetchProviderModels, switchProviderConfig } from '../utils/aiProviders'
+import { PROVIDER_PRESETS, getProviderList, fetchProviderModels, switchProviderConfig, buildVertexApiUrl } from '../utils/aiProviders'
 import { useMultiplayerStore } from '../stores/multiplayerStore'
 import { disconnect as mpDisconnect } from '../utils/multiplayerWs'
 import { generateBatchSummaries, generateBatchDiaries } from '../utils/summaryManager'
@@ -276,6 +276,14 @@ const onProviderChange = () => {
   previousProvider = newProvider
   gameStore.saveToStorage()
 }
+
+const onVertexFieldChange = () => {
+  const ai = gameStore.settings.assistantAI
+  ai.apiUrl = buildVertexApiUrl(ai.vertexProjectId, ai.vertexRegion)
+  gameStore.saveToStorage()
+}
+
+const isVertexProvider = computed(() => gameStore.settings.assistantAI.provider === 'vertex')
 
 const loadModels = async () => {
   if (!gameStore.settings.assistantAI.apiUrl || !gameStore.settings.assistantAI.apiKey) {
@@ -704,14 +712,32 @@ const handleHomeClick = () => {
                             <option v-for="p in providerOptions" :key="p.key" :value="p.key">{{ p.label }}</option>
                           </select>
                         </div>
-                        <div class="input-row">
-                          <label>API 地址</label>
-                          <input type="text" v-model="gameStore.settings.assistantAI.apiUrl" :placeholder="PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.baseUrl || 'https://api.openai.com/v1'" @change="gameStore.saveToStorage()" :disabled="gameStore.settings.assistantAI.provider !== 'custom' && PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.baseUrl">
-                        </div>
-                        <div class="input-row">
-                          <label>API Key</label>
-                          <input type="password" v-model="gameStore.settings.assistantAI.apiKey" :placeholder="PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.placeholder || 'sk-...'" @change="gameStore.saveToStorage()">
-                        </div>
+                        <template v-if="isVertexProvider">
+                          <div class="input-row">
+                            <label>项目 ID</label>
+                            <input type="text" v-model="gameStore.settings.assistantAI.vertexProjectId" placeholder="my-gcp-project" @change="onVertexFieldChange">
+                          </div>
+                          <div class="input-row">
+                            <label>接入点</label>
+                            <select v-model="gameStore.settings.assistantAI.vertexRegion" @change="onVertexFieldChange" class="provider-select">
+                              <option v-for="r in PROVIDER_PRESETS.vertex.regions" :key="r" :value="r">{{ r }}</option>
+                            </select>
+                          </div>
+                          <div class="input-row">
+                            <label>Access Token</label>
+                            <input type="password" v-model="gameStore.settings.assistantAI.apiKey" placeholder="Google Cloud Access Token" @change="gameStore.saveToStorage()">
+                          </div>
+                        </template>
+                        <template v-else>
+                          <div class="input-row">
+                            <label>API 地址</label>
+                            <input type="text" v-model="gameStore.settings.assistantAI.apiUrl" :placeholder="PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.baseUrl || 'https://api.openai.com/v1'" @change="gameStore.saveToStorage()" :disabled="gameStore.settings.assistantAI.provider !== 'custom' && PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.baseUrl">
+                          </div>
+                          <div class="input-row">
+                            <label>API Key</label>
+                            <input type="password" v-model="gameStore.settings.assistantAI.apiKey" :placeholder="PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.placeholder || 'sk-...'" @change="gameStore.saveToStorage()">
+                          </div>
+                        </template>
                         <div class="input-row">
                           <label>模型</label>
                           <div class="model-select">

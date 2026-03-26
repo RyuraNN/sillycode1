@@ -67,7 +67,8 @@ export const PROVIDER_PRESETS = {
     models: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'],
     format: 'openai',
     placeholder: 'Google Cloud Access Token',
-    note: 'API地址格式: https://aiplatform.googleapis.com/v1beta1/projects/{PROJECT_ID}/locations/global/endpoints/openapi',
+    vertexFields: true,
+    regions: ['global', 'us-central1', 'us-east4', 'us-west1', 'europe-west1', 'europe-west4', 'asia-northeast1', 'asia-southeast1'],
   },
   custom: {
     label: '自定义 (OpenAI兼容)',
@@ -76,6 +77,18 @@ export const PROVIDER_PRESETS = {
     format: 'openai',
     placeholder: 'API Key',
   },
+}
+
+/**
+ * 根据 Vertex 项目ID和接入点构建 API 地址
+ */
+export function buildVertexApiUrl(projectId, region = 'global') {
+  if (!projectId) return ''
+  const r = region || 'global'
+  const host = r === 'global'
+    ? 'aiplatform.googleapis.com'
+    : `${r}-aiplatform.googleapis.com`
+  return `https://${host}/v1beta1/projects/${projectId}/locations/${r}/endpoints/openapi`
 }
 
 /**
@@ -99,11 +112,17 @@ export function switchProviderConfig(assistantAI, oldProvider, newProvider) {
   // 1. 保存旧渠道的配置
   if (!assistantAI.channelConfigs) assistantAI.channelConfigs = {}
   if (oldProvider) {
-    assistantAI.channelConfigs[oldProvider] = {
+    const cfg = {
       apiUrl: assistantAI.apiUrl || '',
       apiKey: assistantAI.apiKey || '',
       model: assistantAI.model || '',
     }
+    // 保存 vertex 专属字段
+    if (oldProvider === 'vertex') {
+      cfg.vertexProjectId = assistantAI.vertexProjectId || ''
+      cfg.vertexRegion = assistantAI.vertexRegion || 'global'
+    }
+    assistantAI.channelConfigs[oldProvider] = cfg
   }
 
   // 2. 加载目标渠道的已保存配置
@@ -115,11 +134,19 @@ export function switchProviderConfig(assistantAI, oldProvider, newProvider) {
     assistantAI.apiUrl = saved.apiUrl
     assistantAI.apiKey = saved.apiKey
     assistantAI.model = saved.model
+    if (newProvider === 'vertex') {
+      assistantAI.vertexProjectId = saved.vertexProjectId || ''
+      assistantAI.vertexRegion = saved.vertexRegion || 'global'
+    }
   } else {
     // 无已保存配置 → 用预设默认值，不填 apiKey
     assistantAI.apiUrl = preset.baseUrl || ''
     assistantAI.apiKey = ''
     assistantAI.model = preset.models?.[0] || ''
+    if (newProvider === 'vertex') {
+      assistantAI.vertexProjectId = ''
+      assistantAI.vertexRegion = 'global'
+    }
   }
 
   // 3. 返回模型列表
