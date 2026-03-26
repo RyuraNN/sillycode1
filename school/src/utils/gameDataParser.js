@@ -6,6 +6,8 @@
 import { useGameStore } from '../stores/gameStore'
 import { processNpcRelationshipUpdate, processNpcMoodUpdate } from './messageParser'
 import { calculateTotalHours } from './npcScheduleSystem'
+import { useMultiplayerStore } from '../stores/multiplayerStore'
+import { sendNpcMoveSync, sendNpcRelationshipSync } from './multiplayerWs'
 
 // 变量名中英文映射表
 export const VARIABLE_NAME_MAP = {
@@ -272,6 +274,12 @@ export const applyGameData = (data) => {
     // Process NPC relationship updates
     if (data.npc_relationship) {
       processNpcRelationshipUpdate(data)
+      // 联机模式下广播给其他玩家
+      const mpStore = useMultiplayerStore()
+      if (mpStore.isMultiplayerActive) {
+        const updates = Array.isArray(data.npc_relationship) ? data.npc_relationship : [data.npc_relationship]
+        sendNpcRelationshipSync(updates)
+      }
     }
 
     // Process NPC mood updates
@@ -282,6 +290,12 @@ export const applyGameData = (data) => {
     // Process NPC move updates (forced location)
     if (data.npc_move) {
       processNpcMoveUpdate(data.npc_move, gameStore)
+      // 联机模式下广播给其他玩家
+      const mpStore = useMultiplayerStore()
+      if (mpStore.isMultiplayerActive) {
+        const moves = Array.isArray(data.npc_move) ? data.npc_move : [data.npc_move]
+        sendNpcMoveSync(moves)
+      }
     }
 
     // Process outfit updates

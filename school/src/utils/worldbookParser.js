@@ -18,6 +18,31 @@ import { DEFAULT_TEMPLATES } from './npcScheduleSystem'
 import { parseAcademicTag } from '../data/academicData'
 import { getAllBookNames, getPrimaryBookName } from './worldbookHelper'
 import { getErrorMessage } from './errorUtils'
+import { useMultiplayerStore } from '../stores/multiplayerStore'
+import { sendWorldbookEntrySync } from './multiplayerWs'
+import { isRuntimeSyncableEntry } from './multiplayerSync'
+
+/**
+ * 联机模式下广播世界书条目变更
+ * @param {string} action 'upsert' | 'disable' | 'enable'
+ * @param {string} bookName 世界书名称
+ * @param {Object} [entry] 条目对象（upsert 时需要）
+ * @param {string} [entryName] 条目名（disable/enable 时需要）
+ */
+function broadcastEntryChange(action, bookName, entry, entryName) {
+  try {
+    const mpStore = useMultiplayerStore()
+    if (!mpStore.isMultiplayerActive) return
+    const data = { action, bookName }
+    if (action === 'upsert' && entry) {
+      data.entry = JSON.parse(JSON.stringify(entry))
+    }
+    if (entryName) data.entryName = entryName
+    sendWorldbookEntrySync(data)
+  } catch (e) {
+    // 静默忽略（可能不在联机模式）
+  }
+}
 
 // ==================== 社团数据格式规范 ====================
 /**
@@ -698,6 +723,17 @@ export async function createClubInWorldbook(clubInfo, runId) {
 
     if (updateSuccess) {
       console.log(`[WorldbookParser] Club ${clubInfo.id} created successfully in worldbook`)
+      // 联机广播新建的社团条目
+      const entryName = runId
+        ? `[Club:${clubInfo.id}:${runId}] ${clubInfo.name}`
+        : `[Club:${clubInfo.id}] ${clubInfo.name}`
+      broadcastEntryChange('upsert', bookName, {
+        name: entryName,
+        content: formatClubData(club),
+        key: [clubInfo.name, clubInfo.president].filter(k => k),
+        strategy: { type: runId ? 'constant' : 'selective' },
+        enabled: true
+      })
       return club
     } else {
       console.warn(`[WorldbookParser] updateWorldbookWith completed but updateSuccess is false`)
@@ -2544,28 +2580,24 @@ export async function createRunSpecificClassEntry(classId, classData, runId, pla
 
     console.log(`[WorldbookParser] Creating run-specific class entry [Class:${classId}:${runId}]`)
 
+    // 构建条目数据（updateWorldbookWith 内部 + 外部广播共用）
+    const names = extractNamesFromClassData(classData)
+    if (!names.includes(classId)) names.push(classId)
+    if (classData.name && !names.includes(classData.name)) names.push(classData.name)
+    const isPlayerClass = classId === playerClassId
+    const strategyType = isPlayerClass ? 'constant' : 'selective'
+    const content = formatClassData(classData, true)
+    const entryName = `[Class:${classId}:${runId}] ${classData.name || classId}`
+    let disabledOriginalName = null
+
     await window.updateWorldbookWith(bookName, (entries) => {
       const newEntries = [...entries]
 
-      // 检查是否已存在该 runId 的条目
       const existingRunIndex = newEntries.findIndex(e => 
         e.name && e.name.includes(`[Class:${classId}:${runId}]`)
       )
 
-      // 提取关键词
-      const names = extractNamesFromClassData(classData)
-      if (!names.includes(classId)) names.push(classId)
-      if (classData.name && !names.includes(classData.name)) names.push(classData.name)
-
-      // 是否是玩家班级
-      const isPlayerClass = classId === playerClassId
-      const strategyType = isPlayerClass ? 'constant' : 'selective'
-
-      const content = formatClassData(classData, true)
-      const entryName = `[Class:${classId}:${runId}] ${classData.name || classId}`
-
       if (existingRunIndex !== -1) {
-        // 更新已有的 runId 条目
         newEntries[existingRunIndex] = {
           ...newEntries[existingRunIndex],
           name: entryName,
@@ -2578,8 +2610,7 @@ export async function createRunSpecificClassEntry(classId, classData, runId, pla
           enabled: true
         }
       } else {
-        // 创建新的 runId 条目
-        const newEntry = {
+        newEntries.push({
           name: entryName,
           content: content,
           key: names,
@@ -2598,14 +2629,14 @@ export async function createRunSpecificClassEntry(classId, classData, runId, pla
           recursion: {
             prevent_outgoing: true
           }
-        }
-        newEntries.push(newEntry)
+        })
       }
 
       // 禁用该班级ID的原始条目（不带 runId 的）
       for (let i = 0; i < newEntries.length; i++) {
         const match = newEntries[i].name && newEntries[i].name.match(/\[Class:([\w.-]+)\]/)
         if (match && !newEntries[i].name.match(/\[Class:[\w.-]+:[\w.-]+\]/) && match[1] === classId) {
+          disabledOriginalName = newEntries[i].name
           newEntries[i] = {
             ...newEntries[i],
             enabled: false
@@ -2615,6 +2646,15 @@ export async function createRunSpecificClassEntry(classId, classData, runId, pla
 
       return newEntries
     })
+
+    // 联机广播：新建/更新的 runId 条目 + 禁用的原始条目
+    broadcastEntryChange('upsert', bookName, {
+      name: entryName, content, key: names,
+      strategy: { type: strategyType }, enabled: true
+    })
+    if (disabledOriginalName) {
+      broadcastEntryChange('disable', bookName, null, disabledOriginalName)
+    }
 
     return true
   } catch (e) {

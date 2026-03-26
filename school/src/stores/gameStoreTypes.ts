@@ -1001,6 +1001,14 @@ export interface NpcMemoryEntry {
   timestamp?: number     // 真实时间戳
 }
 
+/** NPC 聊天片段（跨玩家交互历史） */
+export interface NpcChatSnippet {
+  playerName: string    // 与 NPC 交互的玩家名
+  snippet: string       // 交互摘要/对话片段
+  gameTime: string      // 游戏内时间
+  createdAt?: number    // 真实时间戳
+}
+
 /** 联机模式下的对话组 */
 export interface ConversationGroup {
   groupId: string
@@ -1064,6 +1072,7 @@ export interface RoomInfo {
   settings: RoomSettings
   gameTime: any | null
   weekNumber: number
+  roomRunId?: string | null
   playerCount?: number
   players?: RemotePlayerInfo[]
 }

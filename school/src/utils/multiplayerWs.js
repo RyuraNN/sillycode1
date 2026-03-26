@@ -261,6 +261,22 @@ export function sendNpcMemorySync(npcName, memory) {
   return sendMessage('npc_memory_sync', { npcName, memory })
 }
 
+export function sendWorldbookEntrySync(data) {
+  return sendMessage('worldbook_entry_sync', data)
+}
+
+export function sendNpcChatSync(snippets) {
+  return sendMessage('npc_chat_sync', { snippets })
+}
+
+export function sendNpcMoveSync(moves) {
+  return sendMessage('npc_move_sync', { moves })
+}
+
+export function sendNpcRelationshipSync(updates) {
+  return sendMessage('npc_relationship_sync', { updates })
+}
+
 export function sendJoinConversation(targetPlayerId) {
   return sendMessage('join_conversation', { targetPlayerId })
 }
@@ -444,6 +460,43 @@ function handleMessage(msg) {
       // NPC 从另一个玩家转移过来
       // 这会在下次 prompts 构建时被注入
       console.log(`[MultiplayerWs] NPC transfer: ${msg.data.npcName} from ${msg.data.fromPlayer}`)
+      break
+
+    case 'worldbook_entry_sync':
+      // 收到其他玩家广播的世界书条目变更
+      window.dispatchEvent(new CustomEvent('mp:worldbook_entry_sync', { detail: msg.data }))
+      break
+
+    case 'npc_chat_sync':
+      // 收到其他玩家的 NPC 聊天片段
+      if (Array.isArray(msg.data?.snippets)) {
+        for (const s of msg.data.snippets) {
+          if (!s.npcName || !s.snippet) continue
+          if (!mpStore.sharedNpcChatHistory[s.npcName]) {
+            mpStore.sharedNpcChatHistory[s.npcName] = []
+          }
+          mpStore.sharedNpcChatHistory[s.npcName].push({
+            playerName: s.playerName,
+            snippet: s.snippet,
+            gameTime: s.gameTime || '',
+            createdAt: Date.now()
+          })
+          // 每个 NPC 最多 30 条
+          if (mpStore.sharedNpcChatHistory[s.npcName].length > 30) {
+            mpStore.sharedNpcChatHistory[s.npcName] = mpStore.sharedNpcChatHistory[s.npcName].slice(-30)
+          }
+        }
+      }
+      break
+
+    case 'npc_move_sync':
+      // 收到其他玩家广播的 NPC 强制移动
+      window.dispatchEvent(new CustomEvent('mp:npc_move_sync', { detail: msg.data }))
+      break
+
+    case 'npc_relationship_sync':
+      // 收到其他玩家广播的 NPC 关系变更
+      window.dispatchEvent(new CustomEvent('mp:npc_relationship_sync', { detail: msg.data }))
       break
 
     case 'time_warning':

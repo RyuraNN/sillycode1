@@ -13,6 +13,7 @@ import type {
   TurnAction,
   TimeWarning,
   NpcMemoryEntry,
+  NpcChatSnippet,
   WorldbookBackup,
   ChatLogEntry,
 } from './gameStoreTypes'
@@ -69,8 +70,15 @@ export const useMultiplayerStore = defineStore('multiplayer', {
     worldbookBackups: [] as WorldbookBackup[],
     hostWorldbookHash: null as string | null,
 
+    // ── 共享 RunId ──
+    roomRunId: null as string | null,
+    originalRunId: null as string | null, // 加入前保存的本地 runId，退出时恢复
+
     // ── NPC 记忆（联机共享） ──
     sharedNpcMemories: {} as Record<string, NpcMemoryEntry[]>,
+
+    // ── NPC 聊天历史（跨玩家交互） ──
+    sharedNpcChatHistory: {} as Record<string, NpcChatSnippet[]>,
 
     // ── 同地点玩家 ──
     playersAtMyLocation: [] as Array<{ playerId: string; playerName: string }>,
@@ -121,6 +129,7 @@ export const useMultiplayerStore = defineStore('multiplayer', {
       recentChat: any[]
       hostWorldbookHash: string | null
       npcMemories: Record<string, NpcMemoryEntry[]>
+      npcChatHistory?: Record<string, NpcChatSnippet[]>
       isHost: boolean
     }) {
       this.roomId = data.roomInfo.roomId
@@ -153,8 +162,24 @@ export const useMultiplayerStore = defineStore('multiplayer', {
       // 世界书 hash
       this.hostWorldbookHash = data.hostWorldbookHash
 
+      // 共享 RunId：非房主玩家覆盖本地 runId
+      if (data.roomInfo.roomRunId) {
+        this.roomRunId = data.roomInfo.roomRunId
+        if (!data.isHost) {
+          import('./gameStore').then(({ useGameStore }) => {
+            const gameStore = useGameStore()
+            this.originalRunId = gameStore.meta.currentRunId
+            gameStore.meta.currentRunId = data.roomInfo.roomRunId!
+            console.log('[MultiplayerStore] Override local runId to room runId:', data.roomInfo.roomRunId)
+          })
+        }
+      }
+
       // NPC 记忆
       this.sharedNpcMemories = data.npcMemories || {}
+
+      // NPC 聊天历史
+      this.sharedNpcChatHistory = data.npcChatHistory || {}
     },
 
     // ── 玩家加入/离开 ──
@@ -367,6 +392,17 @@ export const useMultiplayerStore = defineStore('multiplayer', {
 
     // ── 重置 ──
     reset() {
+      // 恢复原始 runId（如果被覆盖过）
+      if (this.originalRunId && this.roomRunId) {
+        import('./gameStore').then(({ useGameStore }) => {
+          const gameStore = useGameStore()
+          if (gameStore.meta.currentRunId === this.roomRunId) {
+            gameStore.meta.currentRunId = this.originalRunId!
+            console.log('[MultiplayerStore] Restored original runId:', this.originalRunId)
+          }
+        })
+      }
+
       this.isConnected = false
       this.isConnecting = false
       this.connectionError = null
@@ -392,10 +428,13 @@ export const useMultiplayerStore = defineStore('multiplayer', {
       this.hostDisconnected = false
       this.hostDisconnectTime = null
       this.sharedNpcMemories = {}
+      this.sharedNpcChatHistory = {}
       this.playersAtMyLocation = []
       this.offlinePlayers = {}
       this.showLobby = false
       this.latency = 0
+      this.roomRunId = null
+      this.originalRunId = null
     },
 
     // ── 世界书备份管理 ──

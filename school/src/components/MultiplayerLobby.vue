@@ -17,7 +17,7 @@ import {
   generateWorldbookHash,
   checkAndSyncWorldbook,
   acceptHostWorldbook,
-  getWorldbookSnapshot,
+  getSyncWorldbookSnapshot,
   generateWorldbookSpotSamples,
 } from '../utils/multiplayerSync'
 import { getAuthToken, getDisplayName } from '../utils/multiplayerAuth'
@@ -129,7 +129,7 @@ onUnmounted(() => {
 async function onWorldbookDataRequest(event) {
   if (!mpStore.isHost) return
   try {
-    const snapshot = await getWorldbookSnapshot()
+    const snapshot = await getSyncWorldbookSnapshot()
     sendMessage('worldbook_data', { snapshot })
   } catch (e) {
     console.error('[MultiplayerLobby] Failed to send worldbook data:', e)
@@ -203,6 +203,7 @@ async function handleCreate() {
       gameTime: gameStore.world?.gameTime || null,
       weekNumber: gameStore.events?.weekNumber || 1,
       hostFeatures: getLocalFeatures(),
+      roomRunId: gameStore.meta?.currentRunId || null,
     })
 
     // 创建后立即连接

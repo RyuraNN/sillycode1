@@ -7,15 +7,61 @@ import { useMultiplayerStore } from '../stores/multiplayerStore'
 import { useGameStore } from '../stores/gameStore'
 import { isWorldbookAvailable, getAllBookNames, getCurrentBookName } from './worldbookHelper'
 import { setItem, getItem, removeItem } from './indexedDB'
-import { sendLocationChange, sendPlayerUpdate, sendNpcMemorySync, sendWorldbookSyncComplete } from './multiplayerWs'
+import { sendLocationChange, sendPlayerUpdate, sendNpcMemorySync, sendNpcChatSync, sendWorldbookSyncComplete } from './multiplayerWs'
 
 const WB_BACKUP_KEY_PREFIX = 'wb_backup_'
+
+// ==================== 联机同步条目过滤 ====================
+
+const SYNC_ENTRY_PREFIXES = [
+  '[COT]',
+  '[数值参考]',
+  '[世界观]',
+  '[变量解析]',
+  '[AcademicData]',
+  '[TagData]',
+  '[MapData]',
+  '[CoursePool]',
+  '[Event]',
+  '[Social_Data]',
+  '[TH_NPCSchedule]',
+  '[EventTrigger]',
+  '[商品目录]',
+]
+
+/**
+ * 判断世界书条目是否应参与联机初始同步（hash 比对 + 快照传输）
+ * 仅同步：不带 runId 的班级/社团 + 固定列表条目
+ */
+export function isSyncableEntry(entryName) {
+  if (!entryName) return false
+  // 不带 runId 的班级条目: [Class:xxx] 但不匹配 [Class:xxx:runId]
+  if (/^\[Class:[\w.-]+\]/.test(entryName) && !/^\[Class:[\w.-]+:[\w.-]+\]/.test(entryName)) return true
+  // 不带 runId 的社团条目: [Club:xxx] 但不匹配 [Club:xxx:runId]
+  if (/^\[Club:[^:\]]+\]/.test(entryName) && !/^\[Club:[^:\]]+:[^\]]+\]/.test(entryName)) return true
+  // 固定列表条目
+  for (const prefix of SYNC_ENTRY_PREFIXES) {
+    if (entryName.startsWith(prefix)) return true
+  }
+  return false
+}
+
+/**
+ * 判断世界书条目是否为运行时需要广播的条目（带 roomRunId 的班级/社团）
+ */
+export function isRuntimeSyncableEntry(entryName) {
+  if (!entryName) return false
+  // 带 runId 的班级/社团条目
+  if (/^\[Class:[\w.-]+:[\w.-]+\]/.test(entryName)) return true
+  if (/^\[Club:[^:\]]+:[^\]]+\]/.test(entryName)) return true
+  return false
+}
 
 // ==================== 世界书 Hash ====================
 
 /**
- * 生成当前世界书内容的 hash（用于快速对比）
- * 使用所有世界书条目的 name + content 拼接后做 SHA-256
+ * 生成可同步世界书条目的 hash（用于快速对比）
+ * 仅包含 isSyncableEntry 通过的条目
  * @returns {Promise<string|null>} hex hash 字符串
  */
 export async function generateWorldbookHash() {
@@ -31,10 +77,14 @@ export async function generateWorldbookHash() {
       const entries = await window.getWorldbook(bookName)
       if (Array.isArray(entries)) {
         for (const entry of entries) {
-          allEntries.push(`${entry.name || ''}::${entry.content || ''}`)
+          if (isSyncableEntry(entry.name)) {
+            allEntries.push(`${entry.name || ''}::${entry.content || ''}`)
+          }
         }
       }
     }
+
+    if (allEntries.length === 0) return null
 
     // 排序确保顺序一致
     allEntries.sort()
@@ -55,7 +105,7 @@ export async function generateWorldbookHash() {
 // ==================== 世界书快照 ====================
 
 /**
- * 获取当前世界书的完整条目数据（用于备份和传输）
+ * 获取当前世界书的完整条目数据（用于备份）
  * @returns {Promise<{bookName: string, entries: any[]}[]>}
  */
 export async function getWorldbookSnapshot() {
@@ -73,6 +123,34 @@ export async function getWorldbookSnapshot() {
       }
     } catch (e) {
       console.warn(`[MultiplayerSync] Failed to get worldbook snapshot for ${bookName}:`, e)
+    }
+  }
+
+  return result
+}
+
+/**
+ * 获取仅包含可同步条目的世界书快照（用于联机传输）
+ * @returns {Promise<{bookName: string, entries: any[]}[]>}
+ */
+export async function getSyncWorldbookSnapshot() {
+  if (!isWorldbookAvailable()) return []
+
+  const bookNames = getAllBookNames()
+  const result = []
+
+  for (const bookName of bookNames) {
+    try {
+      if (typeof window.getWorldbook !== 'function') continue
+      const entries = await window.getWorldbook(bookName)
+      if (Array.isArray(entries)) {
+        const syncEntries = entries.filter(e => isSyncableEntry(e.name))
+        if (syncEntries.length > 0) {
+          result.push({ bookName, entries: JSON.parse(JSON.stringify(syncEntries)) })
+        }
+      }
+    } catch (e) {
+      console.warn(`[MultiplayerSync] Failed to get sync worldbook snapshot for ${bookName}:`, e)
     }
   }
 
@@ -181,7 +259,7 @@ export async function deleteWorldbookBackup(backupId) {
 }
 
 /**
- * 将世界书快照数据写入到实际世界书
+ * 将世界书快照数据写入到实际世界书（全量替换，仅用于备份恢复）
  * @param {Array<{bookName: string, entries: any[]}>} snapshot
  */
 async function applyWorldbookSnapshot(snapshot) {
@@ -194,6 +272,53 @@ async function applyWorldbookSnapshot(snapshot) {
       throw new Error('setWorldbook API 不可用')
     }
     await window.setWorldbook(book.bookName, book.entries)
+  }
+}
+
+/**
+ * 将可同步条目合并写入本地世界书（保留本地非同步条目）
+ * @param {Array<{bookName: string, entries: any[]}>} syncSnapshot 仅含同步条目的快照
+ */
+async function applySyncWorldbookSnapshot(syncSnapshot) {
+  if (!isWorldbookAvailable()) {
+    throw new Error('世界书 API 不可用')
+  }
+  if (typeof window.updateWorldbookWith !== 'function') {
+    throw new Error('updateWorldbookWith API 不可用')
+  }
+
+  for (const book of syncSnapshot) {
+    const hostEntryMap = new Map()
+    for (const entry of book.entries) {
+      if (entry.name) hostEntryMap.set(entry.name, entry)
+    }
+
+    await window.updateWorldbookWith(book.bookName, (localEntries) => {
+      const result = []
+      const matched = new Set()
+
+      for (const local of localEntries) {
+        if (isSyncableEntry(local.name) && hostEntryMap.has(local.name)) {
+          // 用房主版本替换本地同步条目
+          result.push(hostEntryMap.get(local.name))
+          matched.add(local.name)
+        } else if (isSyncableEntry(local.name) && !hostEntryMap.has(local.name)) {
+          // 本地有但房主没有的同步条目 → 删除
+        } else {
+          // 非同步条目 → 保留本地版本
+          result.push(local)
+        }
+      }
+
+      // 房主有但本地没有的同步条目 → 新增
+      for (const [name, entry] of hostEntryMap) {
+        if (!matched.has(name)) {
+          result.push(entry)
+        }
+      }
+
+      return result
+    })
   }
 }
 
@@ -238,8 +363,8 @@ export async function acceptHostWorldbook(hostSnapshot, extra = {}) {
       label: `联机同步前备份 (房间: ${extra.roomId || '?'}, 房主: ${extra.hostName || '?'})`,
     })
 
-    // 应用房主的世界书
-    await applyWorldbookSnapshot(hostSnapshot)
+    // 合并房主的同步条目到本地世界书（保留本地非同步条目）
+    await applySyncWorldbookSnapshot(hostSnapshot)
 
     // 通知服务端同步完成
     sendWorldbookSyncComplete(true)
@@ -336,6 +461,71 @@ export function syncLocationChange(newLocation) {
   const mpStore = useMultiplayerStore()
   if (!mpStore.isMultiplayerActive) return
   sendLocationChange(newLocation)
+}
+
+// ==================== NPC 聊天历史提取与同步 ====================
+
+/**
+ * 从 AI 回复中提取与 isAlive NPC 相关的交互片段，并同步到服务端
+ * 在每次 AI 回复后调用
+ * @param {string} aiContent AI 回复的原始文本
+ * @param {Array} aliveNpcs 当前 isAlive 的 NPC 列表 [{name, ...}]
+ * @param {string} playerName 当前玩家名
+ * @param {string} gameTimeStr 游戏内时间字符串
+ */
+export function extractAndSyncNpcChat(aiContent, aliveNpcs, playerName, gameTimeStr) {
+  const mpStore = useMultiplayerStore()
+  if (!mpStore.isMultiplayerActive) return
+  if (!aiContent || !aliveNpcs || aliveNpcs.length === 0) return
+
+  const snippets = []
+
+  for (const npc of aliveNpcs) {
+    if (!npc.name) continue
+
+    // 提取包含 NPC 名字的段落作为交互片段
+    // 按段落分割，找到包含 NPC 名字的段落
+    const paragraphs = aiContent.split(/\n{2,}/)
+    const relevantParts = []
+    for (const p of paragraphs) {
+      if (p.includes(npc.name) && p.trim().length > 10) {
+        // 截取合理长度（最多 200 字）
+        const trimmed = p.trim().slice(0, 200)
+        relevantParts.push(trimmed)
+      }
+    }
+
+    if (relevantParts.length > 0) {
+      // 取最多 2 段最相关的内容
+      const snippet = relevantParts.slice(0, 2).join(' ... ')
+      snippets.push({
+        npcName: npc.name,
+        snippet,
+        gameTime: gameTimeStr || '',
+        playerName,
+      })
+
+      // 同时写入本地 mpStore
+      if (!mpStore.sharedNpcChatHistory[npc.name]) {
+        mpStore.sharedNpcChatHistory[npc.name] = []
+      }
+      mpStore.sharedNpcChatHistory[npc.name].push({
+        playerName,
+        snippet,
+        gameTime: gameTimeStr || '',
+        createdAt: Date.now(),
+      })
+      // 限制条数
+      if (mpStore.sharedNpcChatHistory[npc.name].length > 30) {
+        mpStore.sharedNpcChatHistory[npc.name] = mpStore.sharedNpcChatHistory[npc.name].slice(-30)
+      }
+    }
+  }
+
+  if (snippets.length > 0) {
+    sendNpcChatSync(snippets)
+    console.log(`[MultiplayerSync] NPC chat sync: ${snippets.length} snippets for ${snippets.map(s => s.npcName).join(', ')}`)
+  }
 }
 
 // ==================== NPC 记忆同步钩子 ====================

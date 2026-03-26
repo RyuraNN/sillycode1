@@ -1427,6 +1427,21 @@ const processAIResponse = async (response) => {
     gameStore.cleanupSnapshots(gameLog.value)
     handleNewContent(contentAreaRef.value)
 
+    // 联机模式：提取 NPC 聊天片段并同步
+    if (mpStore.isMultiplayerActive) {
+      try {
+        const { extractAndSyncNpcChat } = await import('../utils/multiplayerSync')
+        const aliveNpcs = (gameStore.world.npcs || []).filter(n => n.isAlive)
+        if (aliveNpcs.length > 0) {
+          const gt = gameStore.world.gameTime
+          const timeStr = gt ? `${gt.month}月${gt.day}日 ${gt.hour}:${String(gt.minute || 0).padStart(2, '0')}` : ''
+          extractAndSyncNpcChat(trueRawContent || cleanedContent, aliveNpcs, gameStore.player.name, timeStr)
+        }
+      } catch (e) {
+        console.warn('[GameMain] NPC chat sync failed:', e)
+      }
+    }
+
     const summarySource = cleanedContent.replace(/<minor_summary>[\s\S]*?<\/minor_summary>/g, '').trim()
     const result = await processPostReply(summarySource, gameStore.meta.currentFloor, preGeneratedSummary)
 
@@ -2201,6 +2216,11 @@ onMounted(async () => {
   // 联机：监听合并对话 AI 回复（非 host 端接收）
   window.addEventListener('mp:ai_response', onMpAiResponse)
 
+  // 联机：世界书条目同步、NPC 强制移动和关系同步
+  window.addEventListener('mp:worldbook_entry_sync', onMpWorldbookEntrySync)
+  window.addEventListener('mp:npc_move_sync', onMpNpcMoveSync)
+  window.addEventListener('mp:npc_relationship_sync', onMpNpcRelationshipSync)
+
   // 联机：离线成长事件监听
   window.addEventListener('mp:player_reconnected', onMpPlayerReconnected)
   window.addEventListener('mp:offline_growth_applied', onMpOfflineGrowthApplied)
@@ -2220,6 +2240,79 @@ function onMpAiResponse(event) {
   gameStore.meta.currentFloor = gameLog.value.length
   handleNewContent(contentAreaRef.value)
   gameStore.createAutoSave(gameLog.value, gameStore.meta.currentFloor)
+}
+
+async function onMpWorldbookEntrySync(event) {
+  const data = event.detail
+  if (!data?.action || !data?.bookName) return
+
+  try {
+    if (data.action === 'upsert' && data.entry) {
+      // 创建或更新条目
+      if (typeof window.updateWorldbookWith === 'function') {
+        await window.updateWorldbookWith(data.bookName, (entries) => {
+          const idx = entries.findIndex(e => e.name === data.entry.name)
+          if (idx !== -1) {
+            entries[idx] = { ...entries[idx], ...data.entry }
+          } else {
+            entries.push(data.entry)
+          }
+          return entries
+        })
+        console.log(`[GameMain] WB entry sync upsert: ${data.entry.name}`)
+      }
+    } else if (data.action === 'disable' && data.entryName) {
+      // 禁用条目
+      if (typeof window.updateWorldbookWith === 'function') {
+        await window.updateWorldbookWith(data.bookName, (entries) => {
+          return entries.map(e => {
+            if (e.name === data.entryName) return { ...e, enabled: false }
+            return e
+          })
+        })
+        console.log(`[GameMain] WB entry sync disable: ${data.entryName}`)
+      }
+    } else if (data.action === 'enable' && data.entryName) {
+      // 启用条目
+      if (typeof window.updateWorldbookWith === 'function') {
+        await window.updateWorldbookWith(data.bookName, (entries) => {
+          return entries.map(e => {
+            if (e.name === data.entryName) return { ...e, enabled: true }
+            return e
+          })
+        })
+        console.log(`[GameMain] WB entry sync enable: ${data.entryName}`)
+      }
+    }
+  } catch (e) {
+    console.warn('[GameMain] Failed to apply worldbook entry sync:', e)
+  }
+}
+
+function onMpNpcMoveSync(event) {
+  const data = event.detail
+  if (!Array.isArray(data?.moves)) return
+  const currentTotalHours = gameStore.world.gameTime
+    ? (gameStore.world.gameTime.day - 1) * 24 + gameStore.world.gameTime.hour
+    : 0
+  for (const move of data.moves) {
+    const { name, location, duration } = move
+    if (!name || !location || !duration) continue
+    const npc = gameStore.world.npcs.find(n => n.name === name)
+    if (npc) {
+      npc.forcedLocation = { locationId: location, endTime: currentTotalHours + duration }
+      console.log(`[GameMain] NPC move sync: ${name} → ${location} for ${duration}h`)
+    }
+  }
+}
+
+function onMpNpcRelationshipSync(event) {
+  const data = event.detail
+  if (!Array.isArray(data?.updates)) return
+  import('../utils/messageParser').then(({ processNpcRelationshipUpdate }) => {
+    processNpcRelationshipUpdate({ npc_relationship: data.updates })
+    console.log(`[GameMain] NPC relationship sync: ${data.updates.length} updates applied`)
+  }).catch(e => console.warn('[GameMain] Failed to process NPC relationship sync:', e))
 }
 
 function onMpPlayerReconnected(event) {
@@ -2248,6 +2341,9 @@ onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)
   document.removeEventListener('click', closeMenu)
   window.removeEventListener('mp:ai_response', onMpAiResponse)
+  window.removeEventListener('mp:worldbook_entry_sync', onMpWorldbookEntrySync)
+  window.removeEventListener('mp:npc_move_sync', onMpNpcMoveSync)
+  window.removeEventListener('mp:npc_relationship_sync', onMpNpcRelationshipSync)
   window.removeEventListener('mp:player_reconnected', onMpPlayerReconnected)
   window.removeEventListener('mp:offline_growth_applied', onMpOfflineGrowthApplied)
   if (inputBarObserver) {

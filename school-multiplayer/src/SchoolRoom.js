@@ -87,6 +87,14 @@ export class SchoolRoom extends DurableObject {
         hash TEXT,
         updated_at INTEGER
       );
+      CREATE TABLE IF NOT EXISTS npc_chat_snippets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        npc_name TEXT NOT NULL,
+        player_name TEXT NOT NULL,
+        snippet TEXT NOT NULL,
+        game_time TEXT,
+        created_at INTEGER
+      );
     `)
   }
 
@@ -128,6 +136,7 @@ export class SchoolRoom extends DurableObject {
       },
       gameTime: body.gameTime || null,
       weekNumber: body.weekNumber || 1,
+      roomRunId: body.roomRunId || null,
     }
     this.saveConfig(config)
 
@@ -279,6 +288,11 @@ export class SchoolRoom extends DurableObject {
       `SELECT npc_name, time_str, content, witness, floor, created_at FROM npc_memories ORDER BY created_at ASC`
     )]
 
+    // 获取 NPC 聊天片段（每个 NPC 最多 30 条）
+    const npcChatSnippets = [...this.ctx.storage.sql.exec(
+      `SELECT npc_name, player_name, snippet, game_time, created_at FROM npc_chat_snippets ORDER BY created_at ASC`
+    )]
+
     // 发送欢迎消息
     server.send(JSON.stringify({
       type: 'welcome',
@@ -297,6 +311,7 @@ export class SchoolRoom extends DurableObject {
         recentChat,
         hostWorldbookHash: wbHashRow?.hash || null,
         npcMemories: this.groupNpcMemories(npcMemories),
+        npcChatHistory: this.groupNpcChatSnippets(npcChatSnippets),
         isHost: playerId === config.hostId,
       },
       ts: Date.now()
@@ -366,6 +381,10 @@ export class SchoolRoom extends DurableObject {
       case 'worldbook_sync_request': this.handleWorldbookSyncRequest(ws, session); break
       case 'worldbook_sync_complete': this.handleWorldbookSyncComplete(ws, session, msg.data); break
       case 'npc_memory_sync': this.handleNpcMemorySync(ws, session, msg.data); break
+      case 'npc_move_sync': this.handleNpcMoveSync(ws, session, msg.data); break
+      case 'npc_relationship_sync': this.handleNpcRelationshipSync(ws, session, msg.data); break
+      case 'worldbook_entry_sync': this.handleWorldbookEntrySync(ws, session, msg.data); break
+      case 'npc_chat_sync': this.handleNpcChatSync(ws, session, msg.data); break
       case 'join_conversation': this.handleJoinConversation(ws, session, msg.data); break
       case 'leave_conversation': this.handleLeaveConversation(ws, session); break
       case 'turn_action': this.handleTurnAction(ws, session, msg.data); break
@@ -517,6 +536,69 @@ export class SchoolRoom extends DurableObject {
       data: { playerId: session.playerId, playerName: session.playerName, success: data?.success },
       ts: Date.now()
     }))
+  }
+
+  handleNpcChatSync(ws, session, data) {
+    if (!Array.isArray(data?.snippets) || data.snippets.length === 0) return
+
+    for (const s of data.snippets) {
+      if (!s.npcName || !s.snippet) continue
+      this.ctx.storage.sql.exec(
+        `INSERT INTO npc_chat_snippets (npc_name, player_name, snippet, game_time, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        s.npcName,
+        session.playerName,
+        s.snippet,
+        s.gameTime || '',
+        Date.now()
+      )
+    }
+
+    // 广播给除发送者外的所有玩家
+    this.broadcast(JSON.stringify({
+      type: 'npc_chat_sync',
+      data: {
+        snippets: data.snippets.map(s => ({
+          ...s,
+          playerName: session.playerName
+        }))
+      },
+      from: session.playerId,
+      ts: Date.now()
+    }), ws)
+  }
+
+  handleWorldbookEntrySync(ws, session, data) {
+    if (!data?.action || !data?.bookName) return
+    // 广播给除发送者外的所有玩家
+    this.broadcast(JSON.stringify({
+      type: 'worldbook_entry_sync',
+      data,
+      from: session.playerId,
+      ts: Date.now()
+    }), ws)
+  }
+
+  handleNpcMoveSync(ws, session, data) {
+    if (!Array.isArray(data?.moves) || data.moves.length === 0) return
+    // 广播给除发送者外的所有玩家
+    this.broadcast(JSON.stringify({
+      type: 'npc_move_sync',
+      data: { moves: data.moves },
+      from: session.playerId,
+      ts: Date.now()
+    }), ws)
+  }
+
+  handleNpcRelationshipSync(ws, session, data) {
+    if (!Array.isArray(data?.updates) || data.updates.length === 0) return
+    // 广播给除发送者外的所有玩家
+    this.broadcast(JSON.stringify({
+      type: 'npc_relationship_sync',
+      data: { updates: data.updates },
+      from: session.playerId,
+      ts: Date.now()
+    }), ws)
   }
 
   handleNpcMemorySync(ws, session, data) {
@@ -1275,6 +1357,26 @@ export class SchoolRoom extends DurableObject {
         }))
       }
     }
+  }
+
+  groupNpcChatSnippets(rows) {
+    const result = {}
+    for (const row of rows) {
+      if (!result[row.npc_name]) result[row.npc_name] = []
+      result[row.npc_name].push({
+        playerName: row.player_name,
+        snippet: row.snippet,
+        gameTime: row.game_time || '',
+        createdAt: row.created_at,
+      })
+    }
+    // 每个 NPC 最多保留最近 30 条
+    for (const name of Object.keys(result)) {
+      if (result[name].length > 30) {
+        result[name] = result[name].slice(-30)
+      }
+    }
+    return result
   }
 
   groupNpcMemories(rows) {

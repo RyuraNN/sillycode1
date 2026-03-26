@@ -1282,6 +1282,29 @@ export const buildSystemPromptContent = (gameState) => {
           }
         }
 
+        // 联机模式：跨玩家 NPC 交互历史
+        {
+          let chatSnippets = []
+          try {
+            const mpStore = useMultiplayerStore()
+            if (mpStore.isMultiplayerActive) {
+              chatSnippets = mpStore.sharedNpcChatHistory[npc.name] || []
+            }
+          } catch (_) { /* store not ready */ }
+
+          // 过滤掉当前玩家自己的片段（避免重复），取最近 10 条
+          const otherPlayerSnippets = chatSnippets
+            .filter(s => s.playerName !== gameState.player?.name)
+            .slice(-10)
+
+          if (otherPlayerSnippets.length > 0) {
+            details += `Cross-player Interaction History:\n`
+            for (const s of otherPlayerSnippets) {
+              details += `  [${s.gameTime}] (with ${s.playerName}) ${s.snippet}\n`
+            }
+          }
+        }
+
         // 备注信息
         if (gameState.characterNotes && gameState.characterNotes[npc.name]) {
           details += `Notes: ${gameState.characterNotes[npc.name]}\n`
