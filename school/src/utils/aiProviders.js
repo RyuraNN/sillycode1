@@ -1,6 +1,6 @@
 /**
  * aiProviders.js - 多模型提供商适配器
- * 支持 OpenAI / DeepSeek / KIMI / MiniMax / 豆包 / GLM / Claude
+ * 支持 OpenAI / DeepSeek / KIMI / MiniMax / 豆包 / GLM / Claude / Gemini / Vertex / SiliconFlow / OpenRouter
  */
 
 export const PROVIDER_PRESETS = {
@@ -17,6 +17,20 @@ export const PROVIDER_PRESETS = {
     models: ['deepseek-chat', 'deepseek-reasoner'],
     format: 'openai',
     placeholder: 'sk-...',
+  },
+  siliconflow: {
+    label: 'SiliconFlow (硅基流动)',
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    models: ['Qwen/Qwen3-8B', 'Qwen/Qwen3-30B-A3B', 'Qwen/Qwen2.5-7B-Instruct', 'Qwen/Qwen2.5-32B-Instruct', 'deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-R1', 'THUDM/GLM-4-9B-0414', 'Pro/google/gemma-3-27b-it'],
+    format: 'openai',
+    placeholder: 'sk-...',
+  },
+  openrouter: {
+    label: 'OpenRouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    models: ['google/gemini-2.5-flash', 'google/gemini-2.5-pro', 'deepseek/deepseek-chat-v3-0324:free', 'deepseek/deepseek-r1:free', 'qwen/qwen3-235b-a22b', 'meta-llama/llama-4-maverick', 'anthropic/claude-sonnet-4', 'openai/gpt-4.1-mini'],
+    format: 'openai',
+    placeholder: 'sk-or-...',
   },
   kimi: {
     label: 'KIMI (Moonshot)',
@@ -64,9 +78,9 @@ export const PROVIDER_PRESETS = {
   vertex: {
     label: 'Vertex AI (Google Cloud)',
     baseUrl: '',
-    models: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'],
-    format: 'openai',
-    placeholder: 'Google Cloud Access Token',
+    models: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'],
+    format: 'gemini_native',
+    placeholder: 'API Key (AIza...)',
     vertexFields: true,
     regions: ['global', 'us-central1', 'us-east4', 'us-west1', 'europe-west1', 'europe-west4', 'asia-northeast1', 'asia-southeast1'],
   },
@@ -80,7 +94,8 @@ export const PROVIDER_PRESETS = {
 }
 
 /**
- * 根据 Vertex 项目ID和接入点构建 API 地址
+ * 根据 Vertex 项目ID和接入点构建 API 基础地址（不含模型路径）
+ * 实际请求时由 buildGeminiNativeRequest 拼接完整 URL
  */
 export function buildVertexApiUrl(projectId, region = 'global') {
   if (!projectId) return ''
@@ -88,7 +103,7 @@ export function buildVertexApiUrl(projectId, region = 'global') {
   const host = r === 'global'
     ? 'aiplatform.googleapis.com'
     : `${r}-aiplatform.googleapis.com`
-  return `https://${host}/v1beta1/projects/${projectId}/locations/${r}/endpoints/openapi`
+  return `https://${host}/v1/projects/${projectId}/locations/${r}`
 }
 
 /**
@@ -168,6 +183,10 @@ export function buildApiRequest(config, messages) {
     return buildClaudeRequest(config, messages)
   }
 
+  if (format === 'gemini_native') {
+    return buildGeminiNativeRequest(config, messages)
+  }
+
   return buildOpenAIRequest(config, messages)
 }
 
@@ -196,6 +215,57 @@ function buildOpenAIRequest(config, messages) {
         temperature,
         stream: false,
       }),
+    },
+  }
+}
+
+/**
+ * Gemini Native 格式请求（Vertex AI Express）
+ * - system → systemInstruction
+ * - assistant → model
+ * - API key 通过 ?key= URL 参数传递
+ * - 端点格式: .../models/{model}:generateContent?key={apiKey}
+ */
+function buildGeminiNativeRequest(config, messages) {
+  const { apiUrl, apiKey, model, temperature } = config
+
+  // 构建端点 URL：baseUrl/publishers/google/models/{model}:generateContent?key={apiKey}
+  const baseUrl = (apiUrl || '').replace(/\/+$/, '')
+  const endpoint = `${baseUrl}/publishers/google/models/${model}:generateContent?key=${apiKey}`
+
+  // 转换消息格式：OpenAI → Gemini Native
+  let systemText = ''
+  const contents = []
+
+  for (const msg of messages) {
+    if (msg.role === 'system') {
+      systemText += (systemText ? '\n\n' : '') + msg.content
+    } else {
+      contents.push({
+        role: msg.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: msg.content }],
+      })
+    }
+  }
+
+  const body = {
+    contents,
+    generationConfig: {
+      temperature,
+      maxOutputTokens: 8192,
+    },
+  }
+
+  if (systemText) {
+    body.systemInstruction = { parts: [{ text: systemText }] }
+  }
+
+  return {
+    endpoint,
+    fetchOptions: {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     },
   }
 }
@@ -274,6 +344,18 @@ export function extractReply(provider, data) {
     return ''
   }
 
+  if (preset.format === 'gemini_native') {
+    // Gemini Native: { candidates: [{ content: { parts: [{ text: '...' }] } }] }
+    const parts = data.candidates?.[0]?.content?.parts
+    if (Array.isArray(parts)) {
+      return parts
+        .filter(p => p.text != null)
+        .map(p => p.text)
+        .join('')
+    }
+    return ''
+  }
+
   // OpenAI: { choices: [{ message: { content: '...' } }] }
   return data.choices?.[0]?.message?.content || ''
 }
@@ -288,8 +370,8 @@ export function extractReply(provider, data) {
 export async function fetchProviderModels(provider, apiUrl, apiKey) {
   const preset = PROVIDER_PRESETS[provider] || PROVIDER_PRESETS.custom
 
-  // Claude 不支持 /models 端点，直接返回预设
-  if (preset.format === 'claude') {
+  // Claude / Gemini Native 不支持 /models 端点，直接返回预设
+  if (preset.format === 'claude' || preset.format === 'gemini_native') {
     return preset.models.map(id => ({ id }))
   }
 

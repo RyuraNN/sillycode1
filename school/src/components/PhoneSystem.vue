@@ -724,8 +724,8 @@ const handleHomeClick = () => {
                             </select>
                           </div>
                           <div class="input-row">
-                            <label>Access Token</label>
-                            <input type="password" v-model="gameStore.settings.assistantAI.apiKey" placeholder="Google Cloud Access Token" @change="gameStore.saveToStorage()">
+                            <label>API Key</label>
+                            <input type="password" v-model="gameStore.settings.assistantAI.apiKey" :placeholder="PROVIDER_PRESETS.vertex.placeholder" @change="gameStore.saveToStorage()">
                           </div>
                         </template>
                         <template v-else>

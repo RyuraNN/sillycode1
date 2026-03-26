@@ -351,10 +351,10 @@ ${mainAIResponse}
     { role: 'user', content: userContent }
   ]
 
-  // Claude 不支持 assistant prefill，其他格式可以用
+  // Claude / Gemini Native 不支持 assistant prefill
   const provider = gameStore.settings.assistantAI.provider || 'custom'
   const preset = PROVIDER_PRESETS[provider] || PROVIDER_PRESETS.custom
-  if (assistantPrefill && preset.format !== 'claude') {
+  if (assistantPrefill && preset.format !== 'claude' && preset.format !== 'gemini_native') {
     messages.push({ role: 'assistant', content: assistantPrefill })
   }
 
@@ -382,8 +382,9 @@ ${mainAIResponse}
     const data = await response.json()
     let reply = extractReply(provider, data)
 
-    // 仅在变量解析模式下拼接 Prefill（Claude 不使用 prefill）
-    return (assistantPrefill && preset.format !== 'claude') ? (assistantPrefill + reply) : reply
+    // 仅在变量解析模式下拼接 Prefill（Claude / Gemini Native 不使用 prefill）
+    const noPrefillFormat = preset.format === 'claude' || preset.format === 'gemini_native'
+    return (assistantPrefill && !noPrefillFormat) ? (assistantPrefill + reply) : reply
   } catch (error) {
     console.error('[AssistantAI] Request failed:', error)
     // 增强错误信息
@@ -437,8 +438,8 @@ export async function callImageAnalysisAI(storyContent, characterAnchors = {}) {
     { role: 'user', content: userContent },
   ]
 
-  // Claude 不使用 assistant prefill
-  if (preset.format !== 'claude') {
+  // Claude / Gemini Native 不使用 assistant prefill
+  if (preset.format !== 'claude' && preset.format !== 'gemini_native') {
     messages.push({ role: 'assistant', content: ASSISTANT_PREFILL })
   }
 
@@ -459,7 +460,8 @@ export async function callImageAnalysisAI(storyContent, characterAnchors = {}) {
     const data = await response.json()
     const reply = extractReply(provider, data)
     console.log('[ImageAnalysisAI] Response:', reply)
-    return (preset.format !== 'claude') ? (ASSISTANT_PREFILL + reply) : reply
+    const skipPrefill = preset.format === 'claude' || preset.format === 'gemini_native'
+  return !skipPrefill ? (ASSISTANT_PREFILL + reply) : reply
   } catch (error) {
     console.error('[ImageAnalysisAI] Request failed:', error)
     return '' // 失败时静默返回空字符串，不中断流程

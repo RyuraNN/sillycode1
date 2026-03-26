@@ -2,6 +2,7 @@ import { useGameStore } from '../stores/gameStore'
 import { cleanImageTags, removeThinking } from './summaryManager'
 import { getNpcsAtLocation } from './npcScheduleSystem.js'
 import { validateAssistantAIConfig } from './assistantAI'
+import { buildApiRequest, extractReply, PROVIDER_PRESETS } from './aiProviders'
 import { getErrorMessage } from './errorUtils'
 import { loadSummaryEmbeddings, saveSummaryEmbedding, persistMemoryPoolState, retrieveMemoryPoolState } from './indexedDB'
 import { buildEntityLookup, insertIntoEntityLookup, queryEntityLookup, serializeEntityLookup, deserializeEntityLookup } from './memoryEntityIndex'
@@ -707,22 +708,21 @@ function parseRewriteXmlResult(result, userInput) {
 const RAG_AI_TIMEOUT_MS = 15000 // AI 辅助调用超时（enhanced recall）
 
 async function requestRewriteCompletion(endpoint, apiKey, model, systemPrompt, userPrompt, enableProactiveQuery) {
+  const gameStore = useGameStore()
+  const provider = gameStore.settings.assistantAI.provider || 'custom'
   const temperature = model && model.toLowerCase().includes('gpt') ? 1 : 0
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
-      temperature
-    })
-  })
+
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userPrompt }
+  ]
+
+  const { endpoint: resolvedEndpoint, fetchOptions } = buildApiRequest(
+    { provider, apiUrl: endpoint, apiKey, model, temperature },
+    messages
+  )
+
+  const res = await fetch(resolvedEndpoint, fetchOptions)
 
   if (!res.ok) {
     const errText = await res.text().catch(() => res.statusText)
@@ -730,7 +730,7 @@ async function requestRewriteCompletion(endpoint, apiKey, model, systemPrompt, u
   }
 
   const data = await res.json()
-  return removeThinking((data.choices?.[0]?.message?.content || '').trim()).trim()
+  return removeThinking((extractReply(provider, data) || '').trim()).trim()
 }
 
 /**
@@ -830,12 +830,7 @@ ${contextBlock}${npcContextBlock}
     })
   }
 
-  let endpoint = apiUrl.replace(/\/+$/, '')
-  if (!endpoint.endsWith('/chat/completions')) {
-    endpoint += '/chat/completions'
-  }
-
-  let result = await requestRewriteCompletion(endpoint, apiKey, model, systemPrompt, userPrompt, enableProactiveQuery)
+  let result = await requestRewriteCompletion(apiUrl, apiKey, model, systemPrompt, userPrompt, enableProactiveQuery)
 
   if (traceId) {
     gameStore.updateRagTrace(traceId, {
@@ -852,7 +847,7 @@ ${contextBlock}${npcContextBlock}
 
 上一次你的输出不符合要求。
 这次请只返回可解析的 XML，并确保至少包含完整的 <main>...</main> 标签。`
-      result = await requestRewriteCompletion(endpoint, apiKey, model, retrySystemPrompt, userPrompt, enableProactiveQuery)
+      result = await requestRewriteCompletion(apiUrl, apiKey, model, retrySystemPrompt, userPrompt, enableProactiveQuery)
       parsed = parseRewriteXmlResult(result, userInput)
 
       if (traceId) {
@@ -1377,10 +1372,17 @@ ${summariesText}
 
 请分析上述召回结果，输出剪枝建议和补充查询：`
 
-  let endpoint = apiUrl.replace(/\/+$/, '')
-  if (!endpoint.endsWith('/chat/completions')) {
-    endpoint += '/chat/completions'
-  }
+  const provider = gameStore.settings.assistantAI.provider || 'custom'
+
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userPrompt }
+  ]
+
+  const { endpoint, fetchOptions } = buildApiRequest(
+    { provider, apiUrl, apiKey, model, temperature },
+    messages
+  )
 
   if (traceId) {
     gameStore.updateRagTrace(traceId, {
@@ -1397,24 +1399,10 @@ ${summariesText}
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), RAG_AI_TIMEOUT_MS)
+    const mergedOptions = { ...fetchOptions, signal: controller.signal }
     let res
     try {
-      res = await fetch(endpoint, {
-        method: 'POST',
-        signal: controller.signal,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-          ],
-          temperature
-        })
-      })
+      res = await fetch(endpoint, mergedOptions)
     } finally {
       clearTimeout(timer)
     }
@@ -1425,7 +1413,7 @@ ${summariesText}
     }
 
     const data = await res.json()
-    let result = (data.choices?.[0]?.message?.content || '').trim()
+    let result = (extractReply(provider, data) || '').trim()
     result = removeThinking(result).trim()
 
     if (traceId) {
