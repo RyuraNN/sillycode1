@@ -29,6 +29,9 @@ export class SchoolRoom extends DurableObject {
     this.wbCheckTimer = null
     this.wbCheckNonces = new Map() // nonce → { createdAt, type }
     this.wbCheckCount = 0
+    this.spectateMap = new Map() // spectatorId → { targetId, mode, excessTime? }
+    this.spectateSettings = new Map() // targetPlayerId → { visibleLayers, lastLayerChange }
+    this.pendingSpectateRequests = new Map() // requesterId → { targetId, mode, excessTime }
 
     // 休眠恢复：重建 sessions
     this.ctx.getWebSockets().forEach((ws) => {
@@ -175,6 +178,7 @@ export class SchoolRoom extends DurableObject {
     const role = url.searchParams.get('role') || 'student'
     const classId = url.searchParams.get('classId') || ''
     const avatar = url.searchParams.get('avatar') || ''
+    const spectatorOnly = url.searchParams.get('spectatorOnly') === 'true'
 
     if (!playerId) {
       return new Response('Missing playerId', { status: 400 })
@@ -255,6 +259,7 @@ export class SchoolRoom extends DurableObject {
       trustLevel: discordAuth ? (discordAuth.verified ? 'verified' : discordAuth.guildMember ? 'member' : 'logged_in') : 'anonymous',
       // 玩家系统 features
       features: features || { assistantAI: false, rag: false, summary: false },
+      spectatorOnly: spectatorOnly || false,
     }
     server.serializeAttachment(sessionData)
     this.sessions.set(server, sessionData)
@@ -307,6 +312,7 @@ export class SchoolRoom extends DurableObject {
           location: s.location,
           trustLevel: s.trustLevel || 'anonymous',
           features: s.features || { assistantAI: false, rag: false, summary: false },
+          spectatorOnly: s.spectatorOnly || false,
         })),
         recentChat,
         hostWorldbookHash: wbHashRow?.hash || null,
@@ -324,6 +330,7 @@ export class SchoolRoom extends DurableObject {
         playerId, playerName, role, classId, avatar,
         trustLevel: sessionData.trustLevel,
         features: sessionData.features,
+        spectatorOnly: sessionData.spectatorOnly || false,
       },
       ts: Date.now()
     }), server)
@@ -395,6 +402,9 @@ export class SchoolRoom extends DurableObject {
       case 'time_adjust': this.handleTimeAdjust(ws, session, msg.data); break
       case 'spectate_request': this.handleSpectateRequest(ws, session, msg.data); break
       case 'spectate_response': this.handleSpectateResponse(ws, session, msg.data); break
+      case 'spectate_stream': this.handleSpectateStream(ws, session, msg.data); break
+      case 'spectate_stop': this.handleSpectateStop(ws, session); break
+      case 'spectate_set_layers': this.handleSpectateSetLayers(ws, session, msg.data); break
       case 'ai_response': this.handleAiResponse(ws, session, msg.data); break
       case 'vote_cast': this.handleVoteCast(ws, session, msg.data); break
       case 'npc_transfer_ack': this.handleNpcTransferAck(ws, session, msg.data); break
@@ -748,7 +758,11 @@ export class SchoolRoom extends DurableObject {
 
     // AFK 检查：超过截止时间的玩家自动视为完成
     const now = Date.now()
-    const onlineIds = [...this.sessions.values()].map(s => s.playerId)
+    // 排除观战者和纯观战加入的玩家
+    const spectatorIds = new Set(this.spectateMap.keys())
+    const onlineIds = [...this.sessions.values()]
+      .filter(s => !s.spectatorOnly && !spectatorIds.has(s.playerId))
+      .map(s => s.playerId)
 
     for (const s of this.sessions.values()) {
       if (s.afkDeadline && now > s.afkDeadline && !this.turnState.get(s.playerId)?.completed) {
@@ -791,10 +805,16 @@ export class SchoolRoom extends DurableObject {
         ts: advanceTs
       }))
 
-      // 回合推进后，开始计60s AFK 倒计时
+      // 回合推进后，开始计60s AFK 倒计时（排除观战者）
+      const spectatorIdsForAfk = new Set(this.spectateMap.keys())
       for (const s of this.sessions.values()) {
-        s.afkDeadline = advanceTs + 60000
+        if (!s.spectatorOnly && !spectatorIdsForAfk.has(s.playerId)) {
+          s.afkDeadline = advanceTs + 60000
+        }
       }
+
+      // 检查时间差观战者是否应该自动退出
+      this.checkTimeGapSpectators(minDelta)
     }
   }
 
@@ -819,20 +839,155 @@ export class SchoolRoom extends DurableObject {
 
   handleSpectateRequest(ws, session, data) {
     if (!data?.targetPlayerId) return
+    // 存储待处理的观战请求（含模式信息）
+    this.pendingSpectateRequests.set(session.playerId, {
+      targetId: data.targetPlayerId,
+      mode: data.mode || 'time_gap',
+      excessTime: data.excessTime || 0,
+    })
     this.sendToPlayer(data.targetPlayerId, JSON.stringify({
       type: 'spectate_request',
-      data: { requesterId: session.playerId, requesterName: session.playerName },
+      data: { requesterId: session.playerId, requesterName: session.playerName, mode: data.mode || 'time_gap' },
       ts: Date.now()
     }))
   }
 
   handleSpectateResponse(ws, session, data) {
     if (!data?.requesterId) return
+    const approved = !!data.approved
+    const pending = this.pendingSpectateRequests.get(data.requesterId)
+    this.pendingSpectateRequests.delete(data.requesterId)
+
+    // 获取/创建被观战者的观战设置
+    if (!this.spectateSettings.has(session.playerId)) {
+      this.spectateSettings.set(session.playerId, { visibleLayers: 4, lastLayerChange: 0 })
+    }
+    const settings = this.spectateSettings.get(session.playerId)
+
     this.sendToPlayer(data.requesterId, JSON.stringify({
       type: 'spectate_response',
-      data: { approved: !!data.approved, targetId: session.playerId, targetName: session.playerName },
+      data: {
+        approved,
+        targetId: session.playerId,
+        targetName: session.playerName,
+        mode: pending?.mode || 'time_gap',
+        visibleLayers: settings.visibleLayers,
+      },
       ts: Date.now()
     }))
+
+    if (approved) {
+      // 记录观战关系（含模式和时间差信息）
+      this.spectateMap.set(data.requesterId, {
+        targetId: session.playerId,
+        mode: pending?.mode || 'time_gap',
+        excessTime: pending?.excessTime || 0,
+      })
+      // 通知被观战者有新观众
+      this.sendToPlayer(session.playerId, JSON.stringify({
+        type: 'spectate_started',
+        data: {
+          spectatorId: data.requesterId,
+          spectatorName: data.requesterName || data.requesterId,
+          mode: pending?.mode || 'time_gap',
+        },
+        ts: Date.now()
+      }))
+    }
+  }
+
+  handleSpectateStream(ws, session, data) {
+    // 被观战者发送 chatLog 更新 → 转发给所有观战者
+    for (const [spectatorId, entry] of this.spectateMap) {
+      if (entry.targetId === session.playerId) {
+        this.sendToPlayer(spectatorId, JSON.stringify({
+          type: 'spectate_stream',
+          data: { chatLog: data?.chatLog || [] },
+          ts: Date.now()
+        }))
+      }
+    }
+  }
+
+  handleSpectateStop(ws, session) {
+    const entry = this.spectateMap.get(session.playerId)
+    if (entry) {
+      this.spectateMap.delete(session.playerId)
+      // 通知被观战者失去一个观众
+      this.sendToPlayer(entry.targetId, JSON.stringify({
+        type: 'spectate_stopped',
+        data: { spectatorId: session.playerId },
+        ts: Date.now()
+      }))
+    }
+  }
+
+  handleSpectateSetLayers(ws, session, data) {
+    const layers = Math.max(1, Math.min(20, parseInt(data?.layers) || 4))
+    if (!this.spectateSettings.has(session.playerId)) {
+      this.spectateSettings.set(session.playerId, { visibleLayers: 4, lastLayerChange: 0 })
+    }
+    const settings = this.spectateSettings.get(session.playerId)
+
+    // 300秒冷却检查
+    const now = Date.now()
+    const cooldownMs = 300000
+    if (settings.lastLayerChange && (now - settings.lastLayerChange) < cooldownMs) {
+      const remaining = Math.ceil((cooldownMs - (now - settings.lastLayerChange)) / 1000)
+      ws.send(JSON.stringify({
+        type: 'spectate_set_layers_error',
+        data: { error: 'cooldown', remaining },
+        ts: now
+      }))
+      return
+    }
+
+    settings.visibleLayers = layers
+    settings.lastLayerChange = now
+
+    // 通知被观战者确认
+    ws.send(JSON.stringify({
+      type: 'spectate_layers_updated',
+      data: { visibleLayers: layers },
+      ts: now
+    }))
+
+    // 通知所有观战此玩家的观战者
+    for (const [spectatorId, entry] of this.spectateMap) {
+      if (entry.targetId === session.playerId) {
+        this.sendToPlayer(spectatorId, JSON.stringify({
+          type: 'spectate_layers_updated',
+          data: { visibleLayers: layers },
+          ts: now
+        }))
+      }
+    }
+  }
+
+  checkTimeGapSpectators(minDelta) {
+    // 每轮结束后，减少时间差观战者的 excessTime
+    const toRemove = []
+    for (const [spectatorId, entry] of this.spectateMap) {
+      if (entry.mode === 'time_gap') {
+        entry.excessTime = (entry.excessTime || 0) - (minDelta || 0)
+        if (entry.excessTime <= 0) {
+          toRemove.push({ spectatorId, entry })
+        }
+      }
+    }
+    for (const { spectatorId, entry } of toRemove) {
+      this.spectateMap.delete(spectatorId)
+      this.sendToPlayer(spectatorId, JSON.stringify({
+        type: 'spectate_auto_exit',
+        data: { reason: 'time_synced' },
+        ts: Date.now()
+      }))
+      this.sendToPlayer(entry.targetId, JSON.stringify({
+        type: 'spectate_stopped',
+        data: { spectatorId },
+        ts: Date.now()
+      }))
+    }
   }
 
   // ── 存档分发 ──
@@ -974,6 +1129,31 @@ export class SchoolRoom extends DurableObject {
       `UPDATE players SET last_seen = ? WHERE player_id = ?`,
       Date.now(), session.playerId
     )
+
+    // 清理观战关系
+    const spectateEntry = this.spectateMap.get(session.playerId)
+    if (spectateEntry) {
+      this.spectateMap.delete(session.playerId)
+      this.sendToPlayer(spectateEntry.targetId, JSON.stringify({
+        type: 'spectate_stopped',
+        data: { spectatorId: session.playerId },
+        ts: Date.now()
+      }))
+    }
+    // 如果被观战的玩家断线，通知所有观战者
+    for (const [spectatorId, entry] of this.spectateMap) {
+      if (entry.targetId === session.playerId) {
+        this.spectateMap.delete(spectatorId)
+        this.sendToPlayer(spectatorId, JSON.stringify({
+          type: 'spectate_stream',
+          data: { chatLog: [], ended: true },
+          ts: Date.now()
+        }))
+      }
+    }
+    // 清理观战设置和待处理请求
+    this.spectateSettings.delete(session.playerId)
+    this.pendingSpectateRequests.delete(session.playerId)
 
     // 广播离开
     this.broadcast(JSON.stringify({

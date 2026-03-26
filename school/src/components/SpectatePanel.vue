@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
 import { useMultiplayerStore } from '../stores/multiplayerStore'
-import { sendSpectateRequest, sendSpectateResponse, sendMessage } from '../utils/multiplayerWs'
+import { sendSpectateRequest, sendSpectateResponse, sendSpectateStop, sendSpectateSetLayers } from '../utils/multiplayerWs'
 
 const mpStore = useMultiplayerStore()
 
@@ -23,6 +23,33 @@ const spectatablePlayers = computed(() => {
 // 待处理的观战请求
 const pendingRequest = computed(() => mpStore.pendingSpectateRequest)
 
+// 被观战者：可见层数设置
+const layerInput = ref(mpStore.spectateVisibleLayers || 4)
+const hasViewers = computed(() => mpStore.spectateViewers.length > 0)
+const layersCooldownRemaining = ref(0)
+let cooldownInterval = null
+
+function startCooldownTimer() {
+  if (cooldownInterval) clearInterval(cooldownInterval)
+  cooldownInterval = setInterval(() => {
+    const remaining = Math.max(0, Math.ceil((mpStore.spectateLayersCooldownEnd - Date.now()) / 1000))
+    layersCooldownRemaining.value = remaining
+    if (remaining <= 0 && cooldownInterval) {
+      clearInterval(cooldownInterval)
+      cooldownInterval = null
+    }
+  }, 1000)
+}
+
+function updateVisibleLayers() {
+  const val = Math.max(1, Math.min(20, parseInt(layerInput.value) || 4))
+  layerInput.value = val
+  sendSpectateSetLayers(val)
+  // 主动设置冷却（服务器会确认或拒绝）
+  mpStore.spectateLayersCooldownEnd = Date.now() + 300000
+  startCooldownTimer()
+}
+
 // 自动滚动
 watch(() => mpStore.spectateLog.length, async () => {
   await nextTick()
@@ -31,15 +58,24 @@ watch(() => mpStore.spectateLog.length, async () => {
   }
 })
 
+// 监听冷却状态
+watch(() => mpStore.spectateLayersCooldownEnd, (val) => {
+  if (val > Date.now()) startCooldownTimer()
+})
+
 function requestSpectate(targetId) {
-  sendSpectateRequest(targetId)
+  // 纯观战者用 spectator_only 模式，否则从 TimeSync 触发的用 time_gap
+  const mode = mpStore.isSpectatorOnly ? 'spectator_only' : 'time_gap'
+  const excessTime = mpStore.timeWarning?.diff || 0
+  sendSpectateRequest(targetId, mode, excessTime)
 }
 
 function stopSpectating() {
-  sendMessage('spectate_stop', {})
+  sendSpectateStop()
   mpStore.isSpectating = false
   mpStore.spectateTarget = null
   mpStore.spectateLog = []
+  mpStore.spectateMode = null
 }
 
 function approveRequest() {
@@ -62,6 +98,8 @@ function denyRequest() {
   <div v-if="pendingRequest" class="sp-request-overlay">
     <div class="sp-request-card">
       <p><strong>{{ pendingRequest.playerName }}</strong> 想要观看你的游戏进程</p>
+      <p v-if="pendingRequest.mode === 'spectator_only'" class="sp-request-mode">（纯观战者）</p>
+      <p v-else class="sp-request-mode">（时间差观战）</p>
       <div class="sp-request-actions">
         <button class="sp-btn primary" @click="approveRequest">允许</button>
         <button class="sp-btn danger" @click="denyRequest">拒绝</button>
@@ -94,6 +132,20 @@ function denyRequest() {
     <div v-for="p in spectatablePlayers" :key="p.playerId" class="sp-list-item" @click="requestSpectate(p.playerId)">
       <span class="sp-list-name">{{ p.playerName }}</span>
       <span class="sp-list-loc">{{ p.location || '未知位置' }}</span>
+    </div>
+  </div>
+
+  <!-- 被观战者：观众管理 & 可见层数调整 -->
+  <div v-if="hasViewers && !isSpectating" class="sp-viewer-settings">
+    <div class="sp-viewer-header">
+      <span>{{ mpStore.spectateViewers.length }} 人正在观看你</span>
+    </div>
+    <div class="sp-layer-control">
+      <label>可见层数</label>
+      <input type="number" v-model.number="layerInput" min="1" max="20" class="sp-layer-input" />
+      <button class="sp-btn small primary" @click="updateVisibleLayers" :disabled="layersCooldownRemaining > 0">
+        {{ layersCooldownRemaining > 0 ? `${layersCooldownRemaining}s` : '应用' }}
+      </button>
     </div>
   </div>
 </template>
@@ -306,6 +358,63 @@ function denyRequest() {
   font-size: 0.75rem;
 }
 
+.sp-btn.small:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sp-request-mode {
+  margin: -8px 0 12px;
+  font-size: 0.78rem;
+  color: #a1887f;
+}
+
+/* Viewer settings */
+.sp-viewer-settings {
+  position: fixed;
+  top: 60px;
+  right: 16px;
+  width: 280px;
+  max-width: 90vw;
+  background: rgba(255, 253, 245, 0.55);
+  border: 1px solid rgba(139, 69, 19, 0.12);
+  border-radius: 12px;
+  z-index: 7200;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(139, 69, 19, 0.06);
+  padding: 12px 14px;
+}
+
+.sp-viewer-header {
+  font-size: 0.82rem;
+  color: #5d4037;
+  margin-bottom: 10px;
+}
+
+.sp-layer-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sp-layer-control label {
+  font-size: 0.78rem;
+  color: #8d6e63;
+  white-space: nowrap;
+}
+
+.sp-layer-input {
+  width: 52px;
+  padding: 4px 6px;
+  border: 1px solid rgba(139, 69, 19, 0.15);
+  border-radius: 6px;
+  background: rgba(255, 253, 245, 0.6);
+  color: #4e342e;
+  font-size: 0.82rem;
+  text-align: center;
+}
+
 /* ── Dark mode ── */
 :global(.dark-mode) .sp-panel {
   background: rgba(30, 20, 12, 0.75);
@@ -353,6 +462,18 @@ function denyRequest() {
 :global(.dark-mode) .sp-btn.primary:hover { background: rgba(218, 165, 32, 0.3); }
 :global(.dark-mode) .sp-btn.danger { border-color: rgba(220, 80, 60, 0.3); color: rgba(255, 180, 160, 0.9); }
 :global(.dark-mode) .sp-btn.danger:hover { background: rgba(180, 60, 40, 0.15); }
+:global(.dark-mode) .sp-viewer-settings {
+  background: rgba(30, 20, 12, 0.75);
+  border-color: rgba(218, 165, 32, 0.2);
+}
+:global(.dark-mode) .sp-viewer-header { color: rgba(255, 248, 220, 0.9); }
+:global(.dark-mode) .sp-layer-control label { color: rgba(218, 165, 32, 0.6); }
+:global(.dark-mode) .sp-layer-input {
+  background: rgba(45, 30, 18, 0.6);
+  border-color: rgba(218, 165, 32, 0.2);
+  color: rgba(255, 248, 220, 0.9);
+}
+:global(.dark-mode) .sp-request-mode { color: rgba(218, 165, 32, 0.5); }
 
 @media (max-width: 768px) {
   .sp-panel {

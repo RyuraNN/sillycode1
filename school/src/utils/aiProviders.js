@@ -82,7 +82,7 @@ export const PROVIDER_PRESETS = {
     format: 'gemini_native',
     placeholder: 'API Key (AIza...)',
     vertexFields: true,
-    regions: ['global', 'us-central1', 'us-east4', 'us-west1', 'europe-west1', 'europe-west4', 'asia-northeast1', 'asia-southeast1'],
+    regions: ['us-central1', 'us-east4', 'us-west1', 'europe-west1', 'europe-west4', 'asia-northeast1', 'asia-southeast1', 'global'],
   },
   custom: {
     label: '自定义 (OpenAI兼容)',
@@ -97,13 +97,15 @@ export const PROVIDER_PRESETS = {
  * 根据 Vertex 项目ID和接入点构建 API 基础地址（不含模型路径）
  * 实际请求时由 buildGeminiNativeRequest 拼接完整 URL
  */
-export function buildVertexApiUrl(projectId, region = 'global') {
-  if (!projectId) return ''
-  const r = region || 'global'
-  const host = r === 'global'
-    ? 'aiplatform.googleapis.com'
-    : `${r}-aiplatform.googleapis.com`
-  return `https://${host}/v1/projects/${projectId}/locations/${r}`
+export function buildVertexApiUrl(projectId, region = 'us-central1') {
+  const r = region || 'us-central1'
+  if (!projectId) {
+    // Express 模式（无项目 ID）：使用区域层级 host
+    if (r === 'global') return 'https://aiplatform.googleapis.com/v1'
+    return `https://${r}-aiplatform.googleapis.com/v1`
+  }
+  // 有项目 ID：始终使用全局 host，但包含 locations 路径（与 SillyTavern 一致）
+  return `https://aiplatform.googleapis.com/v1/projects/${projectId}/locations/${r}`
 }
 
 /**
@@ -160,7 +162,8 @@ export function switchProviderConfig(assistantAI, oldProvider, newProvider) {
     assistantAI.model = preset.models?.[0] || ''
     if (newProvider === 'vertex') {
       assistantAI.vertexProjectId = ''
-      assistantAI.vertexRegion = 'global'
+      assistantAI.vertexRegion = 'us-central1'
+      assistantAI.apiUrl = buildVertexApiUrl('', 'us-central1')
     }
   }
 
@@ -230,7 +233,9 @@ function buildGeminiNativeRequest(config, messages) {
   const { apiUrl, apiKey, model, temperature } = config
 
   // 构建端点 URL：baseUrl/publishers/google/models/{model}:generateContent?key={apiKey}
-  const baseUrl = (apiUrl || '').replace(/\/+$/, '')
+  const baseUrl = (apiUrl && apiUrl.startsWith('https://'))
+    ? apiUrl.replace(/\/+$/, '')
+    : 'https://aiplatform.googleapis.com/v1'
   const endpoint = `${baseUrl}/publishers/google/models/${model}:generateContent?key=${apiKey}`
 
   // 转换消息格式：OpenAI → Gemini Native

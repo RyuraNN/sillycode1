@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useMultiplayerStore } from '../stores/multiplayerStore'
-import { sendAfkExtend } from '../utils/multiplayerWs'
+import { sendAfkExtend, sendSpectateStop } from '../utils/multiplayerWs'
 
 const mpStore = useMultiplayerStore()
 
@@ -101,6 +101,26 @@ function openChat() {
 function handleAfkExtend() {
   sendAfkExtend()
 }
+
+const spectateTargetName = computed(() => {
+  if (!mpStore.isSpectating || !mpStore.spectateTarget) return null
+  const p = mpStore.players[mpStore.spectateTarget]
+  return p?.playerName || mpStore.spectateTarget
+})
+
+const spectateModeLabel = computed(() => {
+  if (mpStore.spectateMode === 'spectator_only') return '观战中'
+  if (mpStore.spectateMode === 'time_gap') return '时间差观战'
+  return '观战中'
+})
+
+function stopSpectating() {
+  sendSpectateStop()
+  mpStore.isSpectating = false
+  mpStore.spectateTarget = null
+  mpStore.spectateLog = []
+  mpStore.spectateMode = null
+}
 </script>
 
 <template>
@@ -152,6 +172,14 @@ function handleAfkExtend() {
           <span v-if="getPlayerFeatures(p.playerId)?.summary" class="feat-dot feat-sum" title="总结系统">S</span>
         </span>
       </span>
+    </div>
+
+    <!-- 观战指示器 -->
+    <div v-if="mpStore.isSpectating" class="hud-spectate-bar">
+      <span class="spectate-icon">👁️</span>
+      <span class="spectate-mode-tag">{{ spectateModeLabel }}</span>
+      <span class="spectate-text">正在观看 <strong>{{ spectateTargetName }}</strong></span>
+      <button class="spectate-exit-btn" @click="stopSpectating">退出观战</button>
     </div>
 
     <!-- 房主断线警告 -->
@@ -438,6 +466,65 @@ function handleAfkExtend() {
 .feat-rag { background: rgba(59, 130, 246, 0.2); color: #2563eb; }
 .feat-sum { background: rgba(245, 158, 11, 0.2); color: #d97706; }
 
+/* ── 观战指示器 ── */
+.hud-spectate-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: 12px;
+  padding: 6px 14px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: spectate-in 0.3s ease-out;
+}
+
+.spectate-icon {
+  font-size: 0.85rem;
+}
+
+.spectate-mode-tag {
+  font-size: 0.68rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(139, 92, 246, 0.15);
+  color: #7c3aed;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.spectate-text {
+  font-size: 0.8rem;
+  color: #6d28d9;
+}
+
+.spectate-text strong {
+  font-weight: 600;
+}
+
+.spectate-exit-btn {
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  background: rgba(239, 68, 68, 0.08);
+  color: #dc2626;
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-left: 4px;
+}
+
+.spectate-exit-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+@keyframes spectate-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .hud-warning {
   background: rgba(239, 68, 68, 0.12);
   border: 1px solid rgba(239, 68, 68, 0.25);
@@ -622,6 +709,18 @@ function handleAfkExtend() {
 :global(.dark-mode) .feat-ai { background: rgba(218, 165, 32, 0.2); color: rgba(255, 215, 0, 0.8); }
 :global(.dark-mode) .feat-rag { background: rgba(139, 69, 19, 0.25); color: rgba(218, 165, 32, 0.8); }
 :global(.dark-mode) .feat-sum { background: rgba(184, 134, 11, 0.2); color: rgba(255, 200, 100, 0.8); }
+:global(.dark-mode) .hud-spectate-bar {
+  background: rgba(139, 92, 246, 0.15);
+  border-color: rgba(139, 92, 246, 0.3);
+}
+:global(.dark-mode) .spectate-mode-tag { background: rgba(139, 92, 246, 0.25); color: rgba(196, 167, 255, 0.9); }
+:global(.dark-mode) .spectate-text { color: rgba(196, 167, 255, 0.9); }
+:global(.dark-mode) .spectate-exit-btn {
+  background: rgba(180, 60, 40, 0.12);
+  border-color: rgba(220, 80, 60, 0.3);
+  color: rgba(255, 180, 160, 0.9);
+}
+:global(.dark-mode) .spectate-exit-btn:hover { background: rgba(180, 60, 40, 0.2); }
 :global(.dark-mode) .hud-warning {
   background: rgba(180, 60, 40, 0.15);
   border-color: rgba(220, 80, 60, 0.3);

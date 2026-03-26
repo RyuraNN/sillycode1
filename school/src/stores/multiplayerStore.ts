@@ -56,7 +56,12 @@ export const useMultiplayerStore = defineStore('multiplayer', {
     isSpectating: false,
     spectateTarget: null as string | null,
     spectateLog: [] as ChatLogEntry[],
-    pendingSpectateRequest: null as { playerId: string; playerName: string } | null,
+    spectateMode: null as 'time_gap' | 'spectator_only' | null,
+    spectateVisibleLayers: 4,
+    isSpectatorOnly: false, // 以纯观战者身份加入房间（无角色）
+    spectateLayersCooldownEnd: 0, // 层数调整冷却截止时间戳
+    pendingSpectateRequest: null as { playerId: string; playerName: string; mode?: string } | null,
+    spectateViewers: [] as string[], // 谁在观看我的游戏
 
     // ── 聊天 ──
     worldChat: [] as MultiplayerChatMessage[],
@@ -374,15 +379,49 @@ export const useMultiplayerStore = defineStore('multiplayer', {
     },
 
     // ── 观战 ──
-    handleSpectateResponse(data: { approved: boolean; targetId: string; targetName: string }) {
+    handleSpectateResponse(data: { approved: boolean; targetId: string; targetName: string; mode?: string; visibleLayers?: number }) {
       if (data.approved) {
         this.isSpectating = true
         this.spectateTarget = data.targetId
+        this.spectateMode = (data.mode as 'time_gap' | 'spectator_only') || 'time_gap'
+        this.spectateVisibleLayers = data.visibleLayers || 4
       }
     },
 
-    handleSpectateStream(data: { chatLog: ChatLogEntry[] }) {
-      this.spectateLog = data.chatLog
+    handleSpectateStream(data: { chatLog: ChatLogEntry[]; ended?: boolean }) {
+      if (data.ended) {
+        // 被观战者断线，自动退出观战
+        this.isSpectating = false
+        this.spectateTarget = null
+        this.spectateLog = []
+        this.spectateMode = null
+        return
+      }
+      // 使用动态层数限制
+      const log = data.chatLog || []
+      this.spectateLog = log.slice(-(this.spectateVisibleLayers || 4))
+    },
+
+    handleSpectateAutoExit() {
+      // 时间差观战自动退出（时间已同步）
+      this.isSpectating = false
+      this.spectateTarget = null
+      this.spectateLog = []
+      this.spectateMode = null
+    },
+
+    handleSpectateLayersUpdated(data: { visibleLayers: number }) {
+      this.spectateVisibleLayers = data.visibleLayers || 4
+    },
+
+    handleSpectateStarted(data: { spectatorId: string; spectatorName?: string; mode?: string }) {
+      if (!this.spectateViewers.includes(data.spectatorId)) {
+        this.spectateViewers.push(data.spectatorId)
+      }
+    },
+
+    handleSpectateStopped(data: { spectatorId: string }) {
+      this.spectateViewers = this.spectateViewers.filter(id => id !== data.spectatorId)
     },
 
     // ── 房间设置更新 ──
@@ -422,6 +461,12 @@ export const useMultiplayerStore = defineStore('multiplayer', {
       this.isSpectating = false
       this.spectateTarget = null
       this.spectateLog = []
+      this.spectateMode = null
+      this.spectateVisibleLayers = 4
+      this.isSpectatorOnly = false
+      this.spectateLayersCooldownEnd = 0
+      this.pendingSpectateRequest = null
+      this.spectateViewers = []
       this.worldChat = []
       this.unreadCount = 0
       this.activeVote = null

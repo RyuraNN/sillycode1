@@ -292,7 +292,11 @@ export const snapshotActions = {
    * 恢复存档快照
    */
   async restoreSnapshot(this: any, snapshotId: string, force?: boolean): Promise<SaveSnapshot | null | { mismatch: true, snapshotEdition: string, currentEdition: string }> {
-    const snapshotMeta = this._ui.saveSnapshots.find((s: SaveSnapshot) => s.id === snapshotId)
+    let snapshotMeta = this._ui.saveSnapshots.find((s: SaveSnapshot) => s.id === snapshotId)
+    // 也搜索联机存档列表
+    if (!snapshotMeta) {
+      snapshotMeta = this._ui.mpSaveSnapshots?.find((s: SaveSnapshot) => s.id === snapshotId)
+    }
     if (!snapshotMeta) return null
 
     // 版本不匹配检查

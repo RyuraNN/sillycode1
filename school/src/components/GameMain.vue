@@ -33,7 +33,7 @@ import {
   broadcastAiResponse,
   getConversationContextPrompt,
 } from '../utils/conversationMerge'
-import { sendTurnAction } from '../utils/multiplayerWs'
+import { sendTurnAction, sendSpectateStream } from '../utils/multiplayerWs'
 
 // Composables
 import { useImageCache, loadImagesFromLog } from '../composables/useImageCache'
@@ -2373,6 +2373,16 @@ watch(() => gameStore._ui.mapSelectionMode, (newVal) => {
 // 只监听数组长度变化，内容变化通过显式调用 syncCurrentChatLog 处理
 watch(() => gameLog.value.length, () => {
   gameStore.syncCurrentChatLog(gameLog.value)
+
+  // 如果有观战者，发送最新 N 条记录（N 由被观战者设置，默认 4）
+  if (mpStore.isMultiplayerActive && mpStore.spectateViewers.length > 0) {
+    const layers = mpStore.spectateVisibleLayers || 4
+    const latestN = gameLog.value.slice(-layers).map(entry => ({
+      type: entry.type,
+      content: entry.content,
+    }))
+    sendSpectateStream(latestN)
+  }
 })
 
 // 监听系统通知（如天赋触发、加入社团等），直接显示为弹幕

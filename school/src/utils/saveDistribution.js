@@ -4,15 +4,20 @@
  * 允许联机房主将当前存档分发给房间内其他玩家。
  * 大型存档通过 WS 分块传输，避免单帧消息过大。
  * 
+ * 只分发当前联机游戏的 gameState + chatLog，
+ * 不涉及 settings、单机存档列表、额外数据等本地内容。
+ * 
  * 流程：
  * 1. 接收方发送 save_request → 房主
- * 2. 房主序列化存档 → 分块 → 逐块发送 save_chunk
- * 3. 接收方收集所有块 → 重组 → 导入存档
+ * 2. 房主收集当前 gameState + chatLog → 分块 → 逐块发送 save_chunk
+ * 3. 接收方收集所有块 → 重组 → 应用世界数据（保留自身玩家身份）
  */
 
 import { useGameStore } from '../stores/gameStore'
 import { useMultiplayerStore } from '../stores/multiplayerStore'
 import { sendMessage } from './multiplayerWs'
+import { collectGameStateFromStore, applyGameStateToStore } from './gameStateMigration'
+import { createInitialState } from '../stores/gameStoreState'
 
 // ── 常量 ──
 
@@ -85,7 +90,7 @@ export function requestSaveFromHost() {
 }
 
 /**
- * [房主] 处理存档请求，序列化并分块发送
+ * [房主] 处理存档请求：只发送当前联机游戏的 gameState + chatLog
  */
 export async function handleSaveRequest(data) {
   const mpStore = useMultiplayerStore()
@@ -97,9 +102,12 @@ export async function handleSaveRequest(data) {
   try {
     console.log(`[SaveDistribution] Preparing save for player ${requesterId}`)
 
-    // 序列化当前游戏状态
-    const exportData = await gameStore.getExportData({ asText: true })
-    const jsonStr = typeof exportData === 'string' ? exportData : JSON.stringify(exportData)
+    // 收集当前 gameState（不含 settings/_ui）
+    // chatLog 不分发 — 每个玩家的 chatLog 独立（对话组同步已单独处理）
+    const gameState = JSON.parse(JSON.stringify(collectGameStateFromStore(gameStore)))
+
+    const payload = { gameState }
+    const jsonStr = JSON.stringify(payload)
     const totalBytes = new TextEncoder().encode(jsonStr).length
 
     // 分块
@@ -115,7 +123,7 @@ export async function handleSaveRequest(data) {
         floor: gameStore.meta?.currentFloor || 0,
         gameTime: gameStore.world?.gameTime,
       },
-      chunkIndex: -1, // -1 表示元数据头
+      chunkIndex: -1,
     })
 
     // 逐块发送
@@ -130,7 +138,6 @@ export async function handleSaveRequest(data) {
         totalChunks,
       })
 
-      // 每 5 块暂停一下避免过载
       if (i % 5 === 4) {
         await new Promise(r => setTimeout(r, 50))
       }
@@ -197,6 +204,7 @@ export function handleSaveChunk(data) {
 
 /**
  * [接收方] 重组并导入存档
+ * 联机模式下保留接收方的玩家身份、设置和单机存档
  */
 async function assembleSave() {
   if (!pendingTransfer) return
@@ -216,21 +224,63 @@ async function assembleSave() {
 
     console.log(`[SaveDistribution] Assembled save (${(jsonStr.length / 1024).toFixed(1)} KB) in ${elapsed}ms`)
 
-    // 导入存档
     const gameStore = useGameStore()
-    const success = await gameStore.importSaveData(jsonStr)
+    const mpStore = useMultiplayerStore()
+
+    // ── 联机保护：导入前剥离不该共享的数据 ──
+    let importData
+    try {
+      const parsed = JSON.parse(jsonStr)
+      // 检测压缩格式
+      if (parsed.compressed && parsed.data) {
+        importData = parsed // 压缩数据交给 importSaveData 内部解压
+      } else {
+        importData = parsed
+      }
+    } catch {
+      importData = null
+    }
+
+    if (!importData || !importData.gameState) {
+      throw new Error('存档数据格式无效：缺少 gameState')
+    }
+
+    const { gameState } = importData
+    const defaults = createInitialState()
+
+    // ── 只应用世界数据，保留接收方的 player ──
+    // applyGameStateToStore 会覆盖 player，所以先保存再恢复
+    const preservedPlayer = JSON.parse(JSON.stringify(gameStore.player))
+
+    applyGameStateToStore(gameStore, gameState, defaults)
+
+    // 恢复接收方的玩家身份
+    gameStore.player = preservedPlayer
+    console.log(`[SaveDistribution] Applied world state, preserved player: ${preservedPlayer.name}`)
+
+    // ── 重建世界书状态 ──
+    try {
+      await gameStore.rebuildWorldbookState()
+    } catch (e) {
+      console.warn('[SaveDistribution] rebuildWorldbookState failed:', e)
+    }
+
+    // ── 初始化 NPC 关系 ──
+    if (Object.keys(gameStore.world.npcRelationships || {}).length === 0) {
+      try {
+        await gameStore.initializeNpcRelationships()
+      } catch (e) {
+        console.warn('[SaveDistribution] initializeNpcRelationships failed:', e)
+      }
+    }
+
+    gameStore.saveToStorage(true)
+
+    window.dispatchEvent(new CustomEvent('mp:save_transfer_complete', {
+      detail: { elapsed }
+    }))
 
     cleanupPendingTransfer()
-
-    if (success) {
-      window.dispatchEvent(new CustomEvent('mp:save_transfer_complete', {
-        detail: { elapsed }
-      }))
-    } else {
-      window.dispatchEvent(new CustomEvent('mp:save_transfer_error', {
-        detail: { error: '存档导入失败' }
-      }))
-    }
   } catch (e) {
     console.error('[SaveDistribution] Assembly failed:', e)
     window.dispatchEvent(new CustomEvent('mp:save_transfer_error', {

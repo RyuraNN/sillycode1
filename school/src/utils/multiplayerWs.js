@@ -137,6 +137,10 @@ export function connectToRoom(roomId, playerInfo) {
   if (playerInfo.features) {
     params.set('features', JSON.stringify(playerInfo.features))
   }
+  // 纯观战者模式
+  if (playerInfo.spectatorOnly) {
+    params.set('spectatorOnly', 'true')
+  }
 
   const url = `${WS_BASE_URL}/ws/room/${roomId}?${params}`
 
@@ -321,12 +325,24 @@ export function sendTimeAdjust(adjustedDelta) {
   return sendMessage('time_adjust', { adjustedDelta })
 }
 
-export function sendSpectateRequest(targetPlayerId) {
-  return sendMessage('spectate_request', { targetPlayerId })
+export function sendSpectateRequest(targetPlayerId, mode = 'time_gap', excessTime = 0) {
+  return sendMessage('spectate_request', { targetPlayerId, mode, excessTime })
 }
 
 export function sendSpectateResponse(requesterId, approved) {
   return sendMessage('spectate_response', { requesterId, approved })
+}
+
+export function sendSpectateStream(chatLog) {
+  return sendMessage('spectate_stream', { chatLog })
+}
+
+export function sendSpectateStop() {
+  return sendMessage('spectate_stop', {})
+}
+
+export function sendSpectateSetLayers(layers) {
+  return sendMessage('spectate_set_layers', { layers })
 }
 
 export function sendAiResponse(content, rawContent) {
@@ -549,6 +565,7 @@ function handleMessage(msg) {
       mpStore.pendingSpectateRequest = {
         playerId: msg.data.requesterId,
         playerName: msg.data.requesterName || msg.data.requesterId,
+        mode: msg.data.mode || 'time_gap',
       }
       break
 
@@ -558,6 +575,29 @@ function handleMessage(msg) {
 
     case 'spectate_stream':
       mpStore.handleSpectateStream(msg.data)
+      break
+
+    case 'spectate_started':
+      mpStore.handleSpectateStarted(msg.data)
+      break
+
+    case 'spectate_stopped':
+      mpStore.handleSpectateStopped(msg.data)
+      break
+
+    case 'spectate_auto_exit':
+      mpStore.handleSpectateAutoExit()
+      break
+
+    case 'spectate_layers_updated':
+      mpStore.handleSpectateLayersUpdated(msg.data)
+      break
+
+    case 'spectate_set_layers_error':
+      // 冷却中，通知 UI
+      if (msg.data?.remaining) {
+        mpStore.spectateLayersCooldownEnd = Date.now() + msg.data.remaining * 1000
+      }
       break
 
     case 'room_update':

@@ -64,6 +64,7 @@ const createForm = ref({
 // ── 加入房间 ──
 const joinRoomId = ref('')
 const joinPassword = ref('')
+const joinAsSpectator = ref(false) // 以观战者身份加入
 const pendingRoomInfo = ref(null) // 验证通过的房间信息，用于预设选择后连接
 
 // ── 房间列表 ──
@@ -282,6 +283,7 @@ function doConnect() {
     password: joinPassword.value || undefined,
     token: getAuthToken() || undefined,
     features: getLocalFeatures(),
+    spectatorOnly: joinAsSpectator.value || undefined,
   })
 
   view.value = 'connecting'
@@ -402,6 +404,13 @@ function skipWorldbookSync() {
 
 /** 连接成功后根据角色路由到正确视图 */
 function checkPostConnectFlow() {
+  if (joinAsSpectator.value) {
+    // 纯观战者：跳过角色创建，直接进入等待大厅并打开观战列表
+    mpStore.isSpectatorOnly = true
+    mpStore.showSpectateList = true
+    view.value = 'waiting_room'
+    return
+  }
   if (mpStore.isHost) {
     // 房主：检查是否有联机存档或角色预设
     loadMpSaves()
@@ -729,8 +738,15 @@ function formatTime(ts) {
           <input v-model="joinPassword" placeholder="可选" type="password" />
         </div>
 
+        <div class="form-row">
+          <label class="checkbox-label">
+            <input type="checkbox" v-model="joinAsSpectator" />
+            <span>以观战者身份加入（无需创建角色）</span>
+          </label>
+        </div>
+
         <button class="mp-btn primary full-width" @click="handleJoin" :disabled="!canJoin || isLoading">
-          {{ isLoading ? '验证中...' : '下一步' }}
+          {{ isLoading ? '验证中...' : joinAsSpectator ? '以观战者加入' : '下一步' }}
         </button>
       </div>
 
