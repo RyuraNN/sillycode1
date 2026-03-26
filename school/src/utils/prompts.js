@@ -100,15 +100,16 @@ export const buildSchoolRulePrompt = (gameState) => {
  * @returns {string} 天气提示词
  */
 export const buildWeatherPrompt = (gameState) => {
-  if (!gameState.worldState || !gameState.worldState.weather || !gameState.worldState.weather.current) {
+  const worldState = gameState.world?.worldState || gameState.worldState
+  if (!worldState || !worldState.weather || !worldState.weather.current) {
     return ''
   }
 
-  const weather = gameState.worldState.weather.current
+  const weather = worldState.weather.current
   let prompt = `\n[当前天气] ${weather.icon} ${weather.weatherName}，气温${weather.temperature}°C\n`
   
   // 检查天气变化 (从状态中读取)
-  const changeInfo = gameState.worldState.weather.lastChangeInfo
+  const changeInfo = worldState.weather.lastChangeInfo
   if (changeInfo) {
     prompt += `[天气变化] ${changeInfo.reason} (从${changeInfo.fromWeather}转为${changeInfo.toWeather})\n`
   }
@@ -123,6 +124,7 @@ export const buildWeatherPrompt = (gameState) => {
  */
 export const buildSocialPrompt = (gameState) => {
   const { player } = gameState
+  const npcs = gameState.world?.npcs || gameState.npcs || []
   let prompt = ''
 
   // 1. 处理好友申请 (持久化请求)
@@ -145,7 +147,7 @@ export const buildSocialPrompt = (gameState) => {
             if (memberId === 'player') return player.name
             const friend = player.social.friends.find(f => f.id === memberId)
             if (friend) return friend.name
-            const npc = gameState.npcs.find(n => n.id === memberId)
+            const npc = npcs.find(n => n.id === memberId)
             if (npc) return npc.name
             if (!memberId.startsWith('char_') && !memberId.startsWith('npc_')) return memberId
             return '未知成员'
@@ -164,7 +166,7 @@ export const buildSocialPrompt = (gameState) => {
         } else {
           // 2. 尝试查找好友 (私聊)
           const friend = player.social.friends.find(f => f.id === msg.metadata.chatId)
-          const npc = gameState.npcs.find(n => n.id === msg.metadata.chatId)
+          const npc = npcs.find(n => n.id === msg.metadata.chatId)
           const targetName = friend ? friend.name : (npc ? npc.name : null)
           
           if (targetName) {
@@ -198,7 +200,7 @@ export const buildSocialPrompt = (gameState) => {
             if (memberId === 'player') return player.name
             const friend = player.social.friends.find(f => f.id === memberId)
             if (friend) return friend.name
-            const npc = gameState.npcs.find(n => n.id === memberId)
+            const npc = npcs.find(n => n.id === memberId)
             if (npc) return npc.name
             if (!memberId.startsWith('char_') && !memberId.startsWith('npc_')) return memberId
             return '未知成员'
@@ -215,7 +217,7 @@ export const buildSocialPrompt = (gameState) => {
           }
         } else {
           const friend = player.social.friends.find(f => f.id === cmd.metadata.chatId)
-          const npc = gameState.npcs.find(n => n.id === cmd.metadata.chatId)
+          const npc = npcs.find(n => n.id === cmd.metadata.chatId)
           const targetName = friend ? friend.name : (npc ? npc.name : null)
           
           if (targetName) {
@@ -342,9 +344,10 @@ export const buildTeacherSchedulePrompt = (gameTime, weeklySchedule, gameState) 
       if (info.isElective) {
         let name = `选修课《${info.subject}》`
         // 查找学生名单
-        if (gameState && gameState.npcElectiveSelections) {
+        const npcElectiveSelections = gameState?.player?.academic?.npcElectiveSelections || gameState?.npcElectiveSelections
+        if (gameState && npcElectiveSelections) {
           const students = []
-          for (const [npcName, selections] of Object.entries(gameState.npcElectiveSelections)) {
+          for (const [npcName, selections] of Object.entries(npcElectiveSelections)) {
             // 检查是否选择了该课程
             // 匹配逻辑：
             // 1. 优先用 courseId 精确匹配
@@ -1084,7 +1087,12 @@ export const buildCondensedPlayerInfo = (gameState) => {
  * @returns {string} 格式化后的提示词内容
  */
 export const buildSystemPromptContent = (gameState) => {
-  const { gameTime, player, npcs, npcRelationships, allClassData, allClubs } = gameState
+  const player = gameState.player
+  const gameTime = gameState.world?.gameTime || gameState.gameTime
+  const npcs = gameState.world?.npcs || gameState.npcs || []
+  const npcRelationships = gameState.world?.npcRelationships || gameState.npcRelationships || {}
+  const allClassData = gameState.world?.allClassData || gameState.allClassData || {}
+  const allClubs = gameState.world?.allClubs || gameState.allClubs || {}
   
   // 获取中文星期
   const weekdayChinese = getWeekdayChinese(gameTime.weekday)
@@ -1306,8 +1314,9 @@ export const buildSystemPromptContent = (gameState) => {
         }
 
         // 备注信息
-        if (gameState.characterNotes && gameState.characterNotes[npc.name]) {
-          details += `Notes: ${gameState.characterNotes[npc.name]}\n`
+        const characterNotes = gameState.world?.characterNotes || gameState.characterNotes
+        if (characterNotes && characterNotes[npc.name]) {
+          details += `Notes: ${characterNotes[npc.name]}\n`
         }
 
         // 目标
@@ -1404,8 +1413,9 @@ export const buildSystemPromptContent = (gameState) => {
 
   // 构建社团申请提示词
   let clubApplicationPrompt = ''
-  if (gameState.clubApplication) {
-    const { clubId, clubName, remainingTurns } = gameState.clubApplication
+  const clubApplication = gameState.player?.events?.clubApplication || gameState.clubApplication
+  if (clubApplication) {
+    const { clubId, clubName, remainingTurns } = clubApplication
     clubApplicationPrompt = `
 [System Notice]
 Player is applying to join the club "${clubName}" (Club ID: ${clubId}).
@@ -1418,8 +1428,9 @@ As the president or person in charge, please decide whether to approve or reject
 
   // 构建社团邀请提示词
   let clubInvitationPrompt = ''
-  if (gameState.clubInvitation) {
-    const { clubId, clubName, targetName, remainingTurns } = gameState.clubInvitation
+  const clubInvitation = gameState.player?.events?.clubInvitation || gameState.clubInvitation
+  if (clubInvitation) {
+    const { clubId, clubName, targetName, remainingTurns } = clubInvitation
     clubInvitationPrompt = `
 [社团邀请]
 ${player.name}邀请"${targetName}"加入"${clubName}"(社团ID: ${clubId})。
