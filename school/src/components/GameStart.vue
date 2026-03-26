@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, nextTick, watch, onMounted } from 'vue'
 import { useGameStore } from '../stores/gameStore'
+import { useMultiplayerStore } from '../stores/multiplayerStore'
 import CustomOptionPanel from './CustomOptionPanel.vue'
 import AttributeAllocationPanel from './AttributeAllocationPanel.vue'
 import StudentProfile from './StudentProfile.vue'
@@ -23,6 +24,13 @@ const props = defineProps({
 })
 const emit = defineEmits(['back', 'startGame'])
 const gameStore = useGameStore()
+const mpStore = useMultiplayerStore()
+
+// 联机模式下仅房主可修改班级名册
+const canEditRoster = computed(() => {
+  if (props.mode !== 'multiplayer') return true
+  return mpStore.isHost
+})
 
 onMounted(async () => {
   await gameStore.loadClassData()
@@ -1256,8 +1264,8 @@ const confirmSignature = async () => {
               <pre>{{ classInfoText }}</pre>
             </div>
 
-            <!-- 班级名册按钮 -->
-            <div v-if="formData.classId" class="roster-btn-container">
+            <!-- 班级名册按钮（联机模式下仅房主可用） -->
+            <div v-if="formData.classId && canEditRoster" class="roster-btn-container">
               <button class="action-btn small" @click="showRoster = true">修改班级名册</button>
             </div>
           </template>
