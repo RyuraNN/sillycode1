@@ -11,6 +11,20 @@ const wbMismatchSelf = ref(false)
 const wbMismatchAlerts = ref([])
 const toasts = ref([])
 let toastId = 0
+const hudPulse = ref(false)
+let pulseTimer = null
+
+function triggerHudPulse() {
+  hudPulse.value = false
+  void document.body?.offsetHeight // force reflow
+  hudPulse.value = true
+  clearTimeout(pulseTimer)
+  pulseTimer = setTimeout(() => { hudPulse.value = false }, 600)
+}
+
+function onNewMessage() {
+  triggerHudPulse()
+}
 
 function onToast(e) {
   const { text, type } = e.detail || {}
@@ -41,12 +55,15 @@ onMounted(() => {
   window.addEventListener('mp:worldbook_mismatch', onWbMismatch)
   window.addEventListener('mp:worldbook_alert', onWbAlert)
   window.addEventListener('mp:toast', onToast)
+  window.addEventListener('mp:new_message', onNewMessage)
 })
 
 onUnmounted(() => {
   window.removeEventListener('mp:worldbook_mismatch', onWbMismatch)
   window.removeEventListener('mp:worldbook_alert', onWbAlert)
   window.removeEventListener('mp:toast', onToast)
+  window.removeEventListener('mp:new_message', onNewMessage)
+  clearTimeout(pulseTimer)
 })
 
 const onlinePlayers = computed(() => mpStore.playerList)
@@ -89,7 +106,7 @@ function handleAfkExtend() {
 <template>
   <div class="mp-hud" v-if="mpStore.isMultiplayerActive">
     <!-- 房间信息条 -->
-    <div class="mp-hud-bar">
+    <div class="mp-hud-bar" :class="{ 'hud-pulse': hudPulse }">
       <div class="hud-room" @click="togglePlayerList">
         <span class="hud-room-id">{{ mpStore.roomId }}</span>
         <span class="hud-dot" :class="{ connected: mpStore.isConnected }"></span>
@@ -342,6 +359,18 @@ function handleAfkExtend() {
 .hud-chat-btn:hover {
   color: #5d4037;
   background: rgba(139, 69, 19, 0.08);
+}
+
+/* ── 新消息脉冲动画 ── */
+.hud-pulse {
+  animation: hud-bounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes hud-bounce {
+  0% { transform: scale(1); box-shadow: 0 2px 12px rgba(139, 69, 19, 0.08); }
+  20% { transform: scale(1.08); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4), 0 2px 12px rgba(139, 69, 19, 0.08); }
+  50% { transform: scale(0.97); box-shadow: 0 0 0 6px rgba(59, 130, 246, 0), 0 2px 12px rgba(139, 69, 19, 0.08); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0), 0 2px 12px rgba(139, 69, 19, 0.08); }
 }
 
 .hud-unread {

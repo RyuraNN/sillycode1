@@ -23,6 +23,11 @@ let batchQueue = []
 let batchTimer = null
 const BATCH_INTERVAL = 100 // ms
 
+// WebSocket 保活
+let pingTimer = null
+const PING_INTERVAL = 25000 // 25秒
+let wakeLockAbort = null
+
 /**
  * 配置服务端地址（仅开发环境可用）
  * 生产环境通过构建时常量 __MP_WS_URL__ / __MP_API_URL__ 注入
@@ -147,9 +152,13 @@ export function connectToRoom(roomId, playerInfo) {
     console.log('[MultiplayerWs] Connected to room:', roomId)
     reconnectAttempts = 0
     startBatchTimer()
+    startPingTimer()
+    acquireWakeLock()
   }
 
   ws.onmessage = (event) => {
+    // 忽略 pong 心跳响应
+    if (event.data === 'pong') return
     try {
       const msg = JSON.parse(event.data)
       handleMessage(msg)
@@ -161,6 +170,7 @@ export function connectToRoom(roomId, playerInfo) {
   ws.onclose = (event) => {
     console.log('[MultiplayerWs] Connection closed:', event.code, event.reason)
     stopBatchTimer()
+    stopPingTimer()
 
     if (event.code === 1000 && event.reason === 'user disconnect') {
       // 用户主动断开
@@ -190,6 +200,8 @@ export function disconnect() {
   clearTimeout(reconnectTimer)
   reconnectAttempts = MAX_RECONNECT_ATTEMPTS
   stopBatchTimer()
+  stopPingTimer()
+  releaseWakeLock()
 
   if (ws) {
     try {
@@ -357,7 +369,8 @@ function handleMessage(msg) {
       }).catch(() => {})
       break
 
-    case 'player_joined':
+    case 'player_joined': {
+      window.dispatchEvent(new Event('mp:new_message'))
       mpStore.handlePlayerJoined(msg.data)
       window.dispatchEvent(new CustomEvent('mp:toast', { detail: { text: `${msg.data.playerName} 加入了房间`, type: 'info' } }))
       // 教师模式：将学生玩家名注入班级条目
@@ -367,6 +380,7 @@ function handleMessage(msg) {
         }).catch(() => {})
       }
       break
+    }
 
     case 'player_left':
       mpStore.handlePlayerLeft(msg.data)
@@ -375,6 +389,7 @@ function handleMessage(msg) {
 
     case 'chat':
       mpStore.handleChat(msg.data, msg.from, msg.fromName)
+      window.dispatchEvent(new Event('mp:new_message'))
       break
 
     case 'player_update':
@@ -719,6 +734,47 @@ function flushBatch() {
     console.error('[MultiplayerWs] Batch send failed:', e)
   }
   batchQueue = []
+}
+
+// ── WebSocket 保活 ──
+
+function startPingTimer() {
+  stopPingTimer()
+  pingTimer = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send('ping') } catch {}
+    }
+  }, PING_INTERVAL)
+}
+
+function stopPingTimer() {
+  if (pingTimer) {
+    clearInterval(pingTimer)
+    pingTimer = null
+  }
+}
+
+/**
+ * 使用 Web Locks API 防止浏览器后台冻结 WebSocket
+ * Web Locks 在持有锁期间会阻止页面被完全冻结（Page Lifecycle API freeze）
+ */
+function acquireWakeLock() {
+  releaseWakeLock()
+  if (typeof navigator !== 'undefined' && navigator.locks) {
+    const controller = new AbortController()
+    wakeLockAbort = controller
+    navigator.locks.request('mp_ws_keepalive', { signal: controller.signal }, () => {
+      // 返回一个永不 resolve 的 promise，持续持有锁
+      return new Promise(() => {})
+    }).catch(() => {})
+  }
+}
+
+function releaseWakeLock() {
+  if (wakeLockAbort) {
+    try { wakeLockAbort.abort() } catch {}
+    wakeLockAbort = null
+  }
 }
 
 /**
