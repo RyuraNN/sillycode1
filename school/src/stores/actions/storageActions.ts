@@ -300,12 +300,13 @@ async function cleanAndMigrateSnapshots(snapshots: any[]): Promise<{ cleaned: an
       console.log(`[GameStore] Migrating snapshot ${s.id} to split storage...`)
       try {
         if (s.gameState) {
+          const gsTime = s.gameState.world?.gameTime || s.gameState.gameTime
           s.gameTime = {
-            year: s.gameState.gameTime?.year,
-            month: s.gameState.gameTime?.month,
-            day: s.gameState.gameTime?.day,
-            hour: s.gameState.gameTime?.hour,
-            minute: s.gameState.gameTime?.minute
+            year: gsTime?.year,
+            month: gsTime?.month,
+            day: gsTime?.day,
+            hour: gsTime?.hour,
+            minute: gsTime?.minute
           }
           s.location = s.gameState.player?.location
         }

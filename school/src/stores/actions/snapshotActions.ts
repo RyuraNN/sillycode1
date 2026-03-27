@@ -876,6 +876,18 @@ export const snapshotActions = {
       }
     }
 
+    const rag = data.rag
+    if (rag) {
+      if (Array.isArray(rag.summaries) && rag.summaries.length === 0 && rag._summariesCount !== undefined) {
+        rag.summaries = this.rag?.summaries || this.player?.summaries || []
+        delete rag._summariesCount
+      }
+      if (Array.isArray(rag.persistentFacts) && rag.persistentFacts.length === 0 && rag._persistentFactsCount !== undefined) {
+        rag.persistentFacts = this.rag?.persistentFacts || this.player?.persistentFacts || []
+        delete rag._persistentFactsCount
+      }
+    }
+
     // Phase 2: 使用 applyGameStateToStore 统一恢复（自动处理 v3→v4 迁移）
     const defaults = createInitialState()
     applyGameStateToStore(this, data, defaults)

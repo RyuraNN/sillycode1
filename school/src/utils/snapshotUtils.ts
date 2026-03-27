@@ -574,15 +574,20 @@ function applyNpcChange(state: any, path: string, value: any): void {
   const npcId = match[1]
   const propertyPath = match[2]
 
+  // Phase 2: v4 使用 world.npcs，旧版兼容仍支持顶层 npcs
+  const npcOwner = (state && typeof state === 'object' && state.world && typeof state.world === 'object')
+    ? state.world
+    : state
+
   // 确保 npcs 数组存在
-  if (!state.npcs) {
-    state.npcs = []
+  if (!Array.isArray(npcOwner.npcs)) {
+    npcOwner.npcs = []
   }
 
   // 构建或使用缓存的 NPC ID -> index 映射
   if (!_npcMapCache) {
     _npcMapCache = new Map(
-      state.npcs.map((npc: any, idx: number) => [npc.id, idx])
+      npcOwner.npcs.map((npc: any, idx: number) => [npc.id, idx])
     )
   }
 
@@ -591,23 +596,23 @@ function applyNpcChange(state: any, path: string, value: any): void {
   if (propertyPath) {
     // 修改 NPC 的属性（如 npcs[id=123].hp）
     if (npcIndex !== undefined) {
-      setNestedValue(state.npcs[npcIndex], propertyPath, value)
+      setNestedValue(npcOwner.npcs[npcIndex], propertyPath, value)
     }
   } else {
     // 添加或删除整个 NPC（如 npcs[id=123]）
     if (value === null) {
       // 删除 NPC
       if (npcIndex !== undefined) {
-        state.npcs.splice(npcIndex, 1)
+        npcOwner.npcs.splice(npcIndex, 1)
         _npcMapCache = null  // 清除缓存，下次重建
       }
     } else {
       // 添加或替换 NPC
       if (npcIndex !== undefined) {
-        state.npcs[npcIndex] = value
+        npcOwner.npcs[npcIndex] = value
       } else {
-        state.npcs.push(value)
-        _npcMapCache.set(npcId, state.npcs.length - 1)
+        npcOwner.npcs.push(value)
+        _npcMapCache.set(npcId, npcOwner.npcs.length - 1)
       }
     }
   }

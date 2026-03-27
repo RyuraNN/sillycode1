@@ -90,6 +90,28 @@ const DIARY_DATA = {
 
 const DIARY_PROMPT = toTOON(DIARY_DATA)
 
+function formatGameDateFromTime(gameTime) {
+  if (!gameTime || typeof gameTime !== 'object') return undefined
+  const year = Number(gameTime.year)
+  const month = Number(gameTime.month)
+  const day = Number(gameTime.day)
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return undefined
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+function normalizeGameDate(value) {
+  if (typeof value !== 'string') return undefined
+  const raw = value.trim()
+  if (!raw) return undefined
+  const match = raw.match(/(\d{4})\s*[\-\/.年]\s*(\d{1,2})\s*[\-\/.月]\s*(\d{1,2})/)
+  if (!match) return undefined
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return undefined
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
 /**
  * 清理内容中的图片相关标签（用于发送给AI处理）
  * @param {string} content 内容
@@ -236,9 +258,10 @@ export function extractSummary(response, type) {
  * @param {number} floor 楼层号
  * @param {boolean} useAssistant 是否使用辅助AI
  * @param {string} [preGeneratedSummary] 预生成的总结内容
+ * @param {string|null} [gameDateOverride] 可选日期覆盖，格式 YYYY-MM-DD
  * @returns {Promise<{success: boolean, summary?: object, error?: string}>}
  */
-export async function generateMinorSummary(content, floor, useAssistant = true, preGeneratedSummary = null) {
+export async function generateMinorSummary(content, floor, useAssistant = true, preGeneratedSummary = null, gameDateOverride = null) {
   const gameStore = useGameStore()
 
   if (!gameStore.settings.summarySystem?.enabled) {
@@ -247,15 +270,14 @@ export async function generateMinorSummary(content, floor, useAssistant = true, 
 
   // 1. 如果有预生成的小总结，直接使用
   if (preGeneratedSummary) {
-    const { year, month, day } = gameStore.world.gameTime
-    const gameDate = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+    const gameDate = normalizeGameDate(gameDateOverride) || formatGameDateFromTime(gameStore.world?.gameTime)
     const summary = {
       floor,
       type: 'minor',
       content: preGeneratedSummary,
       coveredFloors: [floor],
       timestamp: Date.now(),
-      gameDate
+      ...(gameDate && { gameDate })
     }
     const storedSummary = addSummary(summary)
     console.log(`[SummaryManager] Using pre-generated minor summary for floor ${floor}`)
@@ -296,15 +318,14 @@ export async function generateMinorSummary(content, floor, useAssistant = true, 
       return { success: false, error: '无法从AI响应中提取小总结' }
     }
 
-    const { year, month, day } = gameStore.world.gameTime
-    const gameDate = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+    const gameDate = normalizeGameDate(gameDateOverride) || formatGameDateFromTime(gameStore.world?.gameTime)
     const summary = {
       floor,
       type: 'minor',
       content: summaryContent,
       coveredFloors: [floor],
       timestamp: Date.now(),
-      gameDate
+      ...(gameDate && { gameDate })
     }
 
     // 保存到store
@@ -398,6 +419,11 @@ function addSummary(summary) {
     coveredFloors: Array.isArray(summary.coveredFloors) && summary.coveredFloors.length > 0
       ? [...new Set(summary.coveredFloors)].sort((a, b) => a - b)
       : [summary.floor]
+  }
+
+  const normalizedDate = normalizeGameDate(normalizedSummary.gameDate)
+  if (normalizedDate) {
+    normalizedSummary.gameDate = normalizedDate
   }
 
   if ((normalizedSummary.type === 'minor' || normalizedSummary.type === 'diary') && normalizedSummary.content) {
@@ -1014,7 +1040,12 @@ export async function generateBatchSummaries(chatLog, onProgress, options = {}) 
   chatLog.forEach((log, index) => {
     const floor = index + 1
     if (log.type === 'ai' && !coveredFloors.has(floor)) {
-      floorsToProcess.push({ floor, content: log.content })
+      const snapshotTime = log.snapshot?.world?.gameTime || log.snapshot?.gameTime
+      floorsToProcess.push({
+        floor,
+        content: log.content,
+        gameDate: formatGameDateFromTime(snapshotTime)
+      })
     }
   })
 
@@ -1053,7 +1084,7 @@ export async function generateBatchSummaries(chatLog, onProgress, options = {}) 
     if (group.length === 1) {
       // 单层：直接生成 minor 总结
       try {
-        await generateMinorSummary(cleanImageTags(group[0].content), group[0].floor, true)
+        await generateMinorSummary(cleanImageTags(group[0].content), group[0].floor, true, null, group[0].gameDate)
         // 自动计算向量
         if (options.autoEmbed) {
           const newSummary = (gameStore.player.summaries || []).find(s => s.floor === group[0].floor && s.type === 'minor' && summaryNeedsEmbeddingRefresh(s))
@@ -1105,7 +1136,8 @@ ${mergedContent}`
           const coveredGroupFloors = group.map(b => b.floor)
           // 尝试从总结中提取日期
           const dateMatch = summaryContent.match(/日期[|｜]([^\n]+)/)
-          const gameDate = dateMatch ? dateMatch[1].trim() : undefined
+          const fallbackGroupDate = group[group.length - 1]?.gameDate
+          const gameDate = normalizeGameDate(dateMatch ? dateMatch[1].trim() : '') || normalizeGameDate(fallbackGroupDate)
           const summary = {
             floor: Math.max(...coveredGroupFloors),
             type: 'minor',
