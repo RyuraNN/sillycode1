@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, onBeforeUnmount, computed, nextTick } from 'vue'
+import { ref, watch, onMounted, onUnmounted, onBeforeUnmount, computed, nextTick } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { useMultiplayerStore } from '../stores/multiplayerStore'
 import {
@@ -35,6 +35,218 @@ function parseHostFeatures(raw) {
   if (!raw) return { assistantAI: false, rag: false, summary: false }
   if (typeof raw === 'object') return raw
   try { return JSON.parse(raw) } catch { return { assistantAI: false, rag: false, summary: false } }
+}
+
+function parseRoomGameTime(raw) {
+  if (!raw) return null
+  if (typeof raw === 'object') return raw
+  try { return JSON.parse(raw) } catch { return null }
+}
+
+function formatRoomMode(mode) {
+  const map = {
+    normal: '普通',
+    tianlong: '天龙',
+    challenge: '挑战',
+    hard: '困难',
+  }
+  return map[mode] || mode || '未知'
+}
+
+function formatRoomTime(rawGameTime, weekNumber) {
+  const gameTime = parseRoomGameTime(rawGameTime)
+  const weekNum = Number(weekNumber)
+  const weekLabel = Number.isFinite(weekNum) && weekNum > 0 ? `第${weekNum}周` : ''
+
+  if (!gameTime || typeof gameTime !== 'object') {
+    return weekLabel || '时间未知'
+  }
+
+  const month = Number(gameTime.month) || 1
+  const day = Number(gameTime.day) || 1
+  const hour = String(Number(gameTime.hour) || 0).padStart(2, '0')
+  const minute = String(Number(gameTime.minute) || 0).padStart(2, '0')
+  const dateLabel = `${month}/${day} ${hour}:${minute}`
+  return weekLabel ? `${weekLabel} · ${dateLabel}` : dateLabel
+}
+
+const WB_DIFF_MAX_ITEMS = 300
+const WB_HIDE_CONTEXT_PREF_KEY = 'school_mp_wb_hide_context'
+
+function normalizeDiffValue(value) {
+  if (Array.isArray(value)) return value.map(normalizeDiffValue)
+  if (value && typeof value === 'object') {
+    const normalized = {}
+    for (const key of Object.keys(value).sort()) {
+      normalized[key] = normalizeDiffValue(value[key])
+    }
+    return normalized
+  }
+  return value
+}
+
+function entryDiffKey(entry, index) {
+  return String(entry?.uid || entry?.id || entry?.name || `#${index}`)
+}
+
+function entryDiffPreview(entry) {
+  if (!entry) return '（无）'
+  const primary = entry.content || entry.comment || entry.memo || entry.text || entry.name
+  if (primary && typeof primary === 'string') {
+    return primary.replace(/\s+/g, ' ').trim().slice(0, 120) || '（空）'
+  }
+  try {
+    return JSON.stringify(entry).slice(0, 120)
+  } catch {
+    return '（无法预览）'
+  }
+}
+
+function entryDiffRaw(entry) {
+  if (!entry) return 'null'
+  try {
+    return JSON.stringify(normalizeDiffValue(entry), null, 2)
+  } catch {
+    return String(entry)
+  }
+}
+
+function computeLineDiff(leftText, rightText) {
+  const leftLines = String(leftText || '').split('\n')
+  const rightLines = String(rightText || '').split('\n')
+  const m = leftLines.length
+  const n = rightLines.length
+
+  const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0))
+  for (let i = m - 1; i >= 0; i -= 1) {
+    for (let j = n - 1; j >= 0; j -= 1) {
+      if (leftLines[i] === rightLines[j]) {
+        dp[i][j] = dp[i + 1][j + 1] + 1
+      } else {
+        dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1])
+      }
+    }
+  }
+
+  const rows = []
+  let i = 0
+  let j = 0
+  let leftNo = 1
+  let rightNo = 1
+
+  while (i < m && j < n) {
+    if (leftLines[i] === rightLines[j]) {
+      rows.push({ type: 'context', leftNo, rightNo, text: leftLines[i] })
+      i += 1
+      j += 1
+      leftNo += 1
+      rightNo += 1
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      rows.push({ type: 'remove', leftNo, rightNo: null, text: leftLines[i] })
+      i += 1
+      leftNo += 1
+    } else {
+      rows.push({ type: 'add', leftNo: null, rightNo, text: rightLines[j] })
+      j += 1
+      rightNo += 1
+    }
+  }
+
+  while (i < m) {
+    rows.push({ type: 'remove', leftNo, rightNo: null, text: leftLines[i] })
+    i += 1
+    leftNo += 1
+  }
+
+  while (j < n) {
+    rows.push({ type: 'add', leftNo: null, rightNo, text: rightLines[j] })
+    j += 1
+    rightNo += 1
+  }
+
+  return rows
+}
+
+function buildWorldbookSnapshotDiff(localSnapshot, hostSnapshot) {
+  const localBooks = new Map((localSnapshot || []).map(book => [book.bookName, Array.isArray(book.entries) ? book.entries : []]))
+  const hostBooks = new Map((hostSnapshot || []).map(book => [book.bookName, Array.isArray(book.entries) ? book.entries : []]))
+  const allBookNames = new Set([...localBooks.keys(), ...hostBooks.keys()])
+
+  const diffItems = []
+  let added = 0
+  let removed = 0
+  let changed = 0
+  let totalLocal = 0
+  let totalHost = 0
+  let truncated = false
+
+  for (const entries of localBooks.values()) totalLocal += entries.length
+  for (const entries of hostBooks.values()) totalHost += entries.length
+
+  for (const bookName of allBookNames) {
+    const localEntries = localBooks.get(bookName) || []
+    const hostEntries = hostBooks.get(bookName) || []
+
+    const localMap = new Map(localEntries.map((entry, idx) => [entryDiffKey(entry, idx), entry]))
+    const hostMap = new Map(hostEntries.map((entry, idx) => [entryDiffKey(entry, idx), entry]))
+    const allEntryKeys = new Set([...localMap.keys(), ...hostMap.keys()])
+
+    for (const entryKey of allEntryKeys) {
+      const localEntry = localMap.get(entryKey)
+      const hostEntry = hostMap.get(entryKey)
+      const entryId = `${bookName}::${entryKey}`
+      if (!localEntry && hostEntry) {
+        added += 1
+        diffItems.push({
+          id: `${entryId}::added`,
+          type: 'added',
+          bookName,
+          entryName: hostEntry?.name || entryKey,
+          localPreview: '（本地无此条目）',
+          hostPreview: entryDiffPreview(hostEntry),
+          localRaw: entryDiffRaw(null),
+          hostRaw: entryDiffRaw(hostEntry)
+        })
+      } else if (localEntry && !hostEntry) {
+        removed += 1
+        diffItems.push({
+          id: `${entryId}::removed`,
+          type: 'removed',
+          bookName,
+          entryName: localEntry?.name || entryKey,
+          localPreview: entryDiffPreview(localEntry),
+          hostPreview: '（房主无此条目）',
+          localRaw: entryDiffRaw(localEntry),
+          hostRaw: entryDiffRaw(null)
+        })
+      } else {
+        const localSig = JSON.stringify(normalizeDiffValue(localEntry))
+        const hostSig = JSON.stringify(normalizeDiffValue(hostEntry))
+        if (localSig !== hostSig) {
+          changed += 1
+          diffItems.push({
+            id: `${entryId}::changed`,
+            type: 'changed',
+            bookName,
+            entryName: localEntry?.name || hostEntry?.name || entryKey,
+            localPreview: entryDiffPreview(localEntry),
+            hostPreview: entryDiffPreview(hostEntry),
+            localRaw: entryDiffRaw(localEntry),
+            hostRaw: entryDiffRaw(hostEntry)
+          })
+        }
+      }
+
+      if (diffItems.length >= WB_DIFF_MAX_ITEMS) {
+        truncated = true
+        break
+      }
+    }
+
+    if (truncated) break
+  }
+
+  return { diffItems, added, removed, changed, totalLocal, totalHost, truncated }
 }
 
 /** 获取当前玩家的系统功能状态 */
@@ -83,6 +295,26 @@ const showPresetPicker = ref(false)
 // ── 世界书同步 ──
 const wbSyncStatus = ref('') // '' | 'checking' | 'mismatch' | 'syncing' | 'done' | 'error'
 const wbSyncError = ref('')
+const wbDiffLoading = ref(false)
+const wbDiffError = ref('')
+const wbDiffItems = ref([])
+const wbDiffFilter = ref('all') // all | changed | added | removed
+const wbDiffSummary = ref({ totalLocal: 0, totalHost: 0, added: 0, removed: 0, changed: 0, truncated: false })
+const wbHostSnapshotCache = ref(null)
+const wbLocalSnapshotCache = ref([])
+const wbExpandedDiffId = ref(null)
+const wbHideContextRows = ref(readWbHideContextPref())
+let wbDiffRequestToken = 0
+
+function readWbHideContextPref() {
+  try {
+    const raw = localStorage.getItem(WB_HIDE_CONTEXT_PREF_KEY)
+    if (raw == null) return true
+    return raw === '1' || raw === 'true'
+  } catch {
+    return true
+  }
+}
 
 // ── 存档分发 ──
 const saveTransferStatus = ref('') // '' | 'requesting' | 'receiving' | 'done' | 'error'
@@ -105,6 +337,27 @@ const playerName = computed(() => {
   const char = characterName.value
   if (discord && char) return `${discord}（${char}）`
   return discord || char || 'Player'
+})
+
+const wbFilteredDiffItems = computed(() => {
+  if (wbDiffFilter.value === 'all') return wbDiffItems.value
+  return wbDiffItems.value.filter(item => item.type === wbDiffFilter.value)
+})
+
+function toggleDiffDetail(diffId) {
+  wbExpandedDiffId.value = wbExpandedDiffId.value === diffId ? null : diffId
+}
+
+function getLineDiffRows(diff) {
+  const rows = computeLineDiff(diff.localRaw, diff.hostRaw)
+  if (!wbHideContextRows.value) return rows
+  return rows.filter(row => row.type !== 'context')
+}
+
+watch(wbHideContextRows, (value) => {
+  try {
+    localStorage.setItem(WB_HIDE_CONTEXT_PREF_KEY, value ? '1' : '0')
+  } catch {}
 })
 
 // ── 生命周期 ──
@@ -156,9 +409,35 @@ async function onWorldbookDataReceived(event) {
   if (!snapshot) {
     wbSyncStatus.value = 'error'
     wbSyncError.value = '未收到世界书数据'
+    wbDiffLoading.value = false
     return
   }
 
+  if (wbSyncStatus.value === 'mismatch') {
+    wbHostSnapshotCache.value = snapshot
+    const diffResult = buildWorldbookSnapshotDiff(wbLocalSnapshotCache.value, snapshot)
+    wbDiffItems.value = diffResult.diffItems
+    wbDiffSummary.value = {
+      totalLocal: diffResult.totalLocal,
+      totalHost: diffResult.totalHost,
+      added: diffResult.added,
+      removed: diffResult.removed,
+      changed: diffResult.changed,
+      truncated: diffResult.truncated,
+    }
+    wbDiffError.value = ''
+    wbDiffLoading.value = false
+    return
+  }
+
+  if (wbSyncStatus.value !== 'syncing') {
+    return
+  }
+
+  await applyHostSnapshot(snapshot)
+}
+
+async function applyHostSnapshot(snapshot) {
   wbSyncStatus.value = 'syncing'
   try {
     const success = await acceptHostWorldbook(snapshot, {
@@ -179,6 +458,35 @@ async function onWorldbookDataReceived(event) {
     wbSyncStatus.value = 'error'
     wbSyncError.value = e.message || '同步出错'
   }
+}
+
+async function requestWorldbookDiffPreview() {
+  const requestToken = ++wbDiffRequestToken
+  wbDiffLoading.value = true
+  wbDiffError.value = ''
+  wbDiffItems.value = []
+  wbDiffFilter.value = 'all'
+  wbHostSnapshotCache.value = null
+  wbExpandedDiffId.value = null
+  wbHideContextRows.value = true
+
+  try {
+    wbLocalSnapshotCache.value = await getSyncWorldbookSnapshot()
+  } catch (e) {
+    wbDiffLoading.value = false
+    wbDiffError.value = `读取本地世界书失败: ${e.message || e}`
+    return
+  }
+
+  sendWorldbookSyncRequest()
+
+  setTimeout(() => {
+    if (requestToken !== wbDiffRequestToken) return
+    if (wbSyncStatus.value !== 'mismatch') return
+    if (!wbDiffLoading.value) return
+    wbDiffLoading.value = false
+    wbDiffError.value = '等待房主世界书数据超时。你仍可直接点击“同步世界书”。'
+  }, 12000)
 }
 
 // ── 预设管理 ──
@@ -388,6 +696,7 @@ async function checkWorldbookAfterConnect() {
     } else {
       // 不一致，显示同步确认
       wbSyncStatus.value = 'mismatch'
+      requestWorldbookDiffPreview()
     }
   } catch (e) {
     wbSyncStatus.value = 'error'
@@ -398,8 +707,12 @@ async function checkWorldbookAfterConnect() {
 /** 用户确认同步世界书 */
 function acceptWorldbookSync() {
   wbSyncStatus.value = 'syncing'
+  wbDiffLoading.value = false
+  if (wbHostSnapshotCache.value) {
+    applyHostSnapshot(wbHostSnapshotCache.value)
+    return
+  }
   sendWorldbookSyncRequest()
-  // 数据会通过 mp:worldbook_data 事件回调处理
 }
 
 /** 用户拒绝同步，断开连接 */
@@ -407,12 +720,7 @@ function rejectWorldbookSync() {
   disconnect()
   view.value = 'main'
   errorMessage.value = '已拒绝世界书同步，无法加入房间'
-}
-
-/** 跳过同步（不下载房主世界书） */
-function skipWorldbookSync() {
-  wbSyncStatus.value = 'done'
-  checkPostConnectFlow()
+  wbDiffLoading.value = false
 }
 
 /** 连接成功后根据角色路由到正确视图 */
@@ -942,6 +1250,8 @@ function formatTime(ts) {
             </div>
             <div class="room-list-meta">
               <span>房主: {{ room.host_name }}</span>
+              <span>模式: {{ formatRoomMode(room.game_mode) }}</span>
+              <span>{{ formatRoomTime(room.game_time, room.week_number) }}</span>
               <span class="room-host-features" v-if="room.host_features">
                 <span v-if="parseHostFeatures(room.host_features).assistantAI" class="feat-tag feat-ai" title="房主已启用变量辅助AI">AI</span>
                 <span v-if="parseHostFeatures(room.host_features).rag" class="feat-tag feat-rag" title="房主已启用RAG记忆">RAG</span>
@@ -966,9 +1276,78 @@ function formatTime(ts) {
           <div class="wb-sync-icon warn">!</div>
           <p>你的世界书与房主不一致。</p>
           <p class="wb-sync-hint">同步将备份你的当前世界书，然后用房主的世界书替换。你可以在主菜单恢复备份。</p>
+
+          <div class="wb-diff-panel">
+            <div class="wb-diff-summary">
+              <span>本地条目：{{ wbDiffSummary.totalLocal }}</span>
+              <span>房主条目：{{ wbDiffSummary.totalHost }}</span>
+              <span>差异：{{ wbDiffSummary.added + wbDiffSummary.removed + wbDiffSummary.changed }}</span>
+            </div>
+
+            <div class="wb-diff-filter" role="tablist" aria-label="差异筛选">
+              <button class="wb-diff-filter-btn" :class="{ active: wbDiffFilter === 'all' }" @click="wbDiffFilter = 'all'">全部</button>
+              <button class="wb-diff-filter-btn" :class="{ active: wbDiffFilter === 'changed' }" @click="wbDiffFilter = 'changed'">变更 {{ wbDiffSummary.changed }}</button>
+              <button class="wb-diff-filter-btn" :class="{ active: wbDiffFilter === 'added' }" @click="wbDiffFilter = 'added'">房主新增 {{ wbDiffSummary.added }}</button>
+              <button class="wb-diff-filter-btn" :class="{ active: wbDiffFilter === 'removed' }" @click="wbDiffFilter = 'removed'">本地独有 {{ wbDiffSummary.removed }}</button>
+            </div>
+
+            <div v-if="wbDiffLoading" class="wb-diff-loading">正在拉取房主世界书并计算差异...</div>
+            <div v-else-if="wbDiffError" class="wb-diff-error">{{ wbDiffError }}</div>
+            <div v-else-if="wbDiffItems.length === 0" class="wb-diff-empty">可同步条目没有可展示差异（可能仅 hash 元数据不同）。</div>
+            <div v-else class="wb-diff-list">
+              <div v-for="(diff, idx) in wbFilteredDiffItems" :key="`${diff.bookName}-${diff.entryName}-${idx}`" class="wb-diff-item">
+                <div class="wb-diff-item-head">
+                  <span class="wb-diff-type" :class="`is-${diff.type}`">
+                    {{ diff.type === 'changed' ? '变更' : diff.type === 'added' ? '房主新增' : '本地独有' }}
+                  </span>
+                  <span class="wb-diff-book">{{ diff.bookName }}</span>
+                </div>
+                <div class="wb-diff-entry">{{ diff.entryName }}</div>
+                <div class="wb-diff-columns">
+                  <div class="wb-diff-col">
+                    <div class="wb-diff-col-label">本地</div>
+                    <div class="wb-diff-col-value">{{ diff.localPreview }}</div>
+                  </div>
+                  <div class="wb-diff-col">
+                    <div class="wb-diff-col-label">房主</div>
+                    <div class="wb-diff-col-value">{{ diff.hostPreview }}</div>
+                  </div>
+                </div>
+
+                <button class="wb-diff-expand-btn" @click="toggleDiffDetail(diff.id)">
+                  {{ wbExpandedDiffId === diff.id ? '收起逐行 Diff' : '展开逐行 Diff（GitHub/IDE 风格）' }}
+                </button>
+
+                <div v-if="wbExpandedDiffId === diff.id" class="wb-line-diff-wrap">
+                  <div class="wb-line-diff-toolbar">
+                    <label class="wb-line-diff-toggle">
+                      <input type="checkbox" v-model="wbHideContextRows" />
+                      <span>仅看变更块（隐藏 context）</span>
+                    </label>
+                  </div>
+                  <div class="wb-line-diff-scroll" role="region" aria-label="逐行 diff">
+                    <div
+                      v-for="(row, rowIdx) in getLineDiffRows(diff)"
+                      :key="`${diff.id}-row-${rowIdx}`"
+                      class="wb-line-diff-row"
+                      :class="`is-${row.type}`"
+                    >
+                      <span class="wb-line-no">{{ row.leftNo ?? '' }}</span>
+                      <span class="wb-line-no">{{ row.rightNo ?? '' }}</span>
+                      <pre class="wb-line-code">{{ row.text || ' ' }}</pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="wbDiffSummary.truncated" class="wb-diff-truncated">
+              仅展示前 {{ WB_DIFF_MAX_ITEMS }} 条差异，请优先关注关键条目。
+            </div>
+          </div>
+
           <div class="wb-sync-actions">
             <button class="mp-btn primary" @click="acceptWorldbookSync">同步世界书</button>
-            <button class="mp-btn" @click="skipWorldbookSync">跳过同步</button>
             <button class="mp-btn danger" @click="rejectWorldbookSync">取消加入</button>
           </div>
         </div>
@@ -987,7 +1366,7 @@ function formatTime(ts) {
           <div class="wb-sync-icon error">&times;</div>
           <p>{{ wbSyncError || '同步出错' }}</p>
           <div class="wb-sync-actions">
-            <button class="mp-btn" @click="skipWorldbookSync">跳过同步继续</button>
+            <button class="mp-btn primary" @click="acceptWorldbookSync">重试同步</button>
             <button class="mp-btn danger" @click="rejectWorldbookSync">取消加入</button>
           </div>
         </div>
@@ -1809,6 +2188,258 @@ function formatTime(ts) {
   line-height: 1.5;
 }
 
+.wb-diff-panel {
+  width: 100%;
+  max-width: 640px;
+  background: rgba(25, 20, 12, 0.45);
+  border: 1px solid rgba(218, 165, 32, 0.22);
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wb-diff-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+}
+
+.wb-diff-summary span {
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(218, 165, 32, 0.25);
+  background: rgba(139, 69, 19, 0.18);
+  color: rgba(255, 248, 220, 0.78);
+  font-size: 0.75rem;
+}
+
+.wb-diff-filter {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  scrollbar-width: thin;
+  padding-bottom: 2px;
+}
+
+.wb-diff-filter-btn {
+  flex: 0 0 auto;
+  border: 1px solid rgba(218, 165, 32, 0.25);
+  background: rgba(139, 69, 19, 0.16);
+  color: rgba(255, 248, 220, 0.8);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+
+.wb-diff-filter-btn.active {
+  background: rgba(218, 165, 32, 0.22);
+  border-color: rgba(255, 215, 0, 0.45);
+  color: rgba(255, 248, 220, 0.95);
+}
+
+.wb-diff-loading,
+.wb-diff-error,
+.wb-diff-empty,
+.wb-diff-truncated {
+  font-size: 0.78rem;
+  text-align: center;
+  color: rgba(255, 248, 220, 0.72);
+}
+
+.wb-diff-error {
+  color: rgba(255, 200, 180, 0.9);
+}
+
+.wb-diff-truncated {
+  color: rgba(218, 165, 32, 0.85);
+}
+
+.wb-diff-list {
+  max-height: min(40vh, 320px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 2px;
+}
+
+.wb-diff-item {
+  border: 1px solid rgba(218, 165, 32, 0.16);
+  border-radius: 8px;
+  background: rgba(18, 14, 8, 0.45);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wb-diff-item-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.wb-diff-type {
+  font-size: 0.7rem;
+  border-radius: 999px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  color: rgba(255, 248, 220, 0.86);
+}
+
+.wb-diff-type.is-changed {
+  background: rgba(70, 130, 180, 0.2);
+  border-color: rgba(100, 180, 220, 0.35);
+}
+
+.wb-diff-type.is-added {
+  background: rgba(60, 140, 80, 0.2);
+  border-color: rgba(100, 190, 120, 0.35);
+}
+
+.wb-diff-type.is-removed {
+  background: rgba(170, 90, 60, 0.2);
+  border-color: rgba(220, 120, 90, 0.35);
+}
+
+.wb-diff-book {
+  font-size: 0.72rem;
+  color: rgba(218, 165, 32, 0.8);
+}
+
+.wb-diff-entry {
+  font-size: 0.82rem;
+  color: rgba(255, 248, 220, 0.9);
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.wb-diff-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.wb-diff-col {
+  border-radius: 6px;
+  border: 1px solid rgba(218, 165, 32, 0.15);
+  background: rgba(139, 69, 19, 0.1);
+  padding: 6px;
+  min-width: 0;
+}
+
+.wb-diff-col-label {
+  font-size: 0.68rem;
+  color: rgba(218, 165, 32, 0.75);
+  margin-bottom: 3px;
+}
+
+.wb-diff-col-value {
+  font-size: 0.75rem;
+  color: rgba(255, 248, 220, 0.78);
+  line-height: 1.35;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.wb-diff-expand-btn {
+  align-self: flex-start;
+  border: 1px solid rgba(218, 165, 32, 0.3);
+  background: rgba(218, 165, 32, 0.12);
+  color: rgba(255, 248, 220, 0.9);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.wb-line-diff-wrap {
+  border: 1px solid rgba(218, 165, 32, 0.18);
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(16, 12, 8, 0.55);
+}
+
+.wb-line-diff-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(218, 165, 32, 0.16);
+  background: rgba(139, 69, 19, 0.12);
+}
+
+.wb-line-diff-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(255, 248, 220, 0.82);
+  font-size: 0.72rem;
+  user-select: none;
+}
+
+.wb-line-diff-toggle input {
+  width: 16px;
+  height: 16px;
+}
+
+.wb-line-diff-scroll {
+  max-height: min(34vh, 280px);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
+  overscroll-behavior: contain;
+}
+
+.wb-line-diff-row {
+  display: grid;
+  grid-template-columns: 42px 42px minmax(520px, 1fr);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+.wb-line-diff-row.is-context {
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.wb-line-diff-row.is-add {
+  background: rgba(60, 140, 80, 0.18);
+}
+
+.wb-line-diff-row.is-remove {
+  background: rgba(170, 90, 60, 0.2);
+}
+
+.wb-line-no {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 3px 6px;
+  color: rgba(255, 248, 220, 0.55);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  user-select: none;
+}
+
+.wb-line-code {
+  margin: 0;
+  padding: 3px 8px;
+  white-space: pre;
+  color: rgba(255, 248, 220, 0.86);
+}
+
 .wb-sync-actions {
   display: flex;
   flex-direction: column;
@@ -1853,6 +2484,41 @@ function formatTime(ts) {
 
   .player-item {
     min-height: 40px;
+  }
+
+  .wb-diff-panel {
+    max-width: 100%;
+    padding: 8px;
+  }
+
+  .wb-diff-list {
+    max-height: min(44vh, 300px);
+  }
+
+  .wb-diff-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .wb-diff-filter-btn {
+    min-height: 36px;
+    padding: 6px 10px;
+  }
+
+  .wb-line-diff-scroll {
+    max-height: min(38vh, 240px);
+  }
+
+  .wb-line-diff-row {
+    grid-template-columns: 34px 34px minmax(420px, 1fr);
+    font-size: 0.7rem;
+  }
+
+  .wb-line-diff-toolbar {
+    justify-content: flex-start;
+  }
+
+  .wb-line-diff-toggle {
+    font-size: 0.7rem;
   }
 }
 </style>

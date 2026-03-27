@@ -930,7 +930,17 @@ export interface GameState {
       apiKey: string
       model: string
       temperature: number
-      channelConfigs: Record<string, { apiUrl: string; apiKey: string; model: string }>
+      vertexProjectId: string
+      vertexRegion: string
+      vertexMode: 'auto' | 'native' | 'openapi'
+      channelConfigs: Record<string, {
+        apiUrl: string
+        apiKey: string
+        model: string
+        vertexProjectId?: string
+        vertexRegion?: string
+        vertexMode?: 'auto' | 'native' | 'openapi'
+      }>
     }
     summarySystem: SummarySystemSettings
     ragSystem: RAGSettings

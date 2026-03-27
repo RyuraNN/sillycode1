@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { fetchModels, IMAGE_ANALYSIS_PROMPT, validateAssistantAIConfig, callAssistantAI } from '../utils/assistantAI'
-import { PROVIDER_PRESETS, getProviderList, fetchProviderModels, switchProviderConfig } from '../utils/aiProviders'
+import { PROVIDER_PRESETS, getProviderList, fetchProviderModels, switchProviderConfig, buildVertexApiUrl, buildVertexOpenApiUrl, resolveVertexRequestMode } from '../utils/aiProviders'
 import { DEFAULT_INSTRUCTIONS_PROMPT, DEFAULT_STYLE_PROMPT, DEFAULT_CORE_RULES_PROMPT, DEFAULT_BANNED_WORDS_PROMPT } from '../utils/prompts'
 import { GAME_VERSION } from '../utils/editionDetector'
 import { getMatchingStats } from '../utils/todoManager'
@@ -198,26 +198,63 @@ const testAssistantAIConfig = async () => {
 
 const providerOptions = getProviderList()
 let previousProvider = gameStore.settings.assistantAI.provider || 'custom'
+const isVertexProvider = computed(() => gameStore.settings.assistantAI.provider === 'vertex')
+
+const resolvedVertexModeText = computed(() => {
+  if (!isVertexProvider.value) return ''
+  const mode = resolveVertexRequestMode(gameStore.settings.assistantAI)
+  return mode === 'openapi' ? 'OpenAPI 兼容' : 'Gemini Native'
+})
+
+const syncVertexApiUrlByMode = () => {
+  const ai = gameStore.settings.assistantAI
+  const mode = ai.vertexMode || 'auto'
+  const currentUrl = (ai.apiUrl || '').toLowerCase()
+  const preferOpenApi = mode === 'openapi' || (mode === 'auto' && currentUrl.includes('/endpoints/openapi'))
+  if (preferOpenApi) {
+    ai.apiUrl = buildVertexOpenApiUrl(ai.vertexProjectId, ai.vertexRegion || 'global')
+    return
+  }
+  ai.apiUrl = buildVertexApiUrl(ai.vertexProjectId, ai.vertexRegion || 'us-central1')
+}
 
 const onProviderChange = () => {
   const newProvider = gameStore.settings.assistantAI.provider || 'custom'
   modelList.value = switchProviderConfig(gameStore.settings.assistantAI, previousProvider, newProvider)
+  if (newProvider === 'vertex') {
+    const ai = gameStore.settings.assistantAI
+    if (!ai.vertexMode) ai.vertexMode = 'auto'
+    syncVertexApiUrlByMode()
+  }
   previousProvider = newProvider
   gameStore.saveToStorage()
 }
 
+const onVertexFieldChange = () => {
+  syncVertexApiUrlByMode()
+  gameStore.saveToStorage()
+}
+
+const onVertexModeChange = () => {
+  syncVertexApiUrlByMode()
+  gameStore.saveToStorage()
+}
+
 const loadModels = async () => {
-  if (!gameStore.settings.assistantAI.apiUrl || !gameStore.settings.assistantAI.apiKey) {
+  const ai = gameStore.settings.assistantAI
+  const provider = ai.provider || 'custom'
+  const resolvedMode = provider === 'vertex' ? resolveVertexRequestMode(ai) : null
+  const needsApiUrl = !(provider === 'vertex' && resolvedMode === 'native')
+  if ((!ai.apiUrl && needsApiUrl) || !ai.apiKey) {
     alert('请先填写 API 地址和 Key')
     return
   }
   isLoadingModels.value = true
   try {
-    const provider = gameStore.settings.assistantAI.provider || 'custom'
-    const models = await fetchProviderModels(provider, gameStore.settings.assistantAI.apiUrl, gameStore.settings.assistantAI.apiKey)
+    const models = await fetchProviderModels(provider, ai.apiUrl, ai.apiKey)
     modelList.value = models
-    if (models.length > 0 && !gameStore.settings.assistantAI.model) {
-      gameStore.settings.assistantAI.model = models[0].id
+    if (models.length > 0 && !ai.model) {
+      ai.model = models[0].id
     }
   } catch (e) {
     alert('获取模型列表失败: ' + getErrorMessage(e))
@@ -782,32 +819,98 @@ const loadRerankModels = async () => {
                   </select>
                 </div>
 
-                <div class="input-group">
-                  <label class="input-label">API 地址</label>
-                  <input 
-                    type="text" 
-                    v-model="gameStore.settings.assistantAI.apiUrl" 
-                    :placeholder="PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.baseUrl || 'https://api.openai.com/v1'" 
-                    class="text-input"
-                    :disabled="gameStore.settings.assistantAI.provider !== 'custom' && PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.baseUrl"
-                    @change="gameStore.saveToStorage()"
-                  >
-                </div>
+                <template v-if="isVertexProvider">
+                  <div class="input-group">
+                    <label class="input-label">Vertex 项目 ID</label>
+                    <input
+                      type="text"
+                      v-model="gameStore.settings.assistantAI.vertexProjectId"
+                      placeholder="my-gcp-project"
+                      class="text-input"
+                      @change="onVertexFieldChange"
+                    >
+                  </div>
 
-                <div class="input-group">
-                  <label class="input-label">API Key</label>
-                  <input 
-                    type="password" 
-                    v-model="gameStore.settings.assistantAI.apiKey" 
-                    :placeholder="PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.placeholder || 'sk-...'" 
-                    class="text-input"
-                    @change="gameStore.saveToStorage()"
-                  >
-                </div>
+                  <div class="input-group">
+                    <label class="input-label">区域</label>
+                    <select
+                      v-model="gameStore.settings.assistantAI.vertexRegion"
+                      class="model-select"
+                      @change="onVertexFieldChange"
+                    >
+                      <option v-for="r in PROVIDER_PRESETS.vertex.regions" :key="r" :value="r">{{ r }}</option>
+                    </select>
+                  </div>
 
-                <p v-if="PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.note" class="setting-hint" style="color: #d97706; margin: 4px 0 8px;">
-                  {{ PROVIDER_PRESETS[gameStore.settings.assistantAI.provider].note }}
-                </p>
+                  <div class="input-group">
+                    <label class="input-label">调用模式</label>
+                    <select
+                      v-model="gameStore.settings.assistantAI.vertexMode"
+                      class="model-select"
+                      @change="onVertexModeChange"
+                    >
+                      <option value="auto">自动识别</option>
+                      <option value="native">Gemini Native</option>
+                      <option value="openapi">OpenAPI 兼容</option>
+                    </select>
+                    <p class="setting-hint" style="margin-top: 4px;">当前将使用：{{ resolvedVertexModeText }}</p>
+                  </div>
+
+                  <div class="input-group">
+                    <label class="input-label">API 地址</label>
+                    <input
+                      type="text"
+                      v-model="gameStore.settings.assistantAI.apiUrl"
+                      placeholder="https://aiplatform.googleapis.com/v1beta1/projects/<project>/locations/global/endpoints/openapi"
+                      class="text-input"
+                      @change="gameStore.saveToStorage()"
+                    >
+                  </div>
+
+                  <div class="input-group">
+                    <label class="input-label">API Key</label>
+                    <input
+                      type="password"
+                      v-model="gameStore.settings.assistantAI.apiKey"
+                      :placeholder="PROVIDER_PRESETS.vertex.placeholder"
+                      class="text-input"
+                      @change="gameStore.saveToStorage()"
+                    >
+                  </div>
+
+                  <p v-if="PROVIDER_PRESETS.vertex.note" class="setting-hint" style="color: #d97706; margin: 4px 0 8px;">
+                    {{ PROVIDER_PRESETS.vertex.note }}
+                  </p>
+                </template>
+
+                <template v-else>
+                  <div class="input-group">
+                    <label class="input-label">API 地址</label>
+                    <input
+                      type="text"
+                      v-model="gameStore.settings.assistantAI.apiUrl"
+                      :placeholder="PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.baseUrl || 'https://api.openai.com/v1'"
+                      class="text-input"
+                      :disabled="gameStore.settings.assistantAI.provider !== 'custom' && PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.baseUrl"
+                      @change="gameStore.saveToStorage()"
+                    >
+                  </div>
+
+                  <div class="input-group">
+                    <label class="input-label">API Key</label>
+                    <input
+                      type="password"
+                      v-model="gameStore.settings.assistantAI.apiKey"
+                      :placeholder="PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.placeholder || 'sk-...'"
+                      class="text-input"
+                      @change="gameStore.saveToStorage()"
+                    >
+                  </div>
+
+                  <p v-if="PROVIDER_PRESETS[gameStore.settings.assistantAI.provider]?.note" class="setting-hint" style="color: #d97706; margin: 4px 0 8px;">
+                    {{ PROVIDER_PRESETS[gameStore.settings.assistantAI.provider].note }}
+                  </p>
+                </template>
 
                 <div class="input-group">
                   <label class="input-label">模型</label>

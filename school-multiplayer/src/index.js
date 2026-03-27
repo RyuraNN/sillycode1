@@ -180,21 +180,21 @@ async function handleAuthCallback(url, env, workerBase) {
 
   // 用户拒绝授权
   if (error) {
-    return authResultPage(null, error)
+    return authResultPage(null, error, null)
   }
 
   // HMAC 验证 state（无需存储，自验证）
-  if (!state) return authResultPage(null, 'invalid_state')
+  if (!state) return authResultPage(null, 'invalid_state', null)
   const parts = state.split('|')
-  if (parts.length !== 3) return authResultPage(null, 'invalid_state')
+  if (parts.length !== 3) return authResultPage(null, 'invalid_state', null)
   const [nonceFromState, stateId, sig] = parts
   const expectedSig = await hmacSign(`${nonceFromState}|${stateId}`, env.JWT_SECRET)
-  if (sig !== expectedSig) return authResultPage(null, 'invalid_state')
+  if (sig !== expectedSig) return authResultPage(null, 'invalid_state', null)
   const nonce = nonceFromState || ''
 
   if (!code) {
     if (nonce) await getRoomIndex(env).storeAuthToken(nonce, { error: 'missing_code' })
-    return authResultPage(null, 'missing_code')
+    return authResultPage(null, 'missing_code', nonce)
   }
 
   try {
@@ -271,11 +271,11 @@ async function handleAuthCallback(url, env, workerBase) {
     if (nonce) {
       await getRoomIndex(env).storeAuthToken(nonce, { token })
     }
-    return authResultPage(token, null)
+    return authResultPage(token, null, nonce)
   } catch (e) {
     console.error('[Auth] OAuth callback error:', e)
     if (nonce) { try { await getRoomIndex(env).storeAuthToken(nonce, { error: 'internal' }) } catch {} }
-    return authResultPage(null, 'internal')
+    return authResultPage(null, 'internal', nonce)
   }
 }
 
@@ -312,10 +312,10 @@ async function hmacSign(data, secret) {
 /**
  * 返回一个 HTML 页面，通过 postMessage 将 token/error 传回父窗口（弹窗 OAuth 流程）
  */
-function authResultPage(token, error) {
+function authResultPage(token, error, nonce = null) {
   const data = token
-    ? `{ type: 'mp-auth-callback', token: ${JSON.stringify(token)} }`
-    : `{ type: 'mp-auth-callback', error: ${JSON.stringify(error || 'unknown')} }`
+    ? `{ type: 'mp-auth-callback', nonce: ${JSON.stringify(nonce)}, token: ${JSON.stringify(token)} }`
+    : `{ type: 'mp-auth-callback', nonce: ${JSON.stringify(nonce)}, error: ${JSON.stringify(error || 'unknown')} }`
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Discord 登录</title>
 <style>body{font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#2b2d31;color:#dbdee1}
@@ -330,7 +330,7 @@ if (window.opener) {
   setTimeout(() => window.close(), 1500);
 } else {
   document.querySelector('.card').innerHTML += '<p style="margin-top:12px;font-size:14px;color:#949ba4">' +
-    '\u8bf7\u624b\u52a8\u5173\u95ed\u6b64\u7a97\u53e3\u5e76\u8fd4\u56de\u6e38\u620f</p>';
+    '\u8bf7\u8fd4\u56de\u5230\u6e38\u620f\u6807\u7b7e\u9875\u7ee7\u7eed\uff0c\u5fc5\u8981\u65f6\u518d\u624b\u52a8\u5173\u95ed\u6b64\u9875\u9762</p>';
 }
 </script></body></html>`
 

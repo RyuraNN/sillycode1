@@ -718,7 +718,16 @@ async function requestRewriteCompletion(endpoint, apiKey, model, systemPrompt, u
   ]
 
   const { endpoint: resolvedEndpoint, fetchOptions } = buildApiRequest(
-    { provider, apiUrl: endpoint, apiKey, model, temperature },
+    {
+      provider,
+      apiUrl: endpoint,
+      apiKey,
+      model,
+      temperature,
+      vertexProjectId: gameStore.settings.assistantAI.vertexProjectId,
+      vertexRegion: gameStore.settings.assistantAI.vertexRegion,
+      vertexMode: gameStore.settings.assistantAI.vertexMode
+    },
     messages
   )
 
@@ -1380,7 +1389,16 @@ ${summariesText}
   ]
 
   const { endpoint, fetchOptions } = buildApiRequest(
-    { provider, apiUrl, apiKey, model, temperature },
+    {
+      provider,
+      apiUrl,
+      apiKey,
+      model,
+      temperature,
+      vertexProjectId: gameStore.settings.assistantAI.vertexProjectId,
+      vertexRegion: gameStore.settings.assistantAI.vertexRegion,
+      vertexMode: gameStore.settings.assistantAI.vertexMode
+    },
     messages
   )
 

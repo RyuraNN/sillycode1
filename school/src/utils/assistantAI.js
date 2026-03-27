@@ -5,7 +5,7 @@ import { getErrorMessage } from './errorUtils'
 import { isTodoCompleted, isTodoCancelled, parseTodoItems } from './todoManager'
 import { toTOON } from './toonSerializer'
 import { SUMMARY_FORMAT_FIELDS } from './summaryConstants'
-import { buildApiRequest, extractReply, PROVIDER_PRESETS } from './aiProviders'
+import { buildApiRequest, extractReply, PROVIDER_PRESETS, resolveVertexRequestMode } from './aiProviders'
 
 /**
  * 验证辅助AI配置是否完整
@@ -18,7 +18,11 @@ export function validateAssistantAIConfig(config, requireModel = true) {
     return { valid: false, error: '辅助AI配置不存在' }
   }
 
-  if (!config.apiUrl || config.apiUrl.trim() === '') {
+  const provider = config.provider || 'custom'
+  const hasApiUrl = !!(config.apiUrl && config.apiUrl.trim() !== '')
+  const hasVertexContext = provider === 'vertex' && !!(config.vertexProjectId || config.vertexRegion)
+
+  if (!hasApiUrl && !hasVertexContext) {
     return { valid: false, error: 'API地址未配置' }
   }
 
@@ -361,11 +365,23 @@ ${mainAIResponse}
   const provider = gameStore.settings.assistantAI.provider || 'custom'
   const preset = PROVIDER_PRESETS[provider] || PROVIDER_PRESETS.custom
   if (assistantPrefill && preset.format !== 'claude' && preset.format !== 'gemini_native') {
-    messages.push({ role: 'assistant', content: assistantPrefill })
+    const isVertexNative = provider === 'vertex' && resolveVertexRequestMode(gameStore.settings.assistantAI) === 'native'
+    if (!isVertexNative) {
+      messages.push({ role: 'assistant', content: assistantPrefill })
+    }
   }
 
   const { endpoint, fetchOptions } = buildApiRequest(
-    { provider, apiUrl, apiKey, model, temperature },
+    {
+      provider,
+      apiUrl,
+      apiKey,
+      model,
+      temperature,
+      vertexProjectId: gameStore.settings.assistantAI.vertexProjectId,
+      vertexRegion: gameStore.settings.assistantAI.vertexRegion,
+      vertexMode: gameStore.settings.assistantAI.vertexMode
+    },
     messages
   )
 
@@ -389,7 +405,8 @@ ${mainAIResponse}
     let reply = extractReply(provider, data)
 
     // 仅在变量解析模式下拼接 Prefill（Claude / Gemini Native 不使用 prefill）
-    const noPrefillFormat = preset.format === 'claude' || preset.format === 'gemini_native'
+    const noPrefillFormat = preset.format === 'claude' || preset.format === 'gemini_native' ||
+      (provider === 'vertex' && resolveVertexRequestMode(gameStore.settings.assistantAI) === 'native')
     return (assistantPrefill && !noPrefillFormat) ? (assistantPrefill + reply) : reply
   } catch (error) {
     console.error('[AssistantAI] Request failed:', error)
@@ -446,11 +463,23 @@ export async function callImageAnalysisAI(storyContent, characterAnchors = {}) {
 
   // Claude / Gemini Native 不使用 assistant prefill
   if (preset.format !== 'claude' && preset.format !== 'gemini_native') {
-    messages.push({ role: 'assistant', content: ASSISTANT_PREFILL })
+    const isVertexNative = provider === 'vertex' && resolveVertexRequestMode(gameStore.settings.assistantAI) === 'native'
+    if (!isVertexNative) {
+      messages.push({ role: 'assistant', content: ASSISTANT_PREFILL })
+    }
   }
 
   const { endpoint, fetchOptions } = buildApiRequest(
-    { provider, apiUrl, apiKey, model, temperature },
+    {
+      provider,
+      apiUrl,
+      apiKey,
+      model,
+      temperature,
+      vertexProjectId: gameStore.settings.assistantAI.vertexProjectId,
+      vertexRegion: gameStore.settings.assistantAI.vertexRegion,
+      vertexMode: gameStore.settings.assistantAI.vertexMode
+    },
     messages
   )
 
@@ -466,7 +495,8 @@ export async function callImageAnalysisAI(storyContent, characterAnchors = {}) {
     const data = await response.json()
     const reply = extractReply(provider, data)
     console.log('[ImageAnalysisAI] Response:', reply)
-    const skipPrefill = preset.format === 'claude' || preset.format === 'gemini_native'
+    const skipPrefill = preset.format === 'claude' || preset.format === 'gemini_native' ||
+      (provider === 'vertex' && resolveVertexRequestMode(gameStore.settings.assistantAI) === 'native')
   return !skipPrefill ? (ASSISTANT_PREFILL + reply) : reply
   } catch (error) {
     console.error('[ImageAnalysisAI] Request failed:', error)

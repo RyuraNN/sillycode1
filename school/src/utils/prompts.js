@@ -1549,6 +1549,7 @@ ${player.name}邀请"${targetName}"加入"${clubName}"(社团ID: ${clubId})。
   let pendingCommandsPrompt = ''
   if (player.pendingCommands && player.pendingCommands.length > 0) {
     const unhandledCommands = []
+    const consumedNoticeIds = new Set()
     for (const cmd of player.pendingCommands) {
       // 跳过已在其他地方处理的类型
       if (cmd.type === 'moment_post') continue
@@ -1556,11 +1557,22 @@ ${player.name}邀请"${targetName}"加入"${clubName}"(社团ID: ${clubId})。
       if (cmd.type === 'add_friend_request') continue
       if (cmd.metadata?.type === 'forum_post') continue
       if (cmd.metadata?.type === 'forum_reply') continue
+
+      // 联机一次性提示（注入一次后移除）
+      if (cmd.type === 'mp_notice' && cmd.text) {
+        unhandledCommands.push(cmd.text)
+        if (cmd.id) consumedNoticeIds.add(cmd.id)
+        continue
+      }
       
       // 处理其他类型的指令（包括 type === 'other' 或 type === 'item_use' 等）
       if (cmd.text) {
         unhandledCommands.push(cmd.text)
       }
+    }
+
+    if (consumedNoticeIds.size > 0) {
+      player.pendingCommands = player.pendingCommands.filter(cmd => !consumedNoticeIds.has(cmd.id))
     }
     
     if (unhandledCommands.length > 0) {

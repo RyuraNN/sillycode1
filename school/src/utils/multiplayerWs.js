@@ -374,6 +374,10 @@ export function sendTurnAction(content, playerInfo) {
   return sendMessage('turn_action', { content, playerInfo: playerInfo || '' })
 }
 
+export function sendTurnPending(timeout = 10) {
+  return sendMessage('turn_pending', { timeout })
+}
+
 export function sendTurnSkip() {
   return sendMessage('turn_skip', {})
 }
@@ -451,6 +455,21 @@ export function sendVote(option) {
 
 export function sendNpcTransferAck(npcName) {
   return sendMessage('npc_transfer_ack', { npcName })
+}
+
+function appendMultiplayerPromptCommand(gameStore, text) {
+  if (!text || !gameStore?.player) return
+  if (!Array.isArray(gameStore.player.pendingCommands)) {
+    gameStore.player.pendingCommands = []
+  }
+  gameStore.player.pendingCommands.push({
+    id: `mp_notice_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    type: 'mp_notice',
+    text,
+  })
+  if (gameStore.player.pendingCommands.length > 80) {
+    gameStore.player.pendingCommands = gameStore.player.pendingCommands.slice(-80)
+  }
 }
 
 export function sendRoomSettings(settings) {
@@ -636,6 +655,20 @@ function handleMessage(msg) {
       // NPC 从另一个玩家转移过来
       // 这会在下次 prompts 构建时被注入
       console.log(`[MultiplayerWs] NPC transfer: ${msg.data.npcName} from ${msg.data.fromPlayer}`)
+      appendMultiplayerPromptCommand(
+        gameStore,
+        `[联机事件] ${msg.data?.npcName || '某角色'} 从${msg.data?.fromPlayer || '其他玩家'}那边来到你这里${msg.data?.reason ? `（原因：${msg.data.reason}）` : ''}。`
+      )
+      if (msg.data?.npcName) {
+        sendNpcTransferAck(msg.data.npcName)
+      }
+      break
+
+    case 'npc_follow':
+      appendMultiplayerPromptCommand(
+        gameStore,
+        `[联机事件] ${msg.data?.npcName || '某角色'}${msg.data?.action === 'stop' ? '停止' : '开始'}跟随你。`
+      )
       break
 
     case 'worldbook_entry_sync':
@@ -687,12 +720,24 @@ function handleMessage(msg) {
       mpStore.handleHostReconnected()
       break
 
+    case 'host_timeout':
+      // 房主断线超时阶段（即将进入投票）
+      mpStore.hostDisconnected = true
+      break
+
     case 'vote_start':
       mpStore.handleVoteStart(msg.data)
       break
 
     case 'vote_result':
       mpStore.handleVoteResult(msg.data)
+      break
+
+    case 'switch_to_single_player':
+      console.warn('[MultiplayerWs] Switching to single-player:', msg.data?.reason || 'vote')
+      disconnect()
+      mpStore.connectionError = '房主断线投票结果：已转为单人模式'
+      window.dispatchEvent(new CustomEvent('mp:switch_to_single_player', { detail: msg.data || {} }))
       break
 
     case 'spectate_request':

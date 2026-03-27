@@ -405,6 +405,7 @@ export class SchoolRoom extends DurableObject {
       case 'npc_chat_sync': this.handleNpcChatSync(ws, session, msg.data); break
       case 'join_conversation': this.handleJoinConversation(ws, session, msg.data); break
       case 'leave_conversation': this.handleLeaveConversation(ws, session); break
+      case 'turn_pending': this.handleTurnPending(ws, session, msg.data); break
       case 'turn_action': this.handleTurnAction(ws, session, msg.data); break
       case 'turn_skip': this.handleTurnSkip(ws, session); break
       case 'turn_typing': this.handleTurnTyping(ws, session, msg.data); break
@@ -419,6 +420,8 @@ export class SchoolRoom extends DurableObject {
       case 'spectate_set_layers': this.handleSpectateSetLayers(ws, session, msg.data); break
       case 'ai_response': this.handleAiResponse(ws, session, msg.data); break
       case 'vote_cast': this.handleVoteCast(ws, session, msg.data); break
+      case 'npc_transfer': this.handleNpcTransfer(ws, session, msg.data); break
+      case 'npc_follow': this.handleNpcFollow(ws, session, msg.data); break
       case 'npc_transfer_ack': this.handleNpcTransferAck(ws, session, msg.data); break
       case 'room_settings': this.handleRoomSettings(ws, session, msg.data); break
       case 'kick': this.handleKick(ws, session, msg.data); break
@@ -724,6 +727,26 @@ export class SchoolRoom extends DurableObject {
     }
   }
 
+  handleTurnPending(ws, session, data) {
+    const group = this.findConversationGroupByPlayer(session.playerId)
+    if (!group) return
+    if (group.hostPlayerId !== session.playerId) return
+
+    const timeout = Math.max(1, Number(data?.timeout || 10))
+    for (const memberId of group.memberIds) {
+      if (memberId === session.playerId) continue
+      this.sendToPlayer(memberId, JSON.stringify({
+        type: 'turn_pending',
+        data: {
+          groupId: group.groupId,
+          initiator: session.playerId,
+          timeout,
+        },
+        ts: Date.now(),
+      }))
+    }
+  }
+
   handleTurnAction(ws, session, data) {
     session.afkDeadline = Infinity // 有操作 → 清除 AFK
     const group = this.findConversationGroupByPlayer(session.playerId)
@@ -757,7 +780,7 @@ export class SchoolRoom extends DurableObject {
     if (!group) return
 
     // 转发给对话组所有其他成员（含 host）
-    for (const memberId of group.members) {
+    for (const memberId of group.memberIds) {
       if (memberId === session.playerId) continue
       this.sendToPlayer(memberId, JSON.stringify({
         type: 'turn_typing',
@@ -1117,15 +1140,66 @@ export class SchoolRoom extends DurableObject {
 
   handleVoteCast(ws, session, data) {
     if (!this.activeVote) return
+    if (session.spectatorOnly) return
     this.activeVote.votes[session.playerId] = data?.option
 
     // 检查是否所有人都投了
-    const onlineIds = [...this.sessions.values()].map(s => s.playerId)
+    const onlineIds = [...this.sessions.values()]
+      .filter(s => !s.spectatorOnly)
+      .map(s => s.playerId)
     const votedCount = onlineIds.filter(id => this.activeVote.votes[id] != null).length
 
     if (votedCount >= onlineIds.length) {
       this.resolveVote()
     }
+  }
+
+  handleNpcTransfer(ws, session, data) {
+    const npcName = data?.npcName
+    const targetIdentifier = data?.targetPlayer
+    if (!npcName || !targetIdentifier) return
+
+    const targetSession = this.findPlayerSessionByIdentifier(targetIdentifier)
+    if (!targetSession) return
+
+    const payload = {
+      npcName,
+      fromPlayerId: session.playerId,
+      fromPlayer: session.playerName,
+      toPlayerId: targetSession.playerId,
+      toPlayer: targetSession.playerName,
+      reason: data?.reason || '',
+    }
+
+    this.sendToPlayer(targetSession.playerId, JSON.stringify({
+      type: 'npc_transfer',
+      data: payload,
+      ts: Date.now()
+    }))
+  }
+
+  handleNpcFollow(ws, session, data) {
+    const npcName = data?.npcName
+    const action = data?.action || 'start'
+    if (!npcName) return
+
+    const targetIdentifier = data?.targetPlayer || session.playerId
+    const targetSession = this.findPlayerSessionByIdentifier(targetIdentifier)
+    const targetPlayerId = targetSession?.playerId || session.playerId
+    const targetPlayerName = targetSession?.playerName || session.playerName
+
+    this.sendToPlayer(targetPlayerId, JSON.stringify({
+      type: 'npc_follow',
+      data: {
+        npcName,
+        action,
+        fromPlayerId: session.playerId,
+        fromPlayer: session.playerName,
+        targetPlayerId,
+        targetPlayer: targetPlayerName,
+      },
+      ts: Date.now()
+    }))
   }
 
   handleNpcTransferAck(ws, session, data) {
@@ -1324,6 +1398,11 @@ export class SchoolRoom extends DurableObject {
 
       // 启动超时计时器
       this.hostDisconnectTimer = setTimeout(() => {
+        this.broadcast(JSON.stringify({
+          type: 'host_timeout',
+          data: {},
+          ts: Date.now()
+        }))
         this.startHostVote()
       }, HOST_DISCONNECT_TIMEOUT)
     }
@@ -1346,8 +1425,8 @@ export class SchoolRoom extends DurableObject {
   // ── 投票系统 ──
 
   startHostVote() {
-    const onlineIds = [...this.sessions.values()].map(s => s.playerId)
-    if (onlineIds.length === 0) return
+    const eligibleSessions = [...this.sessions.values()].filter(s => !s.spectatorOnly)
+    if (eligibleSessions.length === 0) return
 
     this.activeVote = {
       voteId: `vote_${Date.now()}`,
@@ -1369,8 +1448,9 @@ export class SchoolRoom extends DurableObject {
     }))
 
     // 投票超时
+    const currentVoteId = this.activeVote.voteId
     setTimeout(() => {
-      if (this.activeVote?.voteId === this.activeVote?.voteId) {
+      if (this.activeVote?.voteId === currentVoteId) {
         this.resolveVote()
       }
     }, VOTE_TIMEOUT)
@@ -1406,7 +1486,7 @@ export class SchoolRoom extends DurableObject {
     let newHostId = null
     let newHostName = null
     if (winner === 'new_host') {
-      const onlineSessions = [...this.sessions.values()]
+      const onlineSessions = [...this.sessions.values()].filter(s => !s.spectatorOnly)
       if (onlineSessions.length > 0) {
         const chosen = onlineSessions[Math.floor(Math.random() * onlineSessions.length)]
         newHostId = chosen.playerId
@@ -1425,6 +1505,14 @@ export class SchoolRoom extends DurableObject {
       data: { winner, counts, newHostId, newHostName },
       ts: Date.now()
     }))
+
+    if (winner === 'single_player') {
+      this.broadcast(JSON.stringify({
+        type: 'switch_to_single_player',
+        data: { reason: 'host_timeout_vote' },
+        ts: Date.now()
+      }))
+    }
 
     this.activeVote = null
   }
@@ -1640,6 +1728,16 @@ export class SchoolRoom extends DurableObject {
   findPlayerSession(playerId) {
     for (const [, session] of this.sessions) {
       if (session.playerId === playerId) return session
+    }
+    return null
+  }
+
+  findPlayerSessionByIdentifier(identifier) {
+    if (!identifier) return null
+    for (const [, session] of this.sessions) {
+      if (session.playerId === identifier || session.playerName === identifier) {
+        return session
+      }
     }
     return null
   }

@@ -651,15 +651,25 @@ export async function getAllSnapshotIds() {
 
       request.onsuccess = (event) => {
         const keys = event.target.result || []
-     // 提取快照ID（排除分片和元数据键）
+        // 提取快照ID（排除共享 chatLog、分片、元数据及大型字段子键）
         const snapshotIds = new Set()
         for (const key of keys) {
           if (typeof key === 'string') {
-            // 提取基础快照ID（移除 _chunk_N 和 _meta 后缀）
-            const baseId = key.replace(/_chunk_\d+$/, '').replace(/_meta$/, '')
-            if (baseId !== key || !key.includes('_chunk_') && !key.endsWith('_meta')) {
-              snapshotIds.add(baseId)
+            if (key.startsWith(SHARED_CHATLOG_PREFIX)) {
+              continue
             }
+
+            // 提取基础快照ID（移除 _chunk_N / _meta / _summaries / _persistentFacts 后缀）
+            let baseId = key.replace(/_chunk_\d+$/, '').replace(/_meta$/, '')
+            for (const suffix of BULKY_FIELD_SUFFIXES) {
+              if (baseId.endsWith(suffix)) {
+                baseId = baseId.slice(0, -suffix.length)
+                break
+              }
+            }
+
+            if (!baseId) continue
+            snapshotIds.add(baseId)
           }
         }
         resolve(Array.from(snapshotIds))

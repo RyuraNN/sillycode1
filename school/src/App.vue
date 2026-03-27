@@ -32,6 +32,11 @@ function onEnterGame() {
   showSplashScreen.value = false
 }
 
+function onAuthChange() {
+  isLoggedIn.value = checkAuth()
+  authInfo.value = getAuthInfo()
+}
+
 /**
  * 检测世界书 API 是否已就绪（名称 + 内容都已加载）
  * @param {boolean} lenient - 宽松模式：只检查API和名称，不验证条目内容
@@ -342,7 +347,7 @@ watch(() => gameStore.settings.darkMode, (isDark) => {
       :is-logged-in="isLoggedIn"
       :auth-info="authInfo"
       @enter="onEnterGame"
-      @auth-change="() => { isLoggedIn = checkAuth(); authInfo = getAuthInfo() }"
+      @auth-change="onAuthChange"
     />
 
     <HomeLayout v-if="!showSplashScreen && !isInitializing" />

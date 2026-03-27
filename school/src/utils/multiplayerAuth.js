@@ -74,6 +74,13 @@ export function getAuthInfo() {
 export function startDiscordLogin() {
   return new Promise((resolve, reject) => {
     const apiBase = getApiBaseUrl()
+    const apiOrigin = (() => {
+      try {
+        return new URL(apiBase).origin
+      } catch {
+        return ''
+      }
+    })()
     const nonce = crypto.randomUUID()
 
     const w = 500, h = 700
@@ -92,40 +99,95 @@ export function startDiscordLogin() {
 
     console.log('[Auth] Popup opened, nonce:', nonce, 'polling:', `${apiBase}/auth/poll?nonce=${nonce}`)
     let settled = false
+    let consecutivePollErrors = 0
 
-    // 轮询后端 /auth/poll 获取 token
-    const pollInterval = setInterval(async () => {
+    const cleanup = () => {
+      clearInterval(pollInterval)
+      clearTimeout(timeoutId)
+      window.removeEventListener('message', onMessage)
+      window.removeEventListener('focus', onFocusOrVisible)
+      document.removeEventListener('visibilitychange', onFocusOrVisible)
+    }
+
+    const settleSuccess = (token) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      handleAuthCallback(token)
+      resolve(token)
+    }
+
+    const settleError = (message) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(new Error(message || 'OAuth 失败'))
+    }
+
+    const pollOnce = async () => {
       if (settled) return
       try {
-        console.log('[Auth] Polling...')
         const res = await fetch(`${apiBase}/auth/poll?nonce=${nonce}`)
-        console.log('[Auth] Poll response status:', res.status)
+        if (!res.ok) {
+          throw new Error(`Poll request failed: ${res.status}`)
+        }
+
         const data = await res.json()
         console.log('[Auth] Poll data:', data)
+        consecutivePollErrors = 0
 
-        if (data.status === 'pending') return // 还没完成，继续等
-
-        settled = true
-        clearInterval(pollInterval)
-        clearTimeout(timeoutId)
+        if (data.status === 'pending') return
 
         if (data.status === 'ok' && data.token) {
-          handleAuthCallback(data.token)
-          resolve(data.token)
-        } else {
-          reject(new Error(data.error || 'OAuth 失败'))
+          settleSuccess(data.token)
+          return
         }
+        settleError(data.error || 'OAuth 失败')
       } catch (err) {
+        consecutivePollErrors += 1
         console.error('[Auth] Poll error:', err)
+        if (consecutivePollErrors >= 6) {
+          settleError('登录状态检查失败，请检查网络或跨域设置后重试')
+        }
       }
+    }
+
+    const onMessage = (event) => {
+      if (settled) return
+      if (apiOrigin && event.origin !== apiOrigin) return
+
+      const data = event.data || {}
+      if (data.type !== 'mp-auth-callback') return
+      if (data.nonce && data.nonce !== nonce) return
+
+      if (data.token) {
+        settleSuccess(data.token)
+        return
+      }
+      settleError(data.error || 'OAuth 失败')
+    }
+
+    const onFocusOrVisible = () => {
+      if (settled) return
+      if (document.visibilityState && document.visibilityState !== 'visible') return
+      pollOnce()
+    }
+
+    window.addEventListener('message', onMessage)
+    window.addEventListener('focus', onFocusOrVisible)
+    document.addEventListener('visibilitychange', onFocusOrVisible)
+
+    // 轮询后端 /auth/poll 获取 token
+    const pollInterval = setInterval(() => {
+      pollOnce()
     }, 2000)
+
+    // 先立即检查一次，避免等待首个 interval
+    pollOnce()
 
     // 5 分钟超时
     const timeoutId = setTimeout(() => {
-      if (settled) return
-      settled = true
-      clearInterval(pollInterval)
-      reject(new Error('登录超时，请重试'))
+      settleError('登录超时，请重试')
     }, 300000)
   })
 }

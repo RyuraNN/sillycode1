@@ -33,7 +33,7 @@ import {
   broadcastAiResponse,
   getConversationContextPrompt,
 } from '../utils/conversationMerge'
-import { sendTurnAction, sendSpectateStream } from '../utils/multiplayerWs'
+import { sendTurnAction, sendTurnPending, sendSpectateStream } from '../utils/multiplayerWs'
 
 // Composables
 import { useImageCache, loadImagesFromLog } from '../composables/useImageCache'
@@ -567,6 +567,9 @@ const sendMessage = async () => {
 
   // ── 联机合并对话：host 端等待其他玩家行动 ──
   if (isConversationHost() && mpStore.conversationGroup?.memberIds.length > 1) {
+    // 通知其他成员进入行动窗口（由服务端转发 turn_pending）
+    sendTurnPending(10)
+
     // 开始 10s 行动收集窗口
     await new Promise((resolve) => {
       startActionWindow(10000, resolve)

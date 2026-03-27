@@ -263,6 +263,9 @@ export function createInitialState(): GameState {
         apiKey: '',
         model: '',
         temperature: 0.85,
+        vertexProjectId: '',
+        vertexRegion: 'us-central1',
+        vertexMode: 'auto',
         channelConfigs: {}
       },
       summarySystem: {

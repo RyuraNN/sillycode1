@@ -19,7 +19,8 @@ import {
   saveFullCharacterPool,
   getRosterPresets,
   saveRosterPresets,
-  clearAllData
+  clearAllData,
+  getAllSnapshotIds
 } from '../../utils/indexedDB'
 import { getErrorMessage, getErrorName } from '../../utils/errorUtils'
 import { DEFAULT_RELATIONSHIPS, DEFAULT_PERSONALITIES, DEFAULT_GOALS, DEFAULT_PRIORITIES } from '../../data/relationshipData'
@@ -331,6 +332,10 @@ async function cleanAndMigrateSnapshots(snapshots: any[]): Promise<{ cleaned: an
     }
     if (s.gameTime) lightSnapshot.gameTime = s.gameTime
     if (s.location) lightSnapshot.location = s.location
+    if (s.cardEdition) lightSnapshot.cardEdition = s.cardEdition
+    if (s.gameVersion) lightSnapshot.gameVersion = s.gameVersion
+    if (s.saveMode) lightSnapshot.saveMode = s.saveMode
+    if (s.roomId) lightSnapshot.roomId = s.roomId
     
     cleaned.push(lightSnapshot)
     
@@ -341,6 +346,119 @@ async function cleanAndMigrateSnapshots(snapshots: any[]): Promise<{ cleaned: an
   }
   
   return { cleaned, migrated }
+}
+
+function inferSnapshotSaveMode(snapshot: Partial<SaveSnapshot> | null | undefined): 'single' | 'multiplayer' {
+  if (!snapshot) return 'single'
+  if (snapshot.saveMode === 'multiplayer') return 'multiplayer'
+  if (typeof snapshot.roomId === 'string' && snapshot.roomId.length > 0) return 'multiplayer'
+  return 'single'
+}
+
+function buildRecoveredSnapshotMeta(snapshotId: string, details: any, index: number): SaveSnapshot {
+  const gs = details?.gameState || {}
+  const fallbackTimestamp = Date.now() - index
+  const timestampNum = Number(snapshotId)
+  const timestamp = Number.isFinite(timestampNum) && timestampNum > 0 ? timestampNum : fallbackTimestamp
+  const roomId = gs?.meta?.roomId || gs?.roomId
+  const saveMode: 'single' | 'multiplayer' = roomId ? 'multiplayer' : 'single'
+  const label = saveMode === 'multiplayer'
+    ? `联机恢复存档 ${index + 1}`
+    : `恢复存档 ${index + 1}`
+
+  const snapshot: SaveSnapshot = {
+    id: snapshotId,
+    timestamp,
+    label,
+    messageIndex: Number.isInteger(details?.messageIndex) ? details.messageIndex : 0,
+    saveMode,
+    cardEdition: details?.cardEdition || gs?.cardEdition || 'unknown',
+    gameVersion: details?.gameVersion || gs?.gameVersion
+  }
+
+  const gameTime = gs?.world?.gameTime || gs?.gameTime
+  if (gameTime && typeof gameTime === 'object') {
+    snapshot.gameTime = {
+      year: Number(gameTime.year) || 1,
+      month: Number(gameTime.month) || 1,
+      day: Number(gameTime.day) || 1,
+      hour: Number(gameTime.hour) || 0,
+      minute: Number(gameTime.minute) || 0
+    }
+  }
+
+  const location = gs?.player?.location || gs?.location
+  if (location) {
+    snapshot.location = location
+  }
+
+  if (roomId) {
+    snapshot.roomId = roomId
+  }
+
+  return snapshot
+}
+
+function splitSnapshotsByMode(snapshots: SaveSnapshot[]): { single: SaveSnapshot[]; multiplayer: SaveSnapshot[] } {
+  const single: SaveSnapshot[] = []
+  const multiplayer: SaveSnapshot[] = []
+
+  for (const snapshot of snapshots) {
+    if (!snapshot?.id) continue
+    if (inferSnapshotSaveMode(snapshot) === 'multiplayer') {
+      snapshot.saveMode = 'multiplayer'
+      multiplayer.push(snapshot)
+    } else {
+      snapshot.saveMode = 'single'
+      single.push(snapshot)
+    }
+  }
+
+  single.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+  multiplayer.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+  return { single, multiplayer }
+}
+
+async function reconcileSnapshotMetadata(store: any): Promise<number> {
+  const allSnapshotIds = await getAllSnapshotIds()
+  if (!Array.isArray(allSnapshotIds) || allSnapshotIds.length === 0) {
+    return 0
+  }
+
+  const currentSingle: SaveSnapshot[] = Array.isArray(store._ui.saveSnapshots) ? store._ui.saveSnapshots : []
+  const currentMp: SaveSnapshot[] = Array.isArray(store._ui.mpSaveSnapshots) ? store._ui.mpSaveSnapshots : []
+  const knownIds = new Set([...currentSingle, ...currentMp].map((s: SaveSnapshot) => s.id))
+
+  const recovered: SaveSnapshot[] = []
+  for (const snapshotId of allSnapshotIds) {
+    if (!snapshotId || knownIds.has(snapshotId)) continue
+
+    try {
+      const details = await getSnapshotData(snapshotId)
+      recovered.push(buildRecoveredSnapshotMeta(snapshotId, details, recovered.length))
+    } catch (e) {
+      console.warn(`[GameStore] Failed to inspect orphan snapshot ${snapshotId}:`, e)
+      recovered.push(buildRecoveredSnapshotMeta(snapshotId, null, recovered.length))
+    }
+  }
+
+  if (recovered.length === 0) {
+    return 0
+  }
+
+  const mergedMap = new Map<string, SaveSnapshot>()
+  for (const snapshot of [...currentSingle, ...currentMp, ...recovered]) {
+    if (!snapshot?.id) continue
+    const existed = mergedMap.get(snapshot.id)
+    if (!existed || (snapshot.timestamp || 0) >= (existed.timestamp || 0)) {
+      mergedMap.set(snapshot.id, snapshot)
+    }
+  }
+
+  const { single, multiplayer } = splitSnapshotsByMode(Array.from(mergedMap.values()))
+  store._ui.saveSnapshots = single
+  store._ui.mpSaveSnapshots = multiplayer
+  return recovered.length
 }
 
 export const storageActions = {
@@ -476,13 +594,10 @@ export const storageActions = {
         
         // 用轻量级数据赋值
         this._ui.saveSnapshots = cleaned
-        
+
         if (migrated) {
-          console.log('[GameStore] Migration complete, saving lightweight snapshots list.')
-          // 异步保存，不阻塞初始化
-          this.saveToStorage(true).catch((e: unknown) => 
-            console.warn('[GameStore] Failed to save migrated snapshots:', e)
-          )
+          console.log('[GameStore] Migration complete, persisting lightweight single snapshots list.')
+          await setItem('school_game_snapshots', JSON.parse(JSON.stringify(cleaned)))
         }
         
         console.log(`[GameStore] Loaded ${cleaned.length} snapshots`)
@@ -500,11 +615,32 @@ export const storageActions = {
         'load mp snapshots'
       )
       if (mpSnapshots && Array.isArray(mpSnapshots)) {
-        this._ui.mpSaveSnapshots = mpSnapshots
-        console.log(`[GameStore] Loaded ${mpSnapshots.length} multiplayer snapshots`)
+        const { cleaned, migrated } = await cleanAndMigrateSnapshots(mpSnapshots)
+        this._ui.mpSaveSnapshots = cleaned.map((s: SaveSnapshot) => ({ ...s, saveMode: 'multiplayer' }))
+        if (migrated) {
+          console.log('[GameStore] Migration complete, persisting lightweight multiplayer snapshots list.')
+          await setItem('school_game_mp_snapshots', JSON.parse(JSON.stringify(this._ui.mpSaveSnapshots)))
+        }
+        console.log(`[GameStore] Loaded ${this._ui.mpSaveSnapshots.length} multiplayer snapshots`)
       }
     } catch (e) {
       console.warn('[GameStore] Failed to load MP snapshots:', e)
+    }
+
+    // Step 1.8: 对账 IndexedDB 实体快照，恢复缺失的元数据
+    try {
+      const recoveredCount = await withTimeout(
+        reconcileSnapshotMetadata(this),
+        15000,
+        'reconcile snapshot metadata'
+      )
+      if (recoveredCount > 0) {
+        console.log(`[GameStore] Recovered ${recoveredCount} orphan snapshot metadata entries`)
+        await setItem('school_game_snapshots', JSON.parse(JSON.stringify(this._ui.saveSnapshots)))
+        await setItem('school_game_mp_snapshots', JSON.parse(JSON.stringify(this._ui.mpSaveSnapshots)))
+      }
+    } catch (e) {
+      console.warn('[GameStore] Snapshot metadata reconciliation failed:', e)
     }
 
     // Step 2: 加载设置
@@ -608,12 +744,9 @@ export const storageActions = {
       try {
         this._ui.saveError = null
         await setItem('school_game_snapshots', JSON.parse(JSON.stringify(this._ui.saveSnapshots)))
+        await setItem('school_game_mp_snapshots', JSON.parse(JSON.stringify(this._ui.mpSaveSnapshots || [])))
         await setItem('school_game_settings', JSON.parse(JSON.stringify(this.settings)))
         await setItem('school_game_run_id', this.meta.currentRunId)
-        // 联机存档独立保存
-        if (this._ui.mpSaveSnapshots.length > 0) {
-          await setItem('school_game_mp_snapshots', JSON.parse(JSON.stringify(this._ui.mpSaveSnapshots)))
-        }
       } catch (e) {
         console.error('Failed to save to storage', e)
         this._ui.saveError = getErrorMessage(e, '存档保存失败')
@@ -643,8 +776,9 @@ export const storageActions = {
     const chatLogsByRun: Record<string, any[]> = {}
     const snapshotRunMap: Record<string, string> = {} // snapshotId → runId
 
+    const allSnapshots: SaveSnapshot[] = [...this._ui.saveSnapshots, ...(this._ui.mpSaveSnapshots || [])]
     const exportSnapshots = []
-    for (const snapshot of this._ui.saveSnapshots) {
+    for (const snapshot of allSnapshots) {
       let fullSnapshot = { ...snapshot }
       if (!fullSnapshot.gameState) {
         const details = await getSnapshotData(snapshot.id)
@@ -907,13 +1041,16 @@ export const storageActions = {
         }
       }
 
-      this._ui.saveSnapshots = processedSnapshots
+      const { single, multiplayer } = splitSnapshotsByMode(processedSnapshots as SaveSnapshot[])
+      this._ui.saveSnapshots = single
+      this._ui.mpSaveSnapshots = multiplayer
       this.saveToStorage(true)
       
       // 在 rebuildWorldbookState 之前，从最新快照预加载玩家创建的社团
       // 这是为了确保玩家创建的社团在导入到新设备时能被正确重建
-      if (processedSnapshots.length > 0) {
-        const sortedSnapshots = [...processedSnapshots].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+      const allImportedSnapshots: SaveSnapshot[] = [...single, ...multiplayer]
+      if (allImportedSnapshots.length > 0) {
+        const sortedSnapshots = [...allImportedSnapshots].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
         const latestSnapshot = sortedSnapshots[0]
         
         if (latestSnapshot) {
@@ -1004,7 +1141,10 @@ export const storageActions = {
       const allSnapshotIds = await getAllSnapshotIds()
 
       // 获取元数据中的快照ID
-      const metaSnapshotIds = new Set(this._ui.saveSnapshots.map((s: SaveSnapshot) => s.id))
+      const metaSnapshotIds = new Set([
+        ...this._ui.saveSnapshots.map((s: SaveSnapshot) => s.id),
+        ...(this._ui.mpSaveSnapshots || []).map((s: SaveSnapshot) => s.id)
+      ])
 
       // 找出孤立的快照（存在于IndexedDB但不在元数据中）
       const orphanedSnapshots = allSnapshotIds.filter(id => !metaSnapshotIds.has(id))
@@ -1013,7 +1153,7 @@ export const storageActions = {
         usageMB: estimate.usageMB,
         quotaMB: estimate.quotaMB,
         usagePercent: estimate.usagePercent,
-        snapshotCount: this._ui.saveSnapshots.length,
+        snapshotCount: this._ui.saveSnapshots.length + (this._ui.mpSaveSnapshots?.length || 0),
         orphanedSnapshots,
         orphanedCount: orphanedSnapshots.length
       }
@@ -1023,7 +1163,7 @@ export const storageActions = {
         usageMB: 0,
         quotaMB: 0,
         usagePercent: 0,
-        snapshotCount: this._ui.saveSnapshots.length,
+        snapshotCount: this._ui.saveSnapshots.length + (this._ui.mpSaveSnapshots?.length || 0),
         orphanedSnapshots: [],
         orphanedCount: 0
       }
@@ -1038,7 +1178,10 @@ export const storageActions = {
       const { getAllSnapshotIds, removeSnapshotData, removeChunkedChatLog } = await import('../../utils/indexedDB')
 
       const allSnapshotIds = await getAllSnapshotIds()
-      const metaSnapshotIds = new Set(this._ui.saveSnapshots.map((s: SaveSnapshot) => s.id))
+      const metaSnapshotIds = new Set([
+        ...this._ui.saveSnapshots.map((s: SaveSnapshot) => s.id),
+        ...(this._ui.mpSaveSnapshots || []).map((s: SaveSnapshot) => s.id)
+      ])
       const orphanedSnapshots = allSnapshotIds.filter(id => !metaSnapshotIds.has(id))
 
       if (orphanedSnapshots.length === 0) {

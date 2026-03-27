@@ -34,6 +34,60 @@ function getMultiplayerContext(): { isMultiplayer: boolean; roomId: string | nul
   return { isMultiplayer: false, roomId: null }
 }
 
+function getAllSnapshotMetas(store: any): SaveSnapshot[] {
+  return [...(store._ui.saveSnapshots || []), ...(store._ui.mpSaveSnapshots || [])]
+}
+
+function findSnapshotMeta(store: any, snapshotId: string): SaveSnapshot | null {
+  const single = store._ui.saveSnapshots.find((s: SaveSnapshot) => s.id === snapshotId)
+  if (single) return single
+  const multi = store._ui.mpSaveSnapshots?.find((s: SaveSnapshot) => s.id === snapshotId)
+  return multi || null
+}
+
+function buildRecoveredSnapshotMeta(snapshotId: string, details: any): SaveSnapshot {
+  const gs = details?.gameState || {}
+  const roomId = gs?.meta?.roomId || gs?.roomId
+  const timestampNum = Number(snapshotId)
+  const snapshot: SaveSnapshot = {
+    id: snapshotId,
+    timestamp: Number.isFinite(timestampNum) && timestampNum > 0 ? timestampNum : Date.now(),
+    label: roomId ? '联机恢复存档' : '恢复存档',
+    messageIndex: Number.isInteger(details?.messageIndex) ? details.messageIndex : 0,
+    saveMode: roomId ? 'multiplayer' : 'single',
+    cardEdition: details?.cardEdition || gs?.cardEdition || 'unknown',
+    gameVersion: details?.gameVersion || gs?.gameVersion
+  }
+
+  const gameTime = gs?.world?.gameTime || gs?.gameTime
+  if (gameTime && typeof gameTime === 'object') {
+    snapshot.gameTime = {
+      year: Number(gameTime.year) || 1,
+      month: Number(gameTime.month) || 1,
+      day: Number(gameTime.day) || 1,
+      hour: Number(gameTime.hour) || 0,
+      minute: Number(gameTime.minute) || 0
+    }
+  }
+
+  const location = gs?.player?.location || gs?.location
+  if (location) snapshot.location = location
+  if (roomId) snapshot.roomId = roomId
+
+  return snapshot
+}
+
+function attachRecoveredSnapshotMeta(store: any, snapshotId: string, details: any): SaveSnapshot {
+  const recovered = buildRecoveredSnapshotMeta(snapshotId, details)
+  if (recovered.saveMode === 'multiplayer') {
+    store._ui.mpSaveSnapshots.unshift(recovered)
+  } else {
+    store._ui.saveSnapshots.unshift(recovered)
+  }
+  store.saveToStorage()
+  return recovered
+}
+
 /**
  * 精简 chatLog 拷贝，移除冗余字段
  * 可用于全量映射或增量序列化
@@ -249,14 +303,17 @@ export const snapshotActions = {
    * 加载快照详情（用于预览）
    */
   async loadSnapshotDetails(this: any, snapshotId: string) {
-    const snapshot = this._ui.saveSnapshots.find((s: SaveSnapshot) => s.id === snapshotId)
-    if (!snapshot) return null
+    let snapshot = findSnapshotMeta(this, snapshotId)
 
-    if (snapshot.chatLog && snapshot.gameState) {
+    if (snapshot?.chatLog && snapshot?.gameState) {
       return snapshot
     }
 
     const details = await getSnapshotData(snapshotId)
+    if (!snapshot && details) {
+      snapshot = attachRecoveredSnapshotMeta(this, snapshotId, details)
+    }
+    if (!snapshot) return null
 
     // Phase 1.1: 优先从共享 chatLog 池加载
     let chatLog = details?.chatLog
@@ -292,12 +349,12 @@ export const snapshotActions = {
    * 恢复存档快照
    */
   async restoreSnapshot(this: any, snapshotId: string, force?: boolean): Promise<SaveSnapshot | null | { mismatch: true, snapshotEdition: string, currentEdition: string }> {
-    let snapshotMeta = this._ui.saveSnapshots.find((s: SaveSnapshot) => s.id === snapshotId)
-    // 也搜索联机存档列表
+    let snapshotMeta = findSnapshotMeta(this, snapshotId)
     if (!snapshotMeta) {
-      snapshotMeta = this._ui.mpSaveSnapshots?.find((s: SaveSnapshot) => s.id === snapshotId)
+      const details = await getSnapshotData(snapshotId)
+      if (!details) return null
+      snapshotMeta = attachRecoveredSnapshotMeta(this, snapshotId, details)
     }
-    if (!snapshotMeta) return null
 
     // 版本不匹配检查
     if (!force && snapshotMeta.cardEdition && snapshotMeta.cardEdition !== 'unknown') {
@@ -408,19 +465,32 @@ export const snapshotActions = {
    * 删除存档快照
    */
   async deleteSnapshot(this: any, snapshotId: string) {
-    const index = this._ui.saveSnapshots.findIndex((s: SaveSnapshot) => s.id === snapshotId)
-    if (index !== -1) {
-      this._ui.saveSnapshots.splice(index, 1)
+    let removed = false
+    const singleIndex = this._ui.saveSnapshots.findIndex((s: SaveSnapshot) => s.id === snapshotId)
+    if (singleIndex !== -1) {
+      this._ui.saveSnapshots.splice(singleIndex, 1)
+      removed = true
+    }
+    const mpIndex = this._ui.mpSaveSnapshots.findIndex((s: SaveSnapshot) => s.id === snapshotId)
+    if (mpIndex !== -1) {
+      this._ui.mpSaveSnapshots.splice(mpIndex, 1)
+      removed = true
+    }
+
+    if (removed) {
       this.saveToStorage(true)
 
-      // 删除快照数据和分片数据
-      try {
-        await removeSnapshotData(snapshotId)
-        const { removeChunkedChatLog } = await import('../../utils/indexedDB')
-        await removeChunkedChatLog(snapshotId)
-        console.log(`[GameStore] Deleted snapshot ${snapshotId} and chunks`)
-      } catch (e) {
-        console.warn('[GameStore] Failed to delete snapshot data:', e)
+      const stillReferenced = getAllSnapshotMetas(this).some((s: SaveSnapshot) => s.id === snapshotId)
+      if (!stillReferenced) {
+        // 删除快照数据和分片数据
+        try {
+          await removeSnapshotData(snapshotId)
+          const { removeChunkedChatLog } = await import('../../utils/indexedDB')
+          await removeChunkedChatLog(snapshotId)
+          console.log(`[GameStore] Deleted snapshot ${snapshotId} and chunks`)
+        } catch (e) {
+          console.warn('[GameStore] Failed to delete snapshot data:', e)
+        }
       }
     }
   },
@@ -437,11 +507,11 @@ export const snapshotActions = {
     const maxManualSaves = this.settings.maxManualSaves || 50
     const maxAutoSavesPerRun = 5
 
-    // 分类快照：手动存档 vs 自动存档
+    // 分类快照：手动存档 vs 自动存档（包含单机与联机）
     const manualSnapshots: SaveSnapshot[] = []
     const autoSavesByRun: Record<string, SaveSnapshot[]> = {}
 
-    for (const snapshot of this._ui.saveSnapshots) {
+    for (const snapshot of getAllSnapshotMetas(this)) {
       if (snapshot.id.startsWith('autosave_')) {
         const runId = snapshot.id.replace('autosave_', '')
         if (!autoSavesByRun[runId]) {
@@ -487,7 +557,7 @@ export const snapshotActions = {
    * 更新存档标签
    */
   updateSnapshotLabel(this: any, snapshotId: string, newLabel: string) {
-    const snapshot = this._ui.saveSnapshots.find((s: SaveSnapshot) => s.id === snapshotId)
+    const snapshot = findSnapshotMeta(this, snapshotId)
     if (snapshot) {
       snapshot.label = newLabel
       this.saveToStorage()

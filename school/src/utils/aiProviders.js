@@ -79,9 +79,10 @@ export const PROVIDER_PRESETS = {
     label: 'Vertex AI (Google Cloud)',
     baseUrl: '',
     models: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'],
-    format: 'gemini_native',
+    format: 'vertex_auto',
     placeholder: 'API Key (AIza...)',
     vertexFields: true,
+    note: '支持 Native 与 OpenAPI endpoint（可自动识别）',
     regions: ['us-central1', 'us-east4', 'us-west1', 'europe-west1', 'europe-west4', 'asia-northeast1', 'asia-southeast1', 'global'],
   },
   custom: {
@@ -106,6 +107,35 @@ export function buildVertexApiUrl(projectId, region = 'us-central1') {
   }
   // 有项目 ID：始终使用全局 host，但包含 locations 路径（与 SillyTavern 一致）
   return `https://aiplatform.googleapis.com/v1/projects/${projectId}/locations/${r}`
+}
+
+/** 构建 Vertex OpenAPI 兼容 endpoint 基础地址 */
+export function buildVertexOpenApiUrl(projectId, region = 'global') {
+  const r = region || 'global'
+  if (!projectId) {
+    return 'https://aiplatform.googleapis.com/v1beta1/projects/<project-id>/locations/global/endpoints/openapi'
+  }
+  return `https://aiplatform.googleapis.com/v1beta1/projects/${projectId}/locations/${r}/endpoints/openapi`
+}
+
+function normalizeUrl(url) {
+  return (url || '').trim().replace(/\/+$/, '')
+}
+
+/**
+ * 解析 Vertex 当前请求模式
+ * @returns {'native' | 'openapi'}
+ */
+export function resolveVertexRequestMode(config = {}) {
+  const mode = String(config.vertexMode || 'auto').toLowerCase()
+  if (mode === 'native') return 'native'
+  if (mode === 'openapi') return 'openapi'
+
+  const endpoint = normalizeUrl(config.apiUrl).toLowerCase()
+  if (endpoint.includes('/endpoints/openapi')) return 'openapi'
+  if (endpoint.includes('/publishers/google/models') || endpoint.includes(':generatecontent')) return 'native'
+  if (config.vertexProjectId || config.vertexRegion) return 'native'
+  return 'openapi'
 }
 
 /**
@@ -138,6 +168,7 @@ export function switchProviderConfig(assistantAI, oldProvider, newProvider) {
     if (oldProvider === 'vertex') {
       cfg.vertexProjectId = assistantAI.vertexProjectId || ''
       cfg.vertexRegion = assistantAI.vertexRegion || 'global'
+      cfg.vertexMode = assistantAI.vertexMode || 'auto'
     }
     assistantAI.channelConfigs[oldProvider] = cfg
   }
@@ -154,6 +185,7 @@ export function switchProviderConfig(assistantAI, oldProvider, newProvider) {
     if (newProvider === 'vertex') {
       assistantAI.vertexProjectId = saved.vertexProjectId || ''
       assistantAI.vertexRegion = saved.vertexRegion || 'global'
+      assistantAI.vertexMode = saved.vertexMode || 'auto'
     }
   } else {
     // 无已保存配置 → 用预设默认值，不填 apiKey
@@ -163,6 +195,7 @@ export function switchProviderConfig(assistantAI, oldProvider, newProvider) {
     if (newProvider === 'vertex') {
       assistantAI.vertexProjectId = ''
       assistantAI.vertexRegion = 'us-central1'
+      assistantAI.vertexMode = 'auto'
       assistantAI.apiUrl = buildVertexApiUrl('', 'us-central1')
     }
   }
@@ -182,6 +215,10 @@ export function buildApiRequest(config, messages) {
   const preset = PROVIDER_PRESETS[provider] || PROVIDER_PRESETS.custom
   const format = preset.format
 
+  if (provider === 'vertex') {
+    return buildVertexRequest(config, messages)
+  }
+
   if (format === 'claude') {
     return buildClaudeRequest(config, messages)
   }
@@ -193,13 +230,32 @@ export function buildApiRequest(config, messages) {
   return buildOpenAIRequest(config, messages)
 }
 
+function buildVertexRequest(config, messages) {
+  const mode = resolveVertexRequestMode(config)
+
+  if (mode === 'native') {
+    const nativeConfig = { ...config }
+    if (!nativeConfig.apiUrl) {
+      nativeConfig.apiUrl = buildVertexApiUrl(nativeConfig.vertexProjectId, nativeConfig.vertexRegion)
+    }
+    return buildGeminiNativeRequest(nativeConfig, messages)
+  }
+
+  const openaiConfig = { ...config }
+  const apiUrl = normalizeUrl(openaiConfig.apiUrl)
+  if (!apiUrl || apiUrl.includes('/publishers/google/models')) {
+    openaiConfig.apiUrl = buildVertexOpenApiUrl(openaiConfig.vertexProjectId, openaiConfig.vertexRegion || 'global')
+  }
+  return buildOpenAIRequest(openaiConfig, messages)
+}
+
 /**
  * OpenAI 兼容格式请求
  */
 function buildOpenAIRequest(config, messages) {
   const { apiUrl, apiKey, model, temperature } = config
 
-  let endpoint = apiUrl
+  let endpoint = normalizeUrl(apiUrl)
   if (!endpoint.endsWith('/chat/completions')) {
     endpoint = endpoint.replace(/\/+$/, '') + '/chat/completions'
   }
@@ -234,9 +290,19 @@ function buildGeminiNativeRequest(config, messages) {
 
   // 构建端点 URL：baseUrl/publishers/google/models/{model}:generateContent?key={apiKey}
   const baseUrl = (apiUrl && apiUrl.startsWith('https://'))
-    ? apiUrl.replace(/\/+$/, '')
+    ? normalizeUrl(apiUrl)
     : 'https://aiplatform.googleapis.com/v1'
-  const endpoint = `${baseUrl}/publishers/google/models/${model}:generateContent?key=${apiKey}`
+
+  let endpoint = ''
+  if (baseUrl.includes(':generateContent')) {
+    endpoint = baseUrl
+  } else if (baseUrl.includes('/publishers/google/models/')) {
+    endpoint = `${baseUrl}:generateContent`
+  } else {
+    endpoint = `${baseUrl}/publishers/google/models/${model}:generateContent`
+  }
+
+  endpoint += endpoint.includes('?') ? `&key=${apiKey}` : `?key=${apiKey}`
 
   // 转换消息格式：OpenAI → Gemini Native
   let systemText = ''
@@ -338,6 +404,20 @@ function buildClaudeRequest(config, messages) {
 export function extractReply(provider, data) {
   const preset = PROVIDER_PRESETS[provider] || PROVIDER_PRESETS.custom
 
+  if (provider === 'vertex') {
+    if (Array.isArray(data?.candidates)) {
+      const parts = data.candidates?.[0]?.content?.parts
+      if (Array.isArray(parts)) {
+        return parts
+          .filter(p => p.text != null)
+          .map(p => p.text)
+          .join('')
+      }
+      return ''
+    }
+    return data.choices?.[0]?.message?.content || ''
+  }
+
   if (preset.format === 'claude') {
     // Claude: { content: [{ type: 'text', text: '...' }] }
     if (data.content && Array.isArray(data.content)) {
@@ -374,6 +454,13 @@ export function extractReply(provider, data) {
  */
 export async function fetchProviderModels(provider, apiUrl, apiKey) {
   const preset = PROVIDER_PRESETS[provider] || PROVIDER_PRESETS.custom
+
+  if (provider === 'vertex') {
+    const mode = resolveVertexRequestMode({ provider, apiUrl })
+    if (mode !== 'openapi') {
+      return preset.models.map(id => ({ id }))
+    }
+  }
 
   // Claude / Gemini Native 不支持 /models 端点，直接返回预设
   if (preset.format === 'claude' || preset.format === 'gemini_native') {
