@@ -2,6 +2,7 @@
 import { defineEmits, ref, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { getErrorMessage } from '../utils/errorUtils'
+import { getEditionShortLabel } from '../utils/editionDetector'
 
 const emit = defineEmits(['back', 'close'])
 const gameStore = useGameStore()
@@ -45,16 +46,55 @@ const getLocation = (snapshot) => {
   return null
 }
 
+const isRestoreMismatchResult = (result) => {
+  return !!(result && typeof result === 'object' && result.mismatch)
+}
+
+const isRestoreMultiplayerRestrictedResult = (result) => {
+  return !!(result && typeof result === 'object' && result.multiplayerRestricted)
+}
+
+const showMultiplayerSaveBlockedTip = (result) => {
+  const roomSuffix = result?.roomId ? `（房间 ${result.roomId}）` : ''
+  alert(`该存档为联机模式存档${roomSuffix}，请先进入联机模式后再读取。`)
+}
+
 const handleLoad = async (snapshot) => {
   if (confirm(`确定要读取存档 "${snapshot.label}" 吗？\n当前未保存的进度将丢失。`)) {
-    const result = gameStore.restoreSnapshot(snapshot.id)
-    if (result) {
-      alert('读取成功！')
-      // 如果是在手机里打开的，可能需要关闭手机界面或者刷新
-      // 这里简单触发 close 事件
-      emit('close') 
-    } else {
-      alert('读取失败，存档可能已损坏。')
+    try {
+      let result = await gameStore.restoreSnapshot(snapshot.id, { healMode: 'defaults' })
+
+      if (isRestoreMultiplayerRestrictedResult(result)) {
+        showMultiplayerSaveBlockedTip(result)
+        return
+      }
+
+      if (isRestoreMismatchResult(result)) {
+        const snapshotLabel = getEditionShortLabel(result.snapshotEdition) || result.snapshotEdition
+        const currentLabel = getEditionShortLabel(result.currentEdition) || result.currentEdition
+        const confirmed = confirm(
+          `此存档为「${snapshotLabel}」版，当前绑定「${currentLabel}」版世界书，强行加载可能导致数据异常。\n\n是否继续？`
+        )
+        if (!confirmed) {
+          return
+        }
+
+        result = await gameStore.restoreSnapshot(snapshot.id, { force: true, healMode: 'defaults' })
+        if (isRestoreMultiplayerRestrictedResult(result)) {
+          showMultiplayerSaveBlockedTip(result)
+          return
+        }
+      }
+
+      if (result) {
+        alert('读取成功！')
+        emit('close')
+      } else {
+        alert('读取失败，存档可能已损坏。')
+      }
+    } catch (e) {
+      console.error('LoadGame restore failed:', e)
+      alert(`读取失败：${getErrorMessage(e, '存档恢复异常')}`)
     }
   }
 }

@@ -48,15 +48,18 @@ const restoreProgress = ref(0)
 const restoreStep = ref('')
 const isRestoring = ref(false)
 
+const canAccessMultiplayerSaves = computed(() => mpStore.isMultiplayerActive)
+
 // 获取存档列表（按时间倒序，按模式过滤）
 const snapshots = computed(() => {
-  const source = saveViewMode.value === 'multiplayer'
+  const source = saveViewMode.value === 'multiplayer' && canAccessMultiplayerSaves.value
     ? gameStore._ui.mpSaveSnapshots
     : gameStore._ui.saveSnapshots
   return [...source].sort((a, b) => b.timestamp - a.timestamp)
 })
 
 const hasMpSaves = computed(() => gameStore._ui.mpSaveSnapshots.length > 0)
+const showMultiplayerToggle = computed(() => hasMpSaves.value && canAccessMultiplayerSaves.value)
 
 // 复制联机存档到单人
 const copyToSinglePlayer = (snapshot) => {
@@ -100,6 +103,200 @@ const formatGameTime = (snapshot) => {
   return '未知时间'
 }
 
+const isRestoreMismatchResult = (result) => {
+  return !!(result && typeof result === 'object' && result.mismatch)
+}
+
+const isRestoreCorruptedResult = (result) => {
+  return !!(result && typeof result === 'object' && result.corrupted && Array.isArray(result.issues))
+}
+
+const isRestoreMultiplayerRestrictedResult = (result) => {
+  return !!(result && typeof result === 'object' && result.multiplayerRestricted)
+}
+
+const isRestoredSnapshotResult = (result) => {
+  return !!(
+    result &&
+    typeof result === 'object' &&
+    !isRestoreMismatchResult(result) &&
+    !isRestoreCorruptedResult(result) &&
+    !isRestoreMultiplayerRestrictedResult(result)
+  )
+}
+
+const showMultiplayerSaveBlockedTip = (result) => {
+  const roomSuffix = result?.roomId ? `（房间 ${result.roomId}）` : ''
+  alert(`该存档为联机模式存档${roomSuffix}，请先进入联机模式后再读取。`)
+}
+
+const formatIssueValue = (value) => {
+  if (value === undefined) return 'undefined'
+  if (value === null) return 'null'
+  if (typeof value === 'string') {
+    return value.length > 48 ? `${value.slice(0, 48)}...` : value
+  }
+  try {
+    const text = JSON.stringify(value)
+    return text.length > 72 ? `${text.slice(0, 72)}...` : text
+  } catch {
+    return String(value)
+  }
+}
+
+const buildCorruptedIssuesSummary = (issues, limit = 8) => {
+  const lines = issues.slice(0, limit).map((issue, index) => {
+    const reason = issue.reason === 'missing' ? '缺失' : '类型错误'
+    return `${index + 1}. ${issue.path}（${reason}，期望 ${issue.expectedType}）`
+  })
+  if (issues.length > limit) {
+    lines.push(`... 其余 ${issues.length - limit} 项已省略`) 
+  }
+  return lines.join('\n')
+}
+
+const getPromptDefaultInput = (issue) => {
+  const fallbackByType = {
+    string: '',
+    number: 0,
+    boolean: false,
+    array: [],
+    object: {}
+  }
+
+  const defaultValue = issue?.defaultValue !== undefined
+    ? issue.defaultValue
+    : fallbackByType[issue?.expectedType] ?? null
+
+  if (issue?.expectedType === 'string') {
+    return typeof defaultValue === 'string' ? defaultValue : String(defaultValue ?? '')
+  }
+  if (issue?.expectedType === 'number') {
+    return Number.isFinite(defaultValue) ? String(defaultValue) : '0'
+  }
+  if (issue?.expectedType === 'boolean') {
+    return defaultValue ? 'true' : 'false'
+  }
+
+  try {
+    return JSON.stringify(defaultValue, null, 2)
+  } catch {
+    return ''
+  }
+}
+
+const parseManualIssueInput = (input, issue) => {
+  const text = input.trim()
+  switch (issue.expectedType) {
+    case 'string':
+      return { ok: true, value: text }
+    case 'number': {
+      const num = Number(text)
+      if (!Number.isFinite(num)) {
+        return { ok: false, error: '请输入有效数字' }
+      }
+      return { ok: true, value: num }
+    }
+    case 'boolean': {
+      const lower = text.toLowerCase()
+      if (['true', '1', 'yes', 'y', '是'].includes(lower)) return { ok: true, value: true }
+      if (['false', '0', 'no', 'n', '否'].includes(lower)) return { ok: true, value: false }
+      return { ok: false, error: '请输入 true / false' }
+    }
+    case 'array':
+    case 'object': {
+      try {
+        const parsed = JSON.parse(text)
+        if (issue.expectedType === 'array' && !Array.isArray(parsed)) {
+          return { ok: false, error: '请输入 JSON 数组（[]）' }
+        }
+        if (issue.expectedType === 'object' && (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))) {
+          return { ok: false, error: '请输入 JSON 对象（{}）' }
+        }
+        return { ok: true, value: parsed }
+      } catch {
+        return { ok: false, error: 'JSON 格式无效' }
+      }
+    }
+    default:
+      return { ok: true, value: text }
+  }
+}
+
+const collectManualHealOverrides = (issues) => {
+  const overrides = {}
+  for (const issue of issues) {
+    const reasonText = issue.reason === 'missing' ? '缺失' : '类型错误'
+    const input = window.prompt(
+      [
+        `字段：${issue.path}`,
+        `问题：${reasonText}（期望 ${issue.expectedType}）`,
+        `当前值：${formatIssueValue(issue.currentValue)}`,
+        '请输入修复值（留空或取消 = 使用默认值）'
+      ].join('\n'),
+      getPromptDefaultInput(issue)
+    )
+
+    if (input === null || input.trim() === '') {
+      continue
+    }
+
+    const parsed = parseManualIssueInput(input, issue)
+    if (!parsed.ok) {
+      alert(`字段 ${issue.path} 输入无效：${parsed.error}\n已自动改用默认值。`)
+      continue
+    }
+
+    overrides[issue.path] = parsed.value
+  }
+  return overrides
+}
+
+const restoreSnapshotWithSelfHeal = async (snapshotId, force = false) => {
+  let result = await gameStore.restoreSnapshot(snapshotId, {
+    force,
+    healMode: 'none'
+  })
+
+  if (isRestoreMultiplayerRestrictedResult(result)) {
+    return result
+  }
+
+  if (!isRestoreCorruptedResult(result)) {
+    return result
+  }
+
+  const issueSummary = buildCorruptedIssuesSummary(result.issues)
+  const shouldManualFill = confirm(
+    `检测到存档中 ${result.issues.length} 项变量读取异常：\n\n${issueSummary}\n\n` +
+    '点击“确定”：逐项手动补齐\n点击“取消”：跳过并设为默认值'
+  )
+
+  if (shouldManualFill) {
+    const overrides = collectManualHealOverrides(result.issues)
+    result = await gameStore.restoreSnapshot(snapshotId, {
+      force,
+      healMode: 'custom',
+      healOverrides: overrides
+    })
+  } else {
+    result = await gameStore.restoreSnapshot(snapshotId, {
+      force,
+      healMode: 'defaults'
+    })
+  }
+
+  if (isRestoreCorruptedResult(result)) {
+    alert('存档修复后仍有异常，已自动按默认值继续恢复。')
+    result = await gameStore.restoreSnapshot(snapshotId, {
+      force,
+      healMode: 'defaults'
+    })
+  }
+
+  return result
+}
+
 // 创建新存档
 const createSave = () => {
   const messageIndex = props.currentChatLog.length - 1
@@ -108,25 +305,45 @@ const createSave = () => {
 
 // 加载存档
 const loadSave = async (snapshotId) => {
-  const result = await gameStore.restoreSnapshot(snapshotId)
-  if (result && result.mismatch) {
-    const snapshotLabel = getEditionShortLabel(result.snapshotEdition) || result.snapshotEdition
-    const currentLabel = getEditionShortLabel(result.currentEdition) || result.currentEdition
-    const confirmed = confirm(
-      `此存档为「${snapshotLabel}」版，当前绑定「${currentLabel}」版世界书，强行加载可能导致数据异常。\n\n是否继续？`
-    )
-    if (confirmed) {
-      const snapshot = await gameStore.restoreSnapshot(snapshotId, true)
-      if (snapshot) {
-        emit('restore', snapshot)
-        emit('close')
-      }
+  try {
+    let result = await restoreSnapshotWithSelfHeal(snapshotId)
+    if (isRestoreMultiplayerRestrictedResult(result)) {
+      showMultiplayerSaveBlockedTip(result)
+      return
     }
-    return
-  }
-  if (result) {
-    emit('restore', result)
-    emit('close')
+
+    if (isRestoreMismatchResult(result)) {
+      const snapshotLabel = getEditionShortLabel(result.snapshotEdition) || result.snapshotEdition
+      const currentLabel = getEditionShortLabel(result.currentEdition) || result.currentEdition
+      const confirmed = confirm(
+        `此存档为「${snapshotLabel}」版，当前绑定「${currentLabel}」版世界书，强行加载可能导致数据异常。\n\n是否继续？`
+      )
+      if (confirmed) {
+        result = await restoreSnapshotWithSelfHeal(snapshotId, true)
+        if (isRestoreMultiplayerRestrictedResult(result)) {
+          showMultiplayerSaveBlockedTip(result)
+          return
+        }
+        if (isRestoredSnapshotResult(result)) {
+          emit('restore', {
+            ...result,
+            chatLog: Array.isArray(result.chatLog) ? result.chatLog : []
+          })
+          emit('close')
+        }
+      }
+      return
+    }
+    if (isRestoredSnapshotResult(result)) {
+      emit('restore', {
+        ...result,
+        chatLog: Array.isArray(result.chatLog) ? result.chatLog : []
+      })
+      emit('close')
+    }
+  } catch (e) {
+    console.error('[SavePanel] Failed to restore snapshot:', e)
+    alert(`读取存档失败：${getErrorMessage(e, '存档恢复异常')}`)
   }
 }
 
@@ -188,8 +405,14 @@ const restoreToChatIndex = async (index) => {
     // 1. 恢复存档
     restoreProgress.value = 20
     let snapshot = null
-    const result = await gameStore.restoreSnapshot(previewSnapshot.value.id)
-    if (result && result.mismatch) {
+    let result = await restoreSnapshotWithSelfHeal(previewSnapshot.value.id)
+    if (isRestoreMultiplayerRestrictedResult(result)) {
+      showMultiplayerSaveBlockedTip(result)
+      isRestoring.value = false
+      return
+    }
+
+    if (isRestoreMismatchResult(result)) {
       const snapshotLabel = getEditionShortLabel(result.snapshotEdition) || result.snapshotEdition
       const currentLabel = getEditionShortLabel(result.currentEdition) || result.currentEdition
       const confirmed = confirm(
@@ -199,15 +422,25 @@ const restoreToChatIndex = async (index) => {
         isRestoring.value = false
         return
       }
-      snapshot = await gameStore.restoreSnapshot(previewSnapshot.value.id, true)
-      if (!snapshot) {
+      result = await restoreSnapshotWithSelfHeal(previewSnapshot.value.id, true)
+      if (isRestoreMultiplayerRestrictedResult(result)) {
+        showMultiplayerSaveBlockedTip(result)
         isRestoring.value = false
         return
       }
+      if (!isRestoredSnapshotResult(result)) {
+        isRestoring.value = false
+        return
+      }
+      snapshot = result
     } else if (!result) {
       isRestoring.value = false
       return
     } else {
+      if (!isRestoredSnapshotResult(result)) {
+        isRestoring.value = false
+        return
+      }
       snapshot = result
     }
 
@@ -521,7 +754,7 @@ const closeDebugImportPanel = () => {
 
       <div class="panel-content">
         <!-- 存档模式切换（单人/联机） -->
-        <div v-if="hasMpSaves" class="save-mode-toggle">
+        <div v-if="showMultiplayerToggle" class="save-mode-toggle">
           <button
             class="mode-toggle-btn"
             :class="{ active: saveViewMode === 'single' }"
@@ -532,6 +765,10 @@ const closeDebugImportPanel = () => {
             :class="{ active: saveViewMode === 'multiplayer' }"
             @click="saveViewMode = 'multiplayer'"
           >联机存档</button>
+        </div>
+
+        <div v-if="hasMpSaves && !canAccessMultiplayerSaves" class="mp-save-lock-hint">
+          🔒 联机存档仅可在联机模式下读取
         </div>
 
         <!-- 存档模式下显示新建存档按钮 -->
@@ -1222,6 +1459,7 @@ const closeDebugImportPanel = () => {
   font-size: 0.95rem;
   color: #5d4037;
   display: -webkit-box;
+  line-clamp: 2;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;

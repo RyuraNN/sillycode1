@@ -156,6 +156,23 @@ const currentGenerationId = ref(0)
 const imageGenerationCache = new Map()
 const completedImages = new Map()
 const IMAGE_CACHE_LIMIT = 50
+const IMAGE_CACHE_WAIT_TIMEOUT_MS = 15000
+const EXTREME_WORD_ALTERNATIVES = ['十分', '非常', '特别']
+
+const normalizeNarrativeResponse = (text) => {
+  if (!text) return ''
+
+  let normalized = text
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/^[ \t]*#{3}[ \t]*正文[ \t]*$/gim, '')
+    .replace(/极其/g, () => {
+      const index = Math.floor(Math.random() * EXTREME_WORD_ALTERNATIVES.length)
+      return EXTREME_WORD_ALTERNATIVES[index]
+    })
+
+  normalized = normalized.replace(/\n{3,}/g, '\n\n')
+  return normalized.trim()
+}
 
 // RAG 计算结果缓存
 const cachedRAGHistory = ref(null)
@@ -173,6 +190,23 @@ const addToImageCache = (key, value) => {
   completedImages.set(key, value)
 }
 
+const waitForPendingImageGeneration = async () => {
+  if (imageGenerationCache.size === 0) return
+
+  const timeoutWrap = (promise, timeoutMs) => {
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise
+    return Promise.race([
+      Promise.resolve(promise),
+      new Promise(resolve => setTimeout(() => resolve('__image_wait_timeout__'), timeoutMs))
+    ])
+  }
+
+  const pendingPromises = Array.from(imageGenerationCache.values()).map(p =>
+    timeoutWrap(p, IMAGE_CACHE_WAIT_TIMEOUT_MS)
+  )
+  await Promise.allSettled(pendingPromises)
+}
+
 // Visual Viewport 处理
 const inputBarOffset = ref(0)
 
@@ -187,7 +221,7 @@ const buildCustomHistoryMessages = (summarizedLog, traceId = null, finalUserProm
   const summaryLogs = summarizedLog.filter(log => log.isSummary)
   const normalLogs = summarizedLog.filter(log => !log.isSummary)
   const memoryPacket = summaryLogs.length > 0
-    ? `${MEMORY_PACKET_HEADER}\n\n${summaryLogs.map(log => log.content).join('\n\n')}`
+    ? `${MEMORY_PACKET_HEADER}\n\n${summaryLogs.map(log => normalizeNarrativeResponse(log.content)).join('\n\n')}`
     : ''
 
   const customHistory = []
@@ -198,7 +232,10 @@ const buildCustomHistoryMessages = (summarizedLog, traceId = null, finalUserProm
   for (const log of normalLogs) {
     let role = 'user'
     if (log.type === 'ai') role = 'assistant'
-    customHistory.push({ role, content: log.content })
+    const content = role === 'assistant'
+      ? normalizeNarrativeResponse(log.content)
+      : log.content
+    customHistory.push({ role, content })
   }
 
   if (traceId) {
@@ -1089,6 +1126,8 @@ const processAIResponse = async (response) => {
     return '' // 从显示内容中移除
   })
 
+  cleanResponse = normalizeNarrativeResponse(cleanResponse)
+
   if (danmuContent.trim()) {
     const danmuItems = danmuContent.split('\n')
       .map(line => line.trim())
@@ -1108,9 +1147,7 @@ const processAIResponse = async (response) => {
     // 所以只需要设置内容，让按钮出现即可。
   }
 
-  if (imageGenerationCache.size > 0) {
-    await Promise.allSettled(Array.from(imageGenerationCache.values()))
-  }
+  await waitForPendingImageGeneration()
 
   await parseSocialTags(cleanResponse)
 
@@ -1788,9 +1825,11 @@ const handleAssistantReroll = async () => {
   // 获取原始内容
   const sourceContent = lastLog.rawContent || lastLog.content
   if (!sourceContent) return
+
+  const normalizedSourceContent = normalizeNarrativeResponse(removeThinking(sourceContent))
   
   // 清理内容，只保留给辅助AI分析的文本
-  let contentOnly = sourceContent
+  let contentOnly = normalizedSourceContent
     .replace(/\[GAME_DATA\][\s\S]*?\[\/GAME_DATA\]/g, '')
     .replace(/<minor_summary>[\s\S]*?<\/minor_summary>/g, '')
     .replace(/<imgthink[\s\S]*?<\/imgthink>/gi, '')
@@ -1828,7 +1867,7 @@ const handleAssistantReroll = async () => {
     // 提取并保存小总结
     const rerollSummary = extractSummary(cleanAssistantResponse, 'minor')
     if (rerollSummary) {
-      const summarySource = (lastLog.rawContent || lastLog.content)
+      const summarySource = normalizedSourceContent
         .replace(/<minor_summary>[\s\S]*?<\/minor_summary>/g, '')
         .replace(/\[GAME_DATA\][\s\S]*?\[\/GAME_DATA\]/g, '')
         .trim()

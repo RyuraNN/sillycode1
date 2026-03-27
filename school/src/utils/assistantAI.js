@@ -7,6 +7,52 @@ import { toTOON } from './toonSerializer'
 import { SUMMARY_FORMAT_FIELDS } from './summaryConstants'
 import { buildApiRequest, extractReply, PROVIDER_PRESETS, resolveVertexRequestMode } from './aiProviders'
 
+const ASSISTANT_API_TIMEOUT_MS = 120000
+const WORLDBOOK_FETCH_TIMEOUT_MS = 10000
+
+function withTimeout(promise, timeoutMs, label = 'Operation') {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return Promise.resolve(promise)
+
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timeout after ${Math.round(timeoutMs / 1000)}s`))
+    }, timeoutMs)
+
+    Promise.resolve(promise)
+      .then(value => {
+        clearTimeout(timeoutId)
+        resolve(value)
+      })
+      .catch(error => {
+        clearTimeout(timeoutId)
+        reject(error)
+      })
+  })
+}
+
+async function fetchWithTimeout(endpoint, fetchOptions, timeoutMs, label = 'API request') {
+  if (typeof AbortController === 'undefined' || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return fetch(endpoint, fetchOptions)
+  }
+
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    return await fetch(endpoint, {
+      ...fetchOptions,
+      signal: controller.signal
+    })
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`API Error: ${label} timeout after ${Math.round(timeoutMs / 1000)}s`)
+    }
+    throw error
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 /**
  * 验证辅助AI配置是否完整
  * @param {Object} config - 辅助AI配置对象
@@ -153,7 +199,11 @@ const ASSISTANT_PREFILL = `<think>
 async function getWorldbookContent(name) {
   if (typeof window.getWorldbook !== 'function') return ''
   try {
-    const entries = await window.getWorldbook(name)
+    const entries = await withTimeout(
+      window.getWorldbook(name),
+      WORLDBOOK_FETCH_TIMEOUT_MS,
+      `[AssistantAI] Worldbook "${name}" read`
+    )
     if (!entries || !Array.isArray(entries)) return ''
     
     // 过滤掉禁用的条目和 [COT] 条目
@@ -182,7 +232,11 @@ async function getVariableParsingEntryContent() {
     for (const name of bookNames) {
       let entries
       try {
-        entries = await window.getWorldbook(name)
+        entries = await withTimeout(
+          window.getWorldbook(name),
+          WORLDBOOK_FETCH_TIMEOUT_MS,
+          `[AssistantAI] Worldbook "${name}" read`
+        )
       } catch (e) {
         console.warn(`[AssistantAI] Worldbook "${name}" not accessible, skipping:`, getErrorMessage(e))
         continue
@@ -394,7 +448,12 @@ ${mainAIResponse}
   }
 
   try {
-    const response = await fetch(endpoint, fetchOptions)
+    const response = await fetchWithTimeout(
+      endpoint,
+      fetchOptions,
+      ASSISTANT_API_TIMEOUT_MS,
+      'Assistant request'
+    )
 
     if (!response.ok) {
       const errorText = await response.text()
@@ -486,7 +545,12 @@ export async function callImageAnalysisAI(storyContent, characterAnchors = {}) {
   console.log('[ImageAnalysisAI] Analyzing story for images... (provider:', provider, ')')
 
   try {
-    const response = await fetch(endpoint, fetchOptions)
+    const response = await fetchWithTimeout(
+      endpoint,
+      fetchOptions,
+      ASSISTANT_API_TIMEOUT_MS,
+      'Image analysis request'
+    )
 
     if (!response.ok) {
       throw new Error(`API Error: ${response.status}`)

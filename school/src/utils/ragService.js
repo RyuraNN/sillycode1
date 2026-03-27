@@ -1599,6 +1599,8 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
   const result = []
   const recentThreshold = settings.minorSummaryStartFloor || 6
   const bridgeCount = 5 // 桥接层：正文边界外最近 5 轮小总结
+  const currentFloorNum = Number(currentFloor)
+  const safeCurrentFloor = Number.isFinite(currentFloorNum) ? currentFloorNum : 0
 
   // 构建检索 query：拼接最近2条小总结 + 用户输入，提升语义丰富度
   let query = userInput
@@ -1695,7 +1697,7 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
 
   // 4. RAG 检索（三路融合：向量 + 图谱 + 关键词）
   let ragSummaries = []
-  const ragCandidateCount = currentFloor - recentThreshold
+  const ragCandidateCount = safeCurrentFloor - recentThreshold
   if (ragCandidateCount > 0 && userInput) {
     try {
       const { topK, topN, minVectorScore, minRerankScore, recencyBias, recencyHalfLife } = getEffectiveRAGParams()
@@ -1897,7 +1899,9 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
   // 桥接层：查找对应小总结，按楼层升序注入
   const bridgeSummaries = []
   const usedBridgeKeys = new Set()
-  for (const floor of [...Array(currentFloor - recentThreshold).keys()].map(i => currentFloor - i - 1)) {
+  const bridgeRange = Math.max(0, safeCurrentFloor - recentThreshold)
+  const bridgeFloors = Array.from({ length: bridgeRange }, (_, i) => safeCurrentFloor - i - 1)
+  for (const floor of bridgeFloors) {
     const summary = gameStore.player.summaries
       .filter(s => getSummaryCoveredFloors(s).includes(floor) && !usedBridgeKeys.has(getSummaryCoverageKey(s)))
       .sort((a, b) => {
@@ -1925,7 +1929,7 @@ export async function buildRAGHistory(chatLog, currentFloor, userInput) {
   }
 
   appendTraceStep(traceId, 'historyBuild', '桥接层构建完成', 'success', {
-    bridgeFloors: [...Array(currentFloor - recentThreshold).keys()].map(i => currentFloor - i - 1),
+    bridgeFloors,
     bridgeSummaryCount: bridgeSummaries.length
   })
 

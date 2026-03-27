@@ -91,6 +91,11 @@ export const socialActions = {
   setPendingRestoreLog(this: any, log: ChatLogEntry[]) {
     // chatLog 从 IndexedDB 加载时已经是纯数据，直接浅拷贝即可
     // 避免 JSON.stringify 在大数据时抛出 RangeError: Invalid string length
+    if (!Array.isArray(log)) {
+      console.warn('[socialActions] setPendingRestoreLog received non-array log, fallback to empty log')
+      this._ui.pendingRestoreLog = []
+      return
+    }
     this._ui.pendingRestoreLog = [...log]
   },
 

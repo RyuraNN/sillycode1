@@ -88,6 +88,216 @@ function attachRecoveredSnapshotMeta(store: any, snapshotId: string, details: an
   return recovered
 }
 
+function inferSnapshotSaveMode(snapshot: Partial<SaveSnapshot> | null | undefined): 'single' | 'multiplayer' {
+  if (!snapshot) return 'single'
+  if (snapshot.saveMode === 'multiplayer') return 'multiplayer'
+  if (typeof snapshot.roomId === 'string' && snapshot.roomId.length > 0) return 'multiplayer'
+  return 'single'
+}
+
+function canRestoreMultiplayerSnapshot() {
+  try {
+    const mpStore = useMultiplayerStore()
+    return !!mpStore.isMultiplayerActive
+  } catch {
+    return false
+  }
+}
+
+type RestoreFieldType = 'string' | 'number' | 'boolean' | 'array' | 'object'
+type RestoreHealMode = 'none' | 'defaults' | 'custom'
+
+interface RestoreIssue {
+  path: string
+  expectedType: RestoreFieldType
+  reason: 'missing' | 'invalid_type'
+  currentValue: any
+  defaultValue: any
+}
+
+interface RestoreSnapshotMismatchResult {
+  mismatch: true
+  snapshotEdition: string
+  currentEdition: string
+}
+
+interface RestoreSnapshotCorruptedResult {
+  corrupted: true
+  issues: RestoreIssue[]
+}
+
+interface RestoreSnapshotMultiplayerRestrictedResult {
+  multiplayerRestricted: true
+  roomId: string | null
+}
+
+interface RestoreSnapshotOptions {
+  force?: boolean
+  healMode?: RestoreHealMode
+  healOverrides?: Record<string, any>
+}
+
+const RESTORE_HEAL_RULES: Array<{ path: string; expectedType: RestoreFieldType }> = [
+  { path: 'meta', expectedType: 'object' },
+  { path: 'meta.currentRunId', expectedType: 'string' },
+  { path: 'meta.currentFloor', expectedType: 'number' },
+  { path: 'world', expectedType: 'object' },
+  { path: 'world.gameTime', expectedType: 'object' },
+  { path: 'world.gameTime.year', expectedType: 'number' },
+  { path: 'world.gameTime.month', expectedType: 'number' },
+  { path: 'world.gameTime.day', expectedType: 'number' },
+  { path: 'world.gameTime.hour', expectedType: 'number' },
+  { path: 'world.gameTime.minute', expectedType: 'number' },
+  { path: 'world.npcs', expectedType: 'array' },
+  { path: 'world.npcRelationships', expectedType: 'object' },
+  { path: 'world.allClassData', expectedType: 'object' },
+  { path: 'world.allClubs', expectedType: 'object' },
+  { path: 'player', expectedType: 'object' },
+  { path: 'player.name', expectedType: 'string' },
+  { path: 'player.inventory', expectedType: 'array' },
+  { path: 'player.flags', expectedType: 'object' },
+  { path: 'player.pendingCommands', expectedType: 'array' },
+  { path: 'player.holdMessages', expectedType: 'array' },
+  { path: 'player.systemNotifications', expectedType: 'array' },
+  { path: 'player.social', expectedType: 'object' },
+  { path: 'player.social.friends', expectedType: 'array' },
+  { path: 'player.social.groups', expectedType: 'array' },
+  { path: 'player.social.moments', expectedType: 'array' },
+  { path: 'player.forum', expectedType: 'object' },
+  { path: 'player.forum.posts', expectedType: 'array' },
+  { path: 'player.forum.pendingCommands', expectedType: 'array' },
+  { path: 'player.customCalendarEvents', expectedType: 'array' },
+  { path: 'player.relationships', expectedType: 'object' },
+  { path: 'academic', expectedType: 'object' },
+  { path: 'events', expectedType: 'object' },
+  { path: 'notifications', expectedType: 'object' },
+  { path: 'rag', expectedType: 'object' },
+  { path: 'rag.summaries', expectedType: 'array' },
+  { path: 'rag.persistentFacts', expectedType: 'array' }
+]
+
+function safeCloneValue<T>(value: T): T {
+  if (value === undefined || value === null) return value
+  if (typeof value !== 'object') return value
+  try {
+    return fastClone(value)
+  } catch {
+    return value
+  }
+}
+
+function getPathValue(source: any, path: string): any {
+  const keys = path.split('.')
+  let current = source
+  for (const key of keys) {
+    if (current === undefined || current === null) return undefined
+    current = current[key]
+  }
+  return current
+}
+
+function setPathValue(target: any, path: string, value: any) {
+  const keys = path.split('.')
+  let current = target
+  for (let i = 0; i < keys.length - 1; i++) {
+    const key = keys[i]
+    if (!current[key] || typeof current[key] !== 'object' || Array.isArray(current[key])) {
+      current[key] = {}
+    }
+    current = current[key]
+  }
+  current[keys[keys.length - 1]] = value
+}
+
+function isValidRestoreType(value: any, expectedType: RestoreFieldType): boolean {
+  if (value === undefined || value === null) return false
+  switch (expectedType) {
+    case 'string':
+      return typeof value === 'string'
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value)
+    case 'boolean':
+      return typeof value === 'boolean'
+    case 'array':
+      return Array.isArray(value)
+    case 'object':
+      return typeof value === 'object' && !Array.isArray(value)
+    default:
+      return false
+  }
+}
+
+function resolveRestoreSnapshotArgs(
+  forceOrOptions?: boolean | RestoreSnapshotOptions,
+  manualOverrides?: Record<string, any>
+): { force: boolean; healMode: RestoreHealMode; healOverrides: Record<string, any> } {
+  let force = false
+  let healMode: RestoreHealMode = 'defaults'
+  let healOverrides: Record<string, any> = {}
+
+  if (typeof forceOrOptions === 'boolean') {
+    force = forceOrOptions
+    if (manualOverrides && typeof manualOverrides === 'object') {
+      healOverrides = manualOverrides
+      if (Object.keys(healOverrides).length > 0) {
+        healMode = 'custom'
+      }
+    }
+    return { force, healMode, healOverrides }
+  }
+
+  if (forceOrOptions && typeof forceOrOptions === 'object') {
+    force = !!forceOrOptions.force
+    healOverrides = forceOrOptions.healOverrides && typeof forceOrOptions.healOverrides === 'object'
+      ? forceOrOptions.healOverrides
+      : {}
+    if (forceOrOptions.healMode) {
+      healMode = forceOrOptions.healMode
+    } else if (Object.keys(healOverrides).length > 0) {
+      healMode = 'custom'
+    }
+  }
+
+  return { force, healMode, healOverrides }
+}
+
+function buildRestoreIssuesAndState(
+  rawState: any,
+  defaults: any,
+  options: { healMode: RestoreHealMode; healOverrides?: Record<string, any> }
+): { state: any; issues: RestoreIssue[] } {
+  const migrated = isLegacyGameState(rawState) ? migrateGameStateData(rawState) : rawState
+  const state = safeCloneValue(migrated)
+  const issues: RestoreIssue[] = []
+  const healOverrides = options.healOverrides || {}
+
+  for (const rule of RESTORE_HEAL_RULES) {
+    const currentValue = getPathValue(state, rule.path)
+    if (isValidRestoreType(currentValue, rule.expectedType)) {
+      continue
+    }
+
+    const defaultValue = safeCloneValue(getPathValue(defaults, rule.path))
+    const issue: RestoreIssue = {
+      path: rule.path,
+      expectedType: rule.expectedType,
+      reason: currentValue === undefined || currentValue === null ? 'missing' : 'invalid_type',
+      currentValue: safeCloneValue(currentValue),
+      defaultValue: safeCloneValue(defaultValue)
+    }
+    issues.push(issue)
+
+    if (options.healMode !== 'none') {
+      const overrideValue = healOverrides[rule.path]
+      const hasValidOverride = overrideValue !== undefined && isValidRestoreType(overrideValue, rule.expectedType)
+      const valueToUse = hasValidOverride ? overrideValue : defaultValue
+      setPathValue(state, rule.path, safeCloneValue(valueToUse))
+    }
+  }
+
+  return { state, issues }
+}
+
 /**
  * 精简 chatLog 拷贝，移除冗余字段
  * 可用于全量映射或增量序列化
@@ -348,12 +558,27 @@ export const snapshotActions = {
   /**
    * 恢复存档快照
    */
-  async restoreSnapshot(this: any, snapshotId: string, force?: boolean): Promise<SaveSnapshot | null | { mismatch: true, snapshotEdition: string, currentEdition: string }> {
+  async restoreSnapshot(
+    this: any,
+    snapshotId: string,
+    forceOrOptions?: boolean | RestoreSnapshotOptions,
+    manualHealOverrides?: Record<string, any>
+  ): Promise<SaveSnapshot | null | RestoreSnapshotMismatchResult | RestoreSnapshotCorruptedResult | RestoreSnapshotMultiplayerRestrictedResult> {
+    const { force, healMode, healOverrides } = resolveRestoreSnapshotArgs(forceOrOptions, manualHealOverrides)
+
     let snapshotMeta = findSnapshotMeta(this, snapshotId)
     if (!snapshotMeta) {
       const details = await getSnapshotData(snapshotId)
       if (!details) return null
       snapshotMeta = attachRecoveredSnapshotMeta(this, snapshotId, details)
+    }
+
+    if (inferSnapshotSaveMode(snapshotMeta) === 'multiplayer' && !canRestoreMultiplayerSnapshot()) {
+      console.warn('[GameStore] Blocked multiplayer save restore outside multiplayer mode:', snapshotId)
+      return {
+        multiplayerRestricted: true,
+        roomId: snapshotMeta.roomId || null
+      }
     }
 
     // 版本不匹配检查
@@ -401,10 +626,29 @@ export const snapshotActions = {
       }
     }
 
+    // 兜底：chatLog 统一归一化，避免后续 restore 传递时出现 undefined
+    if (!Array.isArray((fullSnapshot as any).chatLog)) {
+      fullSnapshot = { ...fullSnapshot, chatLog: [] }
+    }
+
     // Phase 2: 使用 applyGameStateToStore 统一恢复逻辑（自动处理 v3→v4 迁移）
     const state = fullSnapshot.gameState
+    if (!state || typeof state !== 'object') {
+      console.error('[GameStore] Snapshot missing or invalid gameState:', snapshotId, state)
+      return null
+    }
+
     const defaults = createInitialState()
-    applyGameStateToStore(this, state, defaults)
+    const restorePrepared = buildRestoreIssuesAndState(state, defaults, { healMode, healOverrides })
+    if (restorePrepared.issues.length > 0) {
+      if (healMode === 'none') {
+        console.warn('[GameStore] Snapshot has corrupted fields, waiting user resolve:', restorePrepared.issues.map(i => i.path))
+        return { corrupted: true, issues: restorePrepared.issues }
+      }
+      console.warn(`[GameStore] Auto-healed ${restorePrepared.issues.length} corrupted fields during restore`) 
+    }
+
+    applyGameStateToStore(this, restorePrepared.state, defaults)
 
     // 如果迁移后没有 runId，生成一个
     if (!this.meta.currentRunId || this.meta.currentRunId === 'temp_editing') {
@@ -458,7 +702,9 @@ export const snapshotActions = {
       console.warn('[snapshotActions] Failed to sync academic worldbook after restore:', e)
     }
 
-    return fullSnapshot
+    return restorePrepared.issues.length > 0
+      ? { ...(fullSnapshot as any), _restoreHealIssues: restorePrepared.issues }
+      : fullSnapshot
   },
 
   /**
@@ -888,9 +1134,14 @@ export const snapshotActions = {
       }
     }
 
-    // Phase 2: 使用 applyGameStateToStore 统一恢复（自动处理 v3→v4 迁移）
     const defaults = createInitialState()
-    applyGameStateToStore(this, data, defaults)
+    const restorePrepared = buildRestoreIssuesAndState(data, defaults, { healMode: 'defaults' })
+    if (restorePrepared.issues.length > 0) {
+      console.warn('[snapshotActions] Auto-healed corrupted fields during restoreGameState:', restorePrepared.issues.map(i => i.path))
+    }
+
+    // Phase 2: 使用 applyGameStateToStore 统一恢复（自动处理 v3→v4 迁移）
+    applyGameStateToStore(this, restorePrepared.state, defaults)
 
     await rehydratePlayerSummaryEmbeddings(this)
   }

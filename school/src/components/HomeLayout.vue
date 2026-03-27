@@ -55,13 +55,24 @@ const startGame = async () => {
 }
 
 const handleRestore = async (snapshot) => {
-  // 设置待恢复的日志，以便 GameMain 挂载时读取
-  gameStore.setPendingRestoreLog(snapshot.chatLog)
-  // 不再需要手动调用世界书同步，因为 restoreSnapshot (在 SavePanel 中被调用) 已经包含在 rebuildWorldbookState 中处理了
-  // 且现在 rebuildWorldbookState 是被 await 等待完成的，所以可以安全切换视图
-  
-  // 切换到游戏视图
-  currentView.value = 'game'
+  try {
+    const safeChatLog = Array.isArray(snapshot?.chatLog) ? snapshot.chatLog : []
+    if (!Array.isArray(snapshot?.chatLog)) {
+      console.warn('[HomeLayout] Restored snapshot has no valid chatLog, fallback to empty log')
+    }
+
+    // 设置待恢复的日志，以便 GameMain 挂载时读取
+    gameStore.setPendingRestoreLog(safeChatLog)
+    // 不再需要手动调用世界书同步，因为 restoreSnapshot (在 SavePanel 中被调用) 已经包含在 rebuildWorldbookState 中处理了
+    // 且现在 rebuildWorldbookState 是被 await 等待完成的，所以可以安全切换视图
+    
+    // 切换到游戏视图
+    currentView.value = 'game'
+  } catch (e) {
+    console.error('[HomeLayout] Failed to handoff restored snapshot:', e)
+    alert(`读取存档失败：${getErrorMessage(e, '恢复数据传递异常')}`)
+    currentView.value = 'menu'
+  }
 }
 
 const handleSavePanelClose = () => {
