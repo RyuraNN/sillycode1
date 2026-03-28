@@ -968,16 +968,38 @@ export const snapshotActions = {
 
     // Post-restore: 保存关系数据到 IndexedDB，确保存档隔离
     try {
-      const { saveNpcRelationships, removeNpcRelationships } = await import('../../utils/indexedDB')
+      const { saveNpcRelationships, removeNpcRelationships, getNpcRelationships } = await import('../../utils/indexedDB')
       const { clearPendingSocialData } = await import('../../utils/relationshipManager')
       clearPendingSocialData()
-      if (this.meta.currentRunId && this.meta.currentRunId !== 'temp_editing' && this.world.npcRelationships) {
-        // 【修复】先删除旧的 IndexedDB 数据，确保回溯时关系数据正确
-        await removeNpcRelationships(this.meta.currentRunId)
-        await saveNpcRelationships(
-          this.meta.currentRunId,
-          fastClone(this.world.npcRelationships)
-        )
+      const runId = this.meta.currentRunId
+      if (runId && runId !== 'temp_editing' && this.world.npcRelationships) {
+        let relationshipsToPersist = this.world.npcRelationships
+
+        if (Object.keys(relationshipsToPersist).length === 0) {
+          try {
+            const existing = await getNpcRelationships(runId)
+            if (existing && typeof existing === 'object' && Object.keys(existing).length > 0) {
+              console.warn('[snapshotActions] Detected empty relationships after message restore, recovered from IndexedDB for run:', runId)
+              relationshipsToPersist = existing
+              this.world.npcRelationships = existing
+            } else {
+              console.warn('[snapshotActions] Skip persisting empty relationships after message restore for run:', runId)
+              relationshipsToPersist = null
+            }
+          } catch (e) {
+            console.warn('[snapshotActions] Failed to read IndexedDB relationships fallback:', e)
+            relationshipsToPersist = null
+          }
+        }
+
+        if (relationshipsToPersist) {
+          // 【修复】先删除旧的 IndexedDB 数据，确保回溯时关系数据正确
+          await removeNpcRelationships(runId)
+          await saveNpcRelationships(
+            runId,
+            fastClone(relationshipsToPersist)
+          )
+        }
       }
     } catch (e) {
       console.warn('[snapshotActions] Failed to save relationships after message restore:', e)
@@ -1106,6 +1128,17 @@ export const snapshotActions = {
    */
   async restoreGameState(this: any, state: any) {
     const data = fastClone(state)
+
+    // 【修复】消息内联快照会主动剥离静态字段（npcRelationships/allClassData/allClubs）。
+    // 这些字段缺失不应被视为损坏并自愈为默认空对象，否则会导致显示与关系数据被覆盖清空。
+    if (data.world && typeof data.world === 'object') {
+      const staticObjectFields = ['npcRelationships', 'allClassData', 'allClubs']
+      for (const field of staticObjectFields) {
+        if (data.world[field] === undefined && this.world?.[field] && typeof this.world[field] === 'object') {
+          data.world[field] = fastClone(this.world[field])
+        }
+      }
+    }
 
     // 【修复】如果内联快照中 summaries/persistentFacts 被剥离（空数组），
     // 保留当前 store 中的数据（这些累积数据在 gameState 存档中独立维护）

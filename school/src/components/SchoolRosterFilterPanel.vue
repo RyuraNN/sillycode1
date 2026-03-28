@@ -333,7 +333,8 @@ const loadRelationshipsFromSnapshot = async (snapshotId) => {
   isLoadingSnapshot.value = true
   try {
     const details = await getSnapshotData(snapshotId)
-    if (!details?.gameState?.npcRelationships) {
+    const snapshotRelationships = resolveSnapshotRelationships(details)
+    if (!snapshotRelationships) {
       alert('该存档中没有关系数据')
       return
     }
@@ -341,7 +342,7 @@ const loadRelationshipsFromSnapshot = async (snapshotId) => {
       runtimeRelBackup.value = JSON.parse(JSON.stringify(gameStore.world.npcRelationships))
     }
     snapshotRelData.value = details
-    gameStore.world.npcRelationships = JSON.parse(JSON.stringify(details.gameState.npcRelationships))
+    gameStore.world.npcRelationships = JSON.parse(JSON.stringify(snapshotRelationships))
     snapshotRelSource.value = snapshotId
     showMessage('已加载存档关系数据，编辑后点击「保存到存档」回写')
   } catch (e) {
@@ -359,7 +360,19 @@ const saveRelationshipsToSnapshot = async () => {
   try {
     const relationships = cloneRelationships()
     const updatedData = JSON.parse(JSON.stringify(snapshotRelData.value))
-    updatedData.gameState.npcRelationships = relationships
+    if (!updatedData.gameState || typeof updatedData.gameState !== 'object') {
+      updatedData.gameState = {}
+    }
+
+    if (!updatedData.gameState.world || typeof updatedData.gameState.world !== 'object') {
+      updatedData.gameState.world = {}
+    }
+    updatedData.gameState.world.npcRelationships = relationships
+
+    // 兼容旧版扁平结构：如果原快照存在旧路径，同步写入以避免混合结构工具读取异常
+    if (updatedData.gameState.npcRelationships !== undefined) {
+      updatedData.gameState.npcRelationships = relationships
+    }
 
     await saveSnapshotData(sid, updatedData)
     console.log('[RelEditor] Saved snapshot relationships (final gameState only).')
@@ -374,6 +387,16 @@ const saveRelationshipsToSnapshot = async () => {
 const discardSnapshotEdit = async () => {
   await restoreRuntimeRelationships()
   showMessage('已恢复为当前运行时数据')
+}
+
+const resolveSnapshotRelationships = (details) => {
+  const worldRel = details?.gameState?.world?.npcRelationships
+  if (worldRel && typeof worldRel === 'object') return worldRel
+
+  const legacyRel = details?.gameState?.npcRelationships
+  if (legacyRel && typeof legacyRel === 'object') return legacyRel
+
+  return null
 }
 
 // 关闭面板时的安全检查

@@ -15,6 +15,44 @@ const gameStore = useGameStore()
 
 const selectedCharName = ref(null)
 
+// 构建名册白名单。
+// 正常情况下以 allClassData 为准；当班级数据暂时缺失时，回退到 npcs/npcRelationships，避免显示层误判为空。
+const buildRosterNames = (includePlayerAliases = true) => {
+    const names = new Set()
+    names.add(gameStore.player.name)
+    if (includePlayerAliases) {
+        names.add('Player')
+        names.add('玩家')
+    }
+
+    let hasClassRoster = false
+    for (const classInfo of Object.values(gameStore.world.allClassData || {})) {
+        if (classInfo.headTeacher?.name) {
+            names.add(classInfo.headTeacher.name)
+            hasClassRoster = true
+        }
+        if (Array.isArray(classInfo.teachers) && classInfo.teachers.length > 0) {
+            classInfo.teachers.forEach(t => { if (t.name) names.add(t.name) })
+            hasClassRoster = true
+        }
+        if (Array.isArray(classInfo.students) && classInfo.students.length > 0) {
+            classInfo.students.forEach(s => { if (s.name) names.add(s.name) })
+            hasClassRoster = true
+        }
+    }
+
+    if (!hasClassRoster) {
+        for (const npc of gameStore.world.npcs || []) {
+            if (npc?.name) names.add(npc.name)
+        }
+        for (const name of Object.keys(gameStore.world.npcRelationships || {})) {
+            if (name) names.add(name)
+        }
+    }
+
+    return { names, hasClassRoster }
+}
+
 // 辅助函数：获取角色的完整关系数据 (合并 Store 和 Default，并过滤被排除的角色)
 const getCharRelations = (charName) => {
     const storeData = gameStore.world.npcRelationships[charName]?.relations || {}
@@ -23,24 +61,7 @@ const getCharRelations = (charName) => {
     // 合并关系数据，Store 优先
     const merged = { ...defaultData, ...storeData }
     
-    // 关键修复：从 allClassData 构建实际名册白名单
-    // 确保只有当前名册中存在的角色才会出现在关系图中
-    // 这比使用 npcRelationships 的 keys 更可靠，因为 npcRelationships 可能包含残留数据
-    const rosterNames = new Set()
-    rosterNames.add(gameStore.player.name)
-    // 也添加 "Player" 和 "玩家" 作为玩家的别名
-    rosterNames.add('Player')
-    rosterNames.add('玩家')
-    
-    for (const classInfo of Object.values(gameStore.world.allClassData || {})) {
-        if (classInfo.headTeacher?.name) rosterNames.add(classInfo.headTeacher.name)
-        if (Array.isArray(classInfo.teachers)) {
-            classInfo.teachers.forEach(t => { if (t.name) rosterNames.add(t.name) })
-        }
-        if (Array.isArray(classInfo.students)) {
-            classInfo.students.forEach(s => { if (s.name) rosterNames.add(s.name) })
-        }
-    }
+    const { names: rosterNames } = buildRosterNames(true)
     
     const filtered = {}
     for (const [targetName, relation] of Object.entries(merged)) {
@@ -57,7 +78,13 @@ const hasPlayerRelation = (charName) => {
     const playerName = gameStore.player.name
     
     // 检查是否存在玩家相关的条目 (玩家自定义名、"Player"、"玩家")
-    return !!(relations[playerName] || relations['Player'] || relations['玩家'])
+    if (relations[playerName] || relations['Player'] || relations['玩家']) {
+        return true
+    }
+
+    // 班级名册未就绪时，避免把已有关系的角色误判为“无关系”导致列表全空
+    const { hasClassRoster } = buildRosterNames(false)
+    return !hasClassRoster && Object.keys(relations).length > 0
 }
 
 // 角色列表数据 (仅显示与玩家有关系的角色)
@@ -197,14 +224,7 @@ const MAX_VELOCITY = 8
 
 // 构建名册白名单
 const getRosterNames = () => {
-    const names = new Set()
-    names.add(gameStore.player.name)
-    for (const classInfo of Object.values(gameStore.world.allClassData || {})) {
-        if (classInfo.headTeacher?.name) names.add(classInfo.headTeacher.name)
-        if (Array.isArray(classInfo.teachers)) classInfo.teachers.forEach(t => { if (t.name) names.add(t.name) })
-        if (Array.isArray(classInfo.students)) classInfo.students.forEach(s => { if (s.name) names.add(s.name) })
-    }
-    return names
+    return buildRosterNames(false).names
 }
 
 // 初始化焦点关系网络数据（星形拓扑）
@@ -792,18 +812,10 @@ const editForm = ref({
 // 获取所有可选角色（排除当前角色自己）
 const availableCharacters = computed(() => {
   if (!currentChar.value) return []
-  const names = new Set()
-  names.add(gameStore.player.name)
-  for (const classInfo of Object.values(gameStore.world.allClassData || {})) {
-    if (classInfo.headTeacher?.name) names.add(classInfo.headTeacher.name)
-    if (Array.isArray(classInfo.teachers)) {
-      classInfo.teachers.forEach(t => { if (t.name) names.add(t.name) })
-    }
-    if (Array.isArray(classInfo.students)) {
-      classInfo.students.forEach(s => { if (s.name) names.add(s.name) })
-    }
-  }
-  return [...names].filter(n => n !== currentChar.value.name)
+  const names = buildRosterNames(false).names
+  return [...names]
+    .filter(n => n !== currentChar.value.name)
+    .sort((a, b) => a.localeCompare(b, 'zh'))
 })
 
 // 打开编辑模态框（编辑现有关系）
