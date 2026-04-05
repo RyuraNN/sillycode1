@@ -29,6 +29,7 @@ function escapeInlineScriptPlugin() {
     async closeBundle() {
       const fs = await import('fs')
       const path = await import('path')
+      const zlib = await import('zlib')
 
       const htmlPath = path.resolve('dist/index.html')
 
@@ -39,7 +40,7 @@ function escapeInlineScriptPlugin() {
 
       let html = fs.readFileSync(htmlPath, 'utf-8')
 
-      // 在 base64 编码前保存一份压缩但未编码的 raw 版本
+      // 在编码前保存一份 raw 版本
       const rawPath = path.resolve('dist/index.raw.html')
       fs.writeFileSync(rawPath, html, 'utf-8')
       console.log(`[escape-inline-script] Saved pre-encoding copy to index.raw.html`)
@@ -47,20 +48,36 @@ function escapeInlineScriptPlugin() {
       html = html.replace(
         /(<script\b[^>]*>)([\s\S]*?)(<\/script>)/gi,
         (match, openTag, body, closeTag) => {
-          // 将 JS 代码转为 base64
-          const b64 = Buffer.from(body, 'utf-8').toString('base64')
+          // 1. deflate-raw 压缩（最高压缩级别）
+          const compressed = zlib.deflateRawSync(Buffer.from(body, 'utf-8'), { level: 9 })
+          // 2. base64 编码，HTML 解析器只看到纯 ASCII 字母数字，不会有 HTML 标签
+          const b64 = compressed.toString('base64')
 
-          // bootstrap 脚本：解码 base64 并通过 Blob + import() 执行 ES module
-          // 注意：这段 bootstrap 代码本身不能包含任何 < 字符
-          // 用 _bin.length>_i 代替 _i<_bin.length 来避免 < 出现
+          // bootstrap 脚本：base64 解码 → DecompressionStream inflate → Blob + import() 执行
+          // 约束：不能出现任何 "<字母" 序列（会被 srcdoc HTML 解析器截断）
+          // 用 _bin.length>_i 代替 _i<_bin.length 来规避 <
           const bootstrap = [
             `var _b64="${b64}";`,
             'var _bin=atob(_b64);',
             'var _bytes=new Uint8Array(_bin.length);',
             'for(var _i=0;_bin.length>_i;_i++)_bytes[_i]=_bin.charCodeAt(_i);',
-            'var _blob=new Blob([_bytes],{type:"text/javascript"});',
+            'var _ds=new DecompressionStream("deflate-raw");',
+            'var _w=_ds.writable.getWriter();',
+            'var _r=_ds.readable.getReader();',
+            '_w.write(_bytes);_w.close();',
+            'var _chunks=[];',
+            '(function _read(){_r.read().then(function(_d){',
+            'if(_d.done){',
+            'var _len=_chunks.reduce(function(a,b){return a+b.length},0);',
+            'var _all=new Uint8Array(_len);',
+            'var _off=0;',
+            '_chunks.forEach(function(c){_all.set(c,_off);_off+=c.length});',
+            'var _js=new TextDecoder().decode(_all);',
+            'var _blob=new Blob([_js],{type:"text/javascript"});',
             'var _url=URL.createObjectURL(_blob);',
-            'import(_url).finally(function(){URL.revokeObjectURL(_url)});'
+            'import(_url).finally(function(){URL.revokeObjectURL(_url)});',
+            '}else{_chunks.push(_d.value);_read();}',
+            '})})();',
           ].join('')
 
           // 将 type="module" 改为普通 script（import() 本身会以 module 方式执行）
@@ -79,21 +96,20 @@ function escapeInlineScriptPlugin() {
       const sEnd = result.indexOf('</script>')
       const sBody = result.substring(sTagEnd, sEnd)
 
-      // 检查 bootstrap 部分（base64 之外）是否有 HTML 标签
-      const bootstrapPart = sBody.substring(0, sBody.indexOf('"') + 1) + '...' + sBody.substring(sBody.lastIndexOf('"'))
       let hasHtmlTag = false
-      const nonB64 = sBody.replace(/"[A-Za-z0-9+/=]+"/, '""') // 去掉 base64 内容
+      const nonB64 = sBody.replace(/"[A-Za-z0-9+/=]+"/, '""') // 去掉 base64 内容后检查
       for (let i = 0; i < nonB64.length - 1; i++) {
         const cc = nonB64.charCodeAt(i)
         const nc = nonB64.charCodeAt(i + 1)
         if (cc === 60 && ((nc >= 65 && nc <= 90) || (nc >= 97 && nc <= 122))) {
           hasHtmlTag = true
-          console.warn(`[escape-inline-script] WARNING: found <tag at pos ${i}: ${nonB64.substring(i, i + 20)}`)
+          console.warn(`[escape-inline-script] WARNING: found HTML tag pattern at pos ${i}: ${nonB64.substring(i, i + 20)}`)
         }
       }
 
+      const rawSize = (Buffer.byteLength(html, 'utf-8') / 1024).toFixed(0)
       const b64Size = (sBody.length / 1024).toFixed(0)
-      console.log(`[escape-inline-script] JS encoded to base64 (${b64Size} KB). HTML-safe: ${!hasHtmlTag}`)
+      console.log(`[escape-inline-script] JS deflate+base64 (${b64Size} KB payload, ${rawSize} KB total HTML). HTML-safe: ${!hasHtmlTag}`)
     }
   }
 }

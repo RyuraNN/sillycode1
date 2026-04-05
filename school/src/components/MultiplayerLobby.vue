@@ -89,7 +89,10 @@ function normalizeDiffValue(value) {
 }
 
 function entryDiffKey(entry, index) {
-  return String(entry?.uid || entry?.id || entry?.name || `#${index}`)
+  if (entry?.uid != null) return `uid:${entry.uid}`
+  if (entry?.id != null) return `id:${entry.id}`
+  if (entry?.name) return `name:${entry.name}`
+  return `#${index}`
 }
 
 function entryDiffPreview(entry) {
@@ -1497,14 +1500,14 @@ function formatTime(ts) {
                 </div>
 
                 <button class="wb-diff-expand-btn" @click="toggleDiffDetail(diff.id)">
-                  {{ wbExpandedDiffId === diff.id ? '收起逐行 Diff' : '展开逐行 Diff（GitHub/IDE 风格）' }}
+                  {{ wbExpandedDiffId === diff.id ? '收起详细对比' : '展开详细对比' }}
                 </button>
 
                 <div v-if="wbExpandedDiffId === diff.id" class="wb-line-diff-wrap">
                   <div class="wb-line-diff-toolbar">
                     <label class="wb-line-diff-toggle">
                       <input type="checkbox" v-model="wbHideContextRows" />
-                      <span>仅看变更块（隐藏 context）</span>
+                      <span>仅显示差异行</span>
                     </label>
                   </div>
                   <div class="wb-line-diff-scroll" role="region" aria-label="逐行 diff">
