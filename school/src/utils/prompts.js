@@ -1871,7 +1871,7 @@ export const buildSystemInjection = (gameState) => {
     role: 'system',
     content: buildSystemPromptContent(gameState),
     position: 'in_chat', // 插入到聊天中
-    depth: 1, // 深度 0 表示插入到最新消息附近 (具体取决于 ST 设置，通常 0 是最底部或顶部，视实现而定，这里假设我们需要它生效)
+    depth: 0, // 深度 0 表示插入到最新消息附近 (具体取决于 ST 设置，通常 0 是最底部或顶部，视实现而定，这里假设我们需要它生效)
     // 根据 generate.d.ts，generate 函数的 injects 不需要 id
     should_scan: true // 允许触发世界书
   }
