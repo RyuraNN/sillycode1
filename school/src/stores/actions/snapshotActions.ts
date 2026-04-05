@@ -48,6 +48,7 @@ function findSnapshotMeta(store: any, snapshotId: string): SaveSnapshot | null {
 function buildRecoveredSnapshotMeta(snapshotId: string, details: any): SaveSnapshot {
   const gs = details?.gameState || {}
   const roomId = gs?.meta?.roomId || gs?.roomId
+  const runId = gs?.meta?.currentRunId || gs?.currentRunId || details?.runId || (snapshotId.startsWith('autosave_') ? snapshotId.replace('autosave_', '') : undefined)
   const timestampNum = Number(snapshotId)
   const snapshot: SaveSnapshot = {
     id: snapshotId,
@@ -73,6 +74,7 @@ function buildRecoveredSnapshotMeta(snapshotId: string, details: any): SaveSnaps
   const location = gs?.player?.location || gs?.location
   if (location) snapshot.location = location
   if (roomId) snapshot.roomId = roomId
+  if (typeof runId === 'string' && runId.length > 0) snapshot.runId = runId
 
   return snapshot
 }
@@ -93,6 +95,29 @@ function inferSnapshotSaveMode(snapshot: Partial<SaveSnapshot> | null | undefine
   if (snapshot.saveMode === 'multiplayer') return 'multiplayer'
   if (typeof snapshot.roomId === 'string' && snapshot.roomId.length > 0) return 'multiplayer'
   return 'single'
+}
+
+function inferSnapshotRunId(snapshot: Partial<SaveSnapshot> | null | undefined, gameState?: any): string | null {
+  const snapshotRunId = snapshot?.runId
+  if (typeof snapshotRunId === 'string' && snapshotRunId.length > 0) return snapshotRunId
+
+  const gs = gameState || snapshot?.gameState
+  const gameStateRunId = gs?.meta?.currentRunId || gs?.currentRunId
+  if (typeof gameStateRunId === 'string' && gameStateRunId.length > 0) return gameStateRunId
+
+  if (typeof snapshot?.id === 'string' && snapshot.id.startsWith('autosave_')) {
+    return snapshot.id.replace('autosave_', '')
+  }
+
+  return null
+}
+
+function normalizeChatLog(chatLog: any): ChatLogEntry[] {
+  return Array.isArray(chatLog) ? chatLog : []
+}
+
+function hasUsableChatLog(chatLog: any): chatLog is ChatLogEntry[] {
+  return Array.isArray(chatLog) && chatLog.length > 0
 }
 
 function canRestoreMultiplayerSnapshot() {
@@ -384,6 +409,7 @@ export const snapshotActions = {
       timestamp: Date.now(),
       label: label || `存档 ${this._ui.saveSnapshots.length + 1}`,
       messageIndex,
+      runId: this.meta.currentRunId,
       gameTime: {
         year: this.world.gameTime.year,
         month: this.world.gameTime.month,
@@ -468,6 +494,7 @@ export const snapshotActions = {
         timestamp: Date.now(),
         label: mpCtx.isMultiplayer ? `联机自动存档 (${this.player.name})` : `自动存档 (${this.player.name})`,
         messageIndex,
+        runId: this.meta.currentRunId,
         gameTime: {
           year: this.world.gameTime.year,
           month: this.world.gameTime.month,
@@ -515,8 +542,12 @@ export const snapshotActions = {
   async loadSnapshotDetails(this: any, snapshotId: string) {
     let snapshot = findSnapshotMeta(this, snapshotId)
 
-    if (snapshot?.chatLog && snapshot?.gameState) {
-      return snapshot
+    if (snapshot?.gameState && Array.isArray(snapshot?.chatLog)) {
+      return {
+        ...snapshot,
+        runId: inferSnapshotRunId(snapshot, snapshot.gameState) || undefined,
+        chatLog: normalizeChatLog(snapshot.chatLog)
+      }
     }
 
     const details = await getSnapshotData(snapshotId)
@@ -526,30 +557,27 @@ export const snapshotActions = {
     if (!snapshot) return null
 
     // Phase 1.1: 优先从共享 chatLog 池加载
-    let chatLog = details?.chatLog
-    if (!chatLog) {
-      // Phase 2: runId 可能在 meta 或旧格式的顶层
-      const gs = details?.gameState
-      const runId = gs?.meta?.currentRunId || gs?.currentRunId || this.meta.currentRunId
-      if (runId) {
+    let chatLog = Array.isArray(details?.chatLog) ? details.chatLog : null
+    const runId = inferSnapshotRunId(snapshot, details?.gameState)
+    if (!hasUsableChatLog(chatLog) && runId) {
         const sharedLog = await loadSharedChatLog(runId)
         if (sharedLog && sharedLog.length > 0) {
           const sliceEnd = (snapshot.messageIndex ?? sharedLog.length - 1) + 1
           chatLog = sharedLog.slice(0, sliceEnd)
         }
-      }
     }
 
     // 回退：旧格式的 per-snapshot 分片存储
-    if (!chatLog) {
+    if (!hasUsableChatLog(chatLog)) {
       chatLog = await loadChunkedChatLog(snapshotId)
     }
 
-    if (details || chatLog) {
+    if (details || Array.isArray(chatLog)) {
       return {
         ...snapshot,
         gameState: details?.gameState,
-        chatLog
+        runId: runId || snapshot.runId,
+        chatLog: normalizeChatLog(chatLog)
       }
     }
     return null
@@ -600,35 +628,28 @@ export const snapshotActions = {
     }
 
     // Phase 1.1: 优先从共享 chatLog 池加载，回退到旧的 per-snapshot 存储
-    if (!fullSnapshot.chatLog) {
-      // Phase 2: runId 可能在 meta 或旧格式的顶层
-      const gs = fullSnapshot.gameState
-      const runId = gs?.meta?.currentRunId || gs?.currentRunId || this.meta.currentRunId
-      let chatLog = null
+    const resolvedRunId = inferSnapshotRunId(fullSnapshot, fullSnapshot.gameState)
+    let resolvedChatLog = Array.isArray((fullSnapshot as any).chatLog) ? (fullSnapshot as any).chatLog : null
 
-      // 1. 尝试共享 chatLog 池
-      if (runId) {
-        chatLog = await loadSharedChatLog(runId)
-        if (chatLog && chatLog.length > 0) {
-          // 截取到存档时的 messageIndex（包含该条）
-          const sliceEnd = (fullSnapshot.messageIndex ?? chatLog.length - 1) + 1
-          chatLog = chatLog.slice(0, sliceEnd)
-        }
-      }
-
-      // 2. 回退：旧格式的 per-snapshot 分片存储
-      if (!chatLog || chatLog.length === 0) {
-        chatLog = await loadChunkedChatLog(snapshotId)
-      }
-
-      if (chatLog && chatLog.length > 0) {
-        fullSnapshot = { ...fullSnapshot, chatLog }
+    // 1. 尝试共享 chatLog 池
+    if (!hasUsableChatLog(resolvedChatLog) && resolvedRunId) {
+      resolvedChatLog = await loadSharedChatLog(resolvedRunId)
+      if (hasUsableChatLog(resolvedChatLog)) {
+        const sliceEnd = (fullSnapshot.messageIndex ?? resolvedChatLog.length - 1) + 1
+        resolvedChatLog = resolvedChatLog.slice(0, sliceEnd)
       }
     }
 
+    // 2. 回退：旧格式的 per-snapshot 分片存储
+    if (!hasUsableChatLog(resolvedChatLog)) {
+      resolvedChatLog = await loadChunkedChatLog(snapshotId)
+    }
+
     // 兜底：chatLog 统一归一化，避免后续 restore 传递时出现 undefined
-    if (!Array.isArray((fullSnapshot as any).chatLog)) {
-      fullSnapshot = { ...fullSnapshot, chatLog: [] }
+    fullSnapshot = {
+      ...fullSnapshot,
+      runId: resolvedRunId || fullSnapshot.runId,
+      chatLog: normalizeChatLog(resolvedChatLog)
     }
 
     // Phase 2: 使用 applyGameStateToStore 统一恢复逻辑（自动处理 v3→v4 迁移）

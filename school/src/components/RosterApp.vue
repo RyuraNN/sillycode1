@@ -1,11 +1,11 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onUnmounted, watch, nextTick } from 'vue'
 import { useGameStore } from '../stores/gameStore'
-import { calculateRelationshipScore, getEmotionalState, RELATIONSHIP_AXES, DEFAULT_RELATIONSHIPS, RELATIONSHIP_GROUPS } from '../data/relationshipData'
+import { calculateRelationshipScore, getEmotionalState, DEFAULT_RELATIONSHIPS, RELATIONSHIP_GROUPS } from '../data/relationshipData'
 import { findNpcLocation } from '../utils/npcScheduleSystem'
 import { getItem } from '../data/mapData'
 import RelationshipEditModal from './RelationshipEditModal.vue'
-import { setRelationship, removeRelationship } from '../utils/relationshipManager'
+import { setRelationship } from '../utils/relationshipManager'
 
 const props = defineProps({
   readOnly: { type: Boolean, default: false }
@@ -15,11 +15,28 @@ const gameStore = useGameStore()
 
 const selectedCharName = ref(null)
 
+const normalizeRosterName = (value) => {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+const getSafeRosterName = (value, fallback = '未知') => {
+  return normalizeRosterName(value) || fallback
+}
+
+const getRosterInitial = (value) => {
+  return getSafeRosterName(value).charAt(0)
+}
+
+const isRosterRecord = (value) => {
+  return !!value && typeof value === 'object'
+}
+
 // 构建名册白名单。
 // 正常情况下以 allClassData 为准；当班级数据暂时缺失时，回退到 npcs/npcRelationships，避免显示层误判为空。
-const buildRosterNames = (includePlayerAliases = true) => {
+const computeRosterContext = (includePlayerAliases = true) => {
     const names = new Set()
-    names.add(gameStore.player.name)
+    const playerName = getSafeRosterName(gameStore.player.name, 'Player')
+    names.add(playerName)
     if (includePlayerAliases) {
         names.add('Player')
         names.add('玩家')
@@ -27,46 +44,68 @@ const buildRosterNames = (includePlayerAliases = true) => {
 
     let hasClassRoster = false
     for (const classInfo of Object.values(gameStore.world.allClassData || {})) {
+        if (!isRosterRecord(classInfo)) continue
         if (classInfo.headTeacher?.name) {
-            names.add(classInfo.headTeacher.name)
+            names.add(getSafeRosterName(classInfo.headTeacher.name))
             hasClassRoster = true
         }
         if (Array.isArray(classInfo.teachers) && classInfo.teachers.length > 0) {
-            classInfo.teachers.forEach(t => { if (t.name) names.add(t.name) })
+            classInfo.teachers.forEach(t => {
+                const teacherName = normalizeRosterName(t?.name)
+                if (teacherName) names.add(teacherName)
+            })
             hasClassRoster = true
         }
         if (Array.isArray(classInfo.students) && classInfo.students.length > 0) {
-            classInfo.students.forEach(s => { if (s.name) names.add(s.name) })
+            classInfo.students.forEach(s => {
+                const studentName = normalizeRosterName(s?.name)
+                if (studentName) names.add(studentName)
+            })
             hasClassRoster = true
         }
     }
 
     if (!hasClassRoster) {
         for (const npc of gameStore.world.npcs || []) {
-            if (npc?.name) names.add(npc.name)
+            const npcName = normalizeRosterName(npc?.name)
+            if (npcName) names.add(npcName)
         }
         for (const name of Object.keys(gameStore.world.npcRelationships || {})) {
-            if (name) names.add(name)
+            const normalizedName = normalizeRosterName(name)
+            if (normalizedName) names.add(normalizedName)
         }
     }
 
     return { names, hasClassRoster }
 }
 
+const rosterContextWithAliases = computed(() => computeRosterContext(true))
+const rosterContextWithoutAliases = computed(() => computeRosterContext(false))
+
+const buildRosterNames = (includePlayerAliases = true) => {
+    return includePlayerAliases ? rosterContextWithAliases.value : rosterContextWithoutAliases.value
+}
+
+const rosterNamesWithAliases = computed(() => rosterContextWithAliases.value.names)
+const rosterNamesWithoutAliases = computed(() => rosterContextWithoutAliases.value.names)
+
 // 辅助函数：获取角色的完整关系数据 (合并 Store 和 Default，并过滤被排除的角色)
-const getCharRelations = (charName) => {
-    const storeData = gameStore.world.npcRelationships[charName]?.relations || {}
-    const defaultData = DEFAULT_RELATIONSHIPS[charName] || {}
+const getCharRelations = (charName, rosterNames = rosterNamesWithAliases.value) => {
+    const normalizedCharName = normalizeRosterName(charName)
+    if (!normalizedCharName) return {}
+
+    const relationshipState = gameStore.world.npcRelationships || {}
+    const storeData = relationshipState[normalizedCharName]?.relations || {}
+    const defaultData = DEFAULT_RELATIONSHIPS[normalizedCharName] || {}
     
     // 合并关系数据，Store 优先
     const merged = { ...defaultData, ...storeData }
-    
-    const { names: rosterNames } = buildRosterNames(true)
-    
+
     const filtered = {}
     for (const [targetName, relation] of Object.entries(merged)) {
-        if (rosterNames.has(targetName)) {
-            filtered[targetName] = relation
+        const normalizedTargetName = normalizeRosterName(targetName)
+        if (normalizedTargetName && rosterNames.has(normalizedTargetName)) {
+            filtered[normalizedTargetName] = relation
         }
     }
     return filtered
@@ -75,7 +114,7 @@ const getCharRelations = (charName) => {
 // 辅助函数：检查是否与玩家有关系
 const hasPlayerRelation = (charName) => {
     const relations = getCharRelations(charName)
-    const playerName = gameStore.player.name
+    const playerName = getSafeRosterName(gameStore.player.name, 'Player')
     
     // 检查是否存在玩家相关的条目 (玩家自定义名、"Player"、"玩家")
     if (relations[playerName] || relations['Player'] || relations['玩家']) {
@@ -87,37 +126,46 @@ const hasPlayerRelation = (charName) => {
     return !hasClassRoster && Object.keys(relations).length > 0
 }
 
+const validRosterNpcs = computed(() => {
+  const source = Array.isArray(gameStore.world.npcs) ? gameStore.world.npcs : []
+  return source.filter(npc => isRosterRecord(npc) && normalizeRosterName(npc.name))
+})
+
 // 角色列表数据 (仅显示与玩家有关系的角色)
 const charList = computed(() => {
   // 先按 name 去重（保留第一个出现的），防止底层数据有重复 NPC
   const seen = new Set()
-  const uniqueNpcs = gameStore.world.npcs.filter(npc => {
-    if (seen.has(npc.name)) return false
-    seen.add(npc.name)
+  const relationshipState = gameStore.world.npcRelationships || {}
+  const uniqueNpcs = validRosterNpcs.value.filter(npc => {
+    const npcName = normalizeRosterName(npc.name)
+    if (!npcName || seen.has(npcName)) return false
+    seen.add(npcName)
     return true
   })
   
   return uniqueNpcs
     .filter(npc => hasPlayerRelation(npc.name))
     .map(npc => {
+        const npcName = getSafeRosterName(npc.name)
         // 尝试获取更多详细信息
-        const fullData = gameStore.world.npcRelationships[npc.name] || {}
+        const fullData = relationshipState[npcName] || {}
         
         // 获取与玩家的关系数据
-        const relations = getCharRelations(npc.name)
-        const playerRel = relations[gameStore.player.name] || relations['Player'] || relations['玩家']
+        const relations = getCharRelations(npcName)
+        const playerName = getSafeRosterName(gameStore.player.name, 'Player')
+        const playerRel = relations[playerName] || relations['Player'] || relations['玩家']
         
         // 实时计算
         const score = calculateRelationshipScore(playerRel)
         
         // Pass genders
         const playerGender = gameStore.player.gender || 'male'
-        const npcGender = gameStore.world.npcRelationships[npc.name]?.gender || npc.gender || 'female'
+        const npcGender = relationshipState[npcName]?.gender || npc.gender || 'female'
         
         const emotion = getEmotionalState(playerRel, playerGender, npcGender)
         
         // 获取实时位置和心情
-        const locationId = findNpcLocation(npc.id, gameStore)
+        const locationId = npc.id ? findNpcLocation(npc.id, gameStore) : null
         const locationItem = locationId ? getItem(locationId) : null
         const locationName = locationItem ? locationItem.name : '未知'
         
@@ -136,6 +184,9 @@ const charList = computed(() => {
 
         return {
           ...npc,
+          id: npc.id || npcName,
+          name: npcName,
+          _rosterKey: `${npc.id || npcName}_${npcName}`,
           fullData,
           calculatedScore: score,
           emotionalState: emotion,
@@ -156,6 +207,7 @@ const currentChar = computed(() => {
 })
 
 const selectChar = (char) => {
+  if (!char?.name) return
   selectedCharName.value = char.name
 }
 
@@ -200,6 +252,10 @@ let netCtx = null
 let netAnimId = null
 let netNodes = []    // { id, name, x, y, vx, vy, pinned, color, isPlayer }
 let netEdges = []    // { source, target, color, width, sourceIdx, targetIdx }
+let simulationActive = false
+let stableFrameCount = 0
+let rebuildQueued = false
+let queuedRestartLayout = false
 
 // 交互状态
 let dragNode = null
@@ -221,22 +277,49 @@ const SPRING_LEN = 200
 const DAMPING = 0.85
 const CENTER_GRAVITY = 0.003
 const MAX_VELOCITY = 8
+const STABLE_SPEED_THRESHOLD = 0.05
+const STABLE_FRAME_TARGET = 12
 
 // 构建名册白名单
 const getRosterNames = () => {
-    return buildRosterNames(false).names
+    return rosterNamesWithoutAliases.value
+}
+
+const stopNetworkLoop = () => {
+    if (netAnimId) {
+        cancelAnimationFrame(netAnimId)
+        netAnimId = null
+    }
+    simulationActive = false
+    stableFrameCount = 0
+}
+
+const requestNetworkDraw = (withSimulation = false) => {
+    if (withSimulation) simulationActive = true
+    if (netAnimId) return
+    netAnimId = requestAnimationFrame(drawNetwork)
 }
 
 // 初始化焦点关系网络数据（星形拓扑）
 const initNetworkData = () => {
     netNodes = []
     netEdges = []
-    const playerName = gameStore.player.name
+    const playerName = getSafeRosterName(gameStore.player.name, 'Player')
     const focusName = selectedCharName.value || playerName
     const playerGender = gameStore.player.gender || 'male'
+    const relationshipState = gameStore.world.npcRelationships || {}
+    const relationCache = new Map()
+    const getRelationsCached = (name) => {
+        const normalizedName = normalizeRosterName(name)
+        if (!normalizedName) return {}
+        if (!relationCache.has(normalizedName)) {
+            relationCache.set(normalizedName, getCharRelations(normalizedName, rosterNamesWithAliases.value))
+        }
+        return relationCache.get(normalizedName)
+    }
 
     // 收集与焦点角色有直接关系的角色（正向查找）
-    const focusRelations = getCharRelations(focusName)
+    const focusRelations = getRelationsCached(focusName)
     const connectedNames = new Set()
     for (const [targetName, relData] of Object.entries(focusRelations)) {
         if (!relData) continue
@@ -249,7 +332,7 @@ const initNetworkData = () => {
     const rosterNames = getRosterNames()
     for (const name of rosterNames) {
         if (name === focusName) continue
-        const rels = getCharRelations(name)
+        const rels = getRelationsCached(name)
         const relToFocus = rels[focusName]
         if (!relToFocus) continue
         const { intimacy = 0, trust = 0, passion = 0, hostility = 0 } = relToFocus
@@ -258,13 +341,13 @@ const initNetworkData = () => {
     }
 
     // 过滤只保留名册中的角色，排除焦点自身
-    const neighbors = [...connectedNames].filter(n => rosterNames.has(n) && n !== focusName)
+    const neighbors = [...connectedNames].filter(n => n && rosterNames.has(n) && n !== focusName)
     if (neighbors.length === 0) return
 
     const nameToIdx = {}
 
     // 焦点节点固定在中心
-    const focusRel = getCharRelations(playerName)[focusName] || getCharRelations(focusName)[playerName]
+    const focusRel = getRelationsCached(playerName)[focusName] || getRelationsCached(focusName)[playerName]
     nameToIdx[focusName] = 0
     netNodes.push({
         id: focusName, name: focusName,
@@ -281,9 +364,9 @@ const initNetworkData = () => {
     neighbors.forEach((name, i) => {
         const angle = (2 * Math.PI * i) / count
         const r = SPRING_LEN * 1.2
-        const rel = focusRelations[name] || getCharRelations(name)[focusName]
+        const rel = focusRelations[name] || getRelationsCached(name)[focusName]
         const score = rel ? calculateRelationshipScore(rel) : 0
-        const npcGender = gameStore.world.npcRelationships[name]?.gender || 'unknown'
+        const npcGender = relationshipState[name]?.gender || 'unknown'
         const emotionText = rel ? getEmotionalState(rel, playerGender, npcGender).text : '陌生'
         const nodeRadius = Math.max(20, name.length * 7)
 
@@ -303,7 +386,7 @@ const initNetworkData = () => {
         const si = nameToIdx[focusName]
         const ti = nameToIdx[name]
         if (si === undefined || ti === undefined) continue
-        const rel = focusRelations[name] || getCharRelations(name)[focusName]
+        const rel = focusRelations[name] || getRelationsCached(name)[focusName]
         const style = getEdgeStyle(rel)
         netEdges.push({
             source: focusName, target: name,
@@ -318,7 +401,7 @@ const initNetworkData = () => {
     for (let i = 0; i < neighbors.length; i++) {
         for (let j = i + 1; j < neighbors.length; j++) {
             const nameA = neighbors[i], nameB = neighbors[j]
-            const relAB = getCharRelations(nameA)[nameB] || getCharRelations(nameB)[nameA]
+            const relAB = getRelationsCached(nameA)[nameB] || getRelationsCached(nameB)[nameA]
             if (!relAB) continue
             const { intimacy = 0, trust = 0, passion = 0, hostility = 0 } = relAB
             if (intimacy === 0 && trust === 0 && passion === 0 && hostility === 0) continue
@@ -363,7 +446,8 @@ const getEdgeStyle = (rel) => {
 // 力导向物理模拟
 const simulateForces = () => {
     const n = netNodes.length
-    if (n === 0) return
+    if (n === 0) return 0
+    let maxSpeed = 0
 
     // 1. 节点间库仑斥力
     for (let i = 0; i < n; i++) {
@@ -410,6 +494,7 @@ const simulateForces = () => {
         node.vy *= DAMPING
         // 限速
         const speed = Math.sqrt(node.vx * node.vx + node.vy * node.vy)
+        maxSpeed = Math.max(maxSpeed, speed)
         if (speed > MAX_VELOCITY) {
             node.vx = (node.vx / speed) * MAX_VELOCITY
             node.vy = (node.vy / speed) * MAX_VELOCITY
@@ -417,6 +502,8 @@ const simulateForces = () => {
         node.x += node.vx
         node.y += node.vy
     }
+
+    return maxSpeed
 }
 
 // 初始化 Canvas
@@ -434,6 +521,7 @@ const initCanvas = () => {
 // 绘制网络图
 let _breathT = 0
 const drawNetwork = () => {
+    netAnimId = null
     if (!netCtx || !networkCanvasRef.value) return
     const width = networkCanvasRef.value.width / (window.devicePixelRatio || 1)
     const height = networkCanvasRef.value.height / (window.devicePixelRatio || 1)
@@ -442,7 +530,7 @@ const drawNetwork = () => {
     _breathT += 0.03
 
     // 物理模拟
-    simulateForces()
+    const maxSpeed = simulationActive ? simulateForces() : 0
 
     // 清除 + 浅色背景
     const gradient = netCtx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(width, height) / 2)
@@ -627,7 +715,23 @@ const drawNetwork = () => {
         }
     }
 
-    netAnimId = requestAnimationFrame(drawNetwork)
+    const isInteracting = isPanning || !!dragNode
+    if (simulationActive) {
+        if (maxSpeed < STABLE_SPEED_THRESHOLD) {
+            stableFrameCount += 1
+        } else {
+            stableFrameCount = 0
+        }
+
+        if (stableFrameCount >= STABLE_FRAME_TARGET) {
+            simulationActive = false
+            stableFrameCount = 0
+        }
+    }
+
+    if (simulationActive || isInteracting) {
+        requestNetworkDraw(simulationActive || isInteracting)
+    }
 }
 
 // 坐标转换：屏幕坐标 → 图坐标
@@ -682,6 +786,8 @@ const handleStart = (e) => {
         lastPanY = clientY
         isGrabbing.value = true
     }
+
+    requestNetworkDraw(true)
 }
 
 const handleMove = (e) => {
@@ -710,6 +816,7 @@ const handleMove = (e) => {
     }
 
     if (e.cancelable) e.preventDefault()
+    requestNetworkDraw(!!dragNode)
 }
 
 const handleEnd = (e) => {
@@ -740,6 +847,7 @@ const handleEnd = (e) => {
     }
     isPanning = false
     isGrabbing.value = false
+    requestNetworkDraw(true)
 }
 
 const handleWheel = (e) => {
@@ -754,47 +862,72 @@ const handleWheel = (e) => {
     panOffsetX -= mx * (delta - 1)
     panOffsetY -= my * (delta - 1)
     zoomScale = newZoom
+    requestNetworkDraw(false)
 }
 
 // 启动网络图
 const startNetwork = () => {
+    stopNetworkLoop()
     initNetworkData()
     initCanvas()
-    if (netAnimId) cancelAnimationFrame(netAnimId)
     // 重置视图
     panOffsetX = 0
     panOffsetY = 0
     zoomScale = 1
-    drawNetwork()
+    stableFrameCount = 0
+    requestNetworkDraw(true)
+}
+
+const queueNetworkRefresh = (restartLayout = false) => {
+    if (!selectedCharName.value) return
+    queuedRestartLayout = queuedRestartLayout || restartLayout
+    if (rebuildQueued) return
+
+    rebuildQueued = true
+    nextTick(() => {
+        nextTick(() => {
+            rebuildQueued = false
+            const shouldRestart = queuedRestartLayout
+            queuedRestartLayout = false
+            if (!selectedCharName.value) {
+                stopNetworkLoop()
+                return
+            }
+            if (shouldRestart) {
+                startNetwork()
+                return
+            }
+            initNetworkData()
+            stableFrameCount = 0
+            requestNetworkDraw(true)
+        })
+    })
 }
 
 // watch: 切换角色时重建图（焦点过滤）
-watch(selectedCharName, async (newVal) => {
-    if (!newVal) return
-    await nextTick()
-    await nextTick()
-    startNetwork()
+watch(selectedCharName, (newVal) => {
+    if (!newVal) {
+        stopNetworkLoop()
+        return
+    }
+    queueNetworkRefresh(true)
 })
 
 // watch: 数据变化时重建图
 watch(() => gameStore.world.npcRelationships, () => {
     if (selectedCharName.value) {
-        nextTick(() => {
-            initNetworkData()
-        })
+        queueNetworkRefresh(false)
     }
 }, { deep: true })
 
-watch(charList, () => {
+watch(() => charList.value.map(char => char._rosterKey).join('|'), () => {
     if (selectedCharName.value) {
-        nextTick(() => {
-            initNetworkData()
-        })
+        queueNetworkRefresh(false)
     }
-}, { deep: true })
+})
 
 onUnmounted(() => {
-    if (netAnimId) cancelAnimationFrame(netAnimId)
+    stopNetworkLoop()
 })
 
 // === 关系编辑功能 ===
@@ -812,7 +945,7 @@ const editForm = ref({
 // 获取所有可选角色（排除当前角色自己）
 const availableCharacters = computed(() => {
   if (!currentChar.value) return []
-  const names = buildRosterNames(false).names
+  const names = rosterNamesWithoutAliases.value
   return [...names]
     .filter(n => n !== currentChar.value.name)
     .sort((a, b) => a.localeCompare(b, 'zh'))
@@ -820,6 +953,7 @@ const availableCharacters = computed(() => {
 
 // 打开编辑模态框（编辑现有关系）
 const openEditModal = (targetName) => {
+  if (!currentChar.value) return
   const relations = getCharRelations(currentChar.value.name)
   const relation = relations[targetName] || {
     intimacy: 0,
@@ -878,9 +1012,7 @@ const handleSaveRelation = (data) => {
   showEditModal.value = false
 
   // 刷新网络图
-  nextTick(() => {
-    initNetworkData()
-  })
+  queueNetworkRefresh(false)
 }
 
 // 关闭模态框
@@ -908,7 +1040,7 @@ const closeEditModal = () => {
     <div v-if="!currentChar" class="list-container">
       <div 
         v-for="(char, index) in charList" 
-        :key="char.id" 
+        :key="char._rosterKey" 
         class="char-item"
         :style="{ '--delay': index * 0.05 + 's' }"
         @click="selectChar(char)"
@@ -916,7 +1048,7 @@ const closeEditModal = () => {
         <div class="avatar-box">
           <div class="avatar-glow"></div>
           <img v-if="char.avatar" :src="char.avatar" class="avatar-img" />
-          <div v-else class="avatar-placeholder">{{ char.name[0] }}</div>
+          <div v-else class="avatar-placeholder">{{ getRosterInitial(char.name) }}</div>
         </div>
         <div class="char-info">
           <div class="char-name">{{ char.name }}</div>
@@ -958,7 +1090,7 @@ const closeEditModal = () => {
               <div class="big-avatar">
                   <div class="avatar-ring"></div>
                   <img v-if="currentChar.avatar" :src="currentChar.avatar" />
-                  <div v-else class="placeholder">{{ currentChar.name[0] }}</div>
+                  <div v-else class="placeholder">{{ getRosterInitial(currentChar.name) }}</div>
               </div>
               <div class="basic-stats">
                   <div class="stat-row highlight">

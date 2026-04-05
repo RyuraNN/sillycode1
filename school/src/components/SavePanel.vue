@@ -43,6 +43,19 @@ const showChatPreview = ref(false)
 const previewSnapshot = ref(null)
 const loadingPreview = ref(false)
 
+const previewChatLog = computed(() => {
+  return Array.isArray(previewSnapshot.value?.chatLog) ? previewSnapshot.value.chatLog : []
+})
+
+const previewChatItems = computed(() => {
+  const chatLog = previewChatLog.value
+  return chatLog.slice(-20).reverse().map((log, index) => ({
+    log,
+    restoreIndex: chatLog.length - 1 - index,
+    key: `${chatLog.length - 1 - index}_${log?.type || 'unknown'}`
+  }))
+})
+
 // 读档进度
 const restoreProgress = ref(0)
 const restoreStep = ref('')
@@ -382,7 +395,11 @@ const handleSnapshotClick = async (snapshot) => {
     try {
       // 尝试加载完整详情（如果是新版分离存档）
       const fullSnapshot = await gameStore.loadSnapshotDetails(snapshot.id)
-      previewSnapshot.value = fullSnapshot || snapshot
+      const resolvedSnapshot = fullSnapshot || snapshot
+      previewSnapshot.value = {
+        ...resolvedSnapshot,
+        chatLog: Array.isArray(resolvedSnapshot?.chatLog) ? resolvedSnapshot.chatLog : []
+      }
       showChatPreview.value = true
     } catch (e) {
       console.error('Failed to load snapshot details:', e)
@@ -666,16 +683,16 @@ const closeDebugImportPanel = () => {
           <div class="chat-list">
             <!-- 倒序显示最后20条 -->
             <div 
-              v-for="(log, index) in previewSnapshot.chatLog.slice(-20).reverse()" 
-              :key="index"
+              v-for="item in previewChatItems" 
+              :key="item.key"
               class="chat-preview-item"
-              @click="restoreToChatIndex(previewSnapshot.chatLog.length - 1 - index)"
+              @click="restoreToChatIndex(item.restoreIndex)"
             >
-              <div class="chat-role-badge" :class="log.type">
-                {{ log.type === 'player' ? '玩家' : 'AI' }}
+              <div class="chat-role-badge" :class="item.log.type">
+                {{ item.log.type === 'player' ? '玩家' : 'AI' }}
               </div>
-              <div class="chat-text">{{ log.content }}</div>
-              <div class="chat-meta" v-if="log.snapshot">
+              <div class="chat-text">{{ item.log.content }}</div>
+              <div class="chat-meta" v-if="item.log.snapshot">
                 <span class="has-snapshot">✓ 可回溯</span>
               </div>
             </div>

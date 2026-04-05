@@ -22,6 +22,7 @@ export interface SaveSnapshot {
   messageIndex: number          // 对应的聊天楼层索引
   gameState?: GameStateData | GameStateDataLegacy | any  // [可选] 完整的 gameStore 状态快照（v4分层 或 v3扁平）
   chatLog?: ChatLogEntry[]      // [可选] 到该楼层为止的聊天历史
+  runId?: string                // [可选] 该存档所属周目，用于安全解析共享 chatLog
   // 元数据（用于列表显示）
   gameTime?: {
     year: number
