@@ -28,22 +28,36 @@ function corsHeaders(origin, env) {
   }
 }
 
-/** 检查 Origin 是否在白名单中 */
+/** 检查 Origin 是否在黑名单中（env.MP_BLOCKED_ORIGINS，逗号分隔） */
+function isOriginBlocked(origin, env) {
+  const blocked = env?.MP_BLOCKED_ORIGINS
+  if (!blocked) return false
+  const list = blocked.split(',').map(s => s.trim().toLowerCase())
+  const lowerOrigin = origin.toLowerCase()
+  try {
+    const hostname = new URL(lowerOrigin).hostname
+    return list.some(b => {
+      const bare = b.replace(/^https?:\/\//, '')
+      return hostname === bare || hostname.endsWith('.' + bare)
+    })
+  } catch {
+    return list.some(b => lowerOrigin.includes(b))
+  }
+}
+
+/** 动态回显 Origin（黑名单拦截，其余放行） */
 function getAllowedOrigin(origin, env) {
   if (!origin || origin === 'null') return '*' // iframe/file:// 发送 Origin: null
-  // 开发环境放行 localhost
   if (origin.includes('localhost') || origin.includes('127.0.0.1')) return origin
-  const allowed = env?.MP_ALLOWED_ORIGIN
-  if (allowed && origin === allowed) return origin
-  return allowed || '*'
+  if (isOriginBlocked(origin, env)) return 'blocked'
+  return origin
 }
 
 function isOriginAllowed(origin, env) {
-  if (!origin || origin === 'null') return true // 无 Origin 或 null（iframe/file://）放行
+  if (!origin || origin === 'null') return true
   if (origin.includes('localhost') || origin.includes('127.0.0.1')) return true
-  const allowed = env?.MP_ALLOWED_ORIGIN
-  if (!allowed) return true // 未配置白名单时放行
-  return origin === allowed
+  if (isOriginBlocked(origin, env)) return false
+  return true
 }
 
 function generateRoomId() {
