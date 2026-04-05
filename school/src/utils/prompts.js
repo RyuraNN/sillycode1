@@ -1821,7 +1821,6 @@ ${homeroomClassIds.length > 0 ? `你是 ${homeroomClassIds.join('、')} 的班�
     },
     club: {
       _description: '社团相关系统指令',
-      申请入社: '<apply_club id="club_id" name="申请人" reason="理由" />',
       拒绝入社: '<reject_club id="club_id" from="拒绝人" reason="理由" />',
       同意入社: '<join_club id="club_id" />',
       教师顾问: '<advise_club id="club_id" />',
