@@ -21,6 +21,7 @@ let lastConnectedAt = 0
 let stableResetTimer = null
 let rapidReconnectTimestamps = []
 let hasReceivedWelcome = false
+let isAutoReconnectAttempt = false
 
 const SAVED_SESSION_KEY = 'mp_saved_session'
 
@@ -41,6 +42,36 @@ function saveSessionToStorage() {
 /** 清除保存的会话信息 */
 function clearSavedSession() {
   try { localStorage.removeItem(SAVED_SESSION_KEY) } catch {}
+}
+
+function triggerPendingWorldbookRestore() {
+  import('./multiplayerSync')
+    .then(({ restorePendingWorldbookIfNeeded }) => restorePendingWorldbookIfNeeded())
+    .catch((e) => console.warn('[MultiplayerWs] Failed to restore pending worldbook:', e))
+}
+
+function finalizeReconnectFailure(connectionError, options = {}) {
+  const preserveSavedSession = options.preserveSavedSession === true
+  clearTimeout(reconnectTimer)
+  clearTimeout(stableResetTimer)
+  reconnectTimer = null
+  reconnectAttempts = 0
+  rapidReconnectTimestamps = []
+  hasReceivedWelcome = false
+  isAutoReconnectAttempt = false
+  currentRoomId = null
+  currentPlayerInfo = null
+  stopBatchTimer()
+  stopPingTimer()
+  releaseWakeLock()
+  stopActivityDetection()
+  if (!preserveSavedSession) {
+    clearSavedSession()
+  }
+  const mpStore = useMultiplayerStore()
+  mpStore.reset()
+  mpStore.connectionError = connectionError
+  triggerPendingWorldbookRestore()
 }
 
 /** 获取保存的会话信息（24小时内有效） */
@@ -166,7 +197,7 @@ export async function getRoomInfo(roomId) {
  * @param {string} roomId
  * @param {Object} playerInfo { playerId, playerName, role, classId, avatar, password? }
  */
-export function connectToRoom(roomId, playerInfo) {
+export function connectToRoom(roomId, playerInfo, options = {}) {
   const mpStore = useMultiplayerStore()
 
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -207,6 +238,7 @@ export function connectToRoom(roomId, playerInfo) {
   const url = `${WS_BASE_URL}/ws/room/${roomId}?${params}`
 
   hasReceivedWelcome = false
+  isAutoReconnectAttempt = options.isReconnect === true
 
   try {
     ws = new WebSocket(url)
@@ -261,16 +293,24 @@ export function connectToRoom(roomId, playerInfo) {
     if (event.code === 1000 && event.reason === 'user disconnect') {
       // 用户主动断开
       mpStore.reset()
+      isAutoReconnectAttempt = false
     } else if (event.code === 1000 && event.reason === 'kicked') {
       // 被房主踢出
       mpStore.reset()
       mpStore.connectionError = '被踢出房间'
       clearSavedSession()
+      isAutoReconnectAttempt = false
+      triggerPendingWorldbookRestore()
     } else if (event.code === 1000 && event.reason === 'replaced') {
       // 相同 playerId 的新连接顶替了旧连接
       mpStore.reset()
       clearSavedSession()
+      isAutoReconnectAttempt = false
     } else if (!hasReceivedWelcome) {
+      if (isAutoReconnectAttempt) {
+        finalizeReconnectFailure(_mapHandshakeRejection(event), { preserveSavedSession: true })
+        return
+      }
       // 握手阶段失败（密码错、房间满、准入不足、token 过期等）
       // 不触发自动重连，清理残留状态并提示用户
       mpStore.isConnecting = false
@@ -314,6 +354,7 @@ export function disconnect(options = {}) {
   stopBatchTimer()
   stopPingTimer()
   releaseWakeLock()
+  stopActivityDetection()
 
   if (ws) {
     try {
@@ -324,6 +365,8 @@ export function disconnect(options = {}) {
 
   currentRoomId = null
   currentPlayerInfo = null
+  hasReceivedWelcome = false
+  isAutoReconnectAttempt = false
 
   // 主动断开 → 清除保存的会话（不再提示重连）
   clearSavedSession()
@@ -332,9 +375,7 @@ export function disconnect(options = {}) {
   mpStore.reset()
 
   if (restoreWorldbook) {
-    import('./multiplayerSync')
-      .then(({ restorePendingWorldbookIfNeeded }) => restorePendingWorldbookIfNeeded())
-      .catch((e) => console.warn('[MultiplayerWs] Failed to restore pending worldbook:', e))
+    triggerPendingWorldbookRestore()
   }
 }
 
@@ -553,6 +594,7 @@ function handleMessage(msg) {
   switch (msg.type) {
     case 'welcome':
       hasReceivedWelcome = true
+      isAutoReconnectAttempt = false
       mpStore.handleWelcome(msg.data)
       // 存储房间游戏时间（用于检测时间差）
       if (msg.data.roomGameTime) {
@@ -975,8 +1017,7 @@ async function computeSHA256(input) {
 function scheduleReconnect() {
   if (!hasReceivedWelcome) return
   if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-    const mpStore = useMultiplayerStore()
-    mpStore.connectionError = '重连失败，请手动重新加入'
+    finalizeReconnectFailure('重连失败，请手动重新加入', { preserveSavedSession: true })
     return
   }
 
@@ -995,7 +1036,7 @@ function scheduleReconnect() {
           freshInfo.token = undefined
         }
       } catch {}
-      connectToRoom(currentRoomId, freshInfo)
+      connectToRoom(currentRoomId, freshInfo, { isReconnect: true })
     }
   }, delay)
 }
