@@ -11,6 +11,7 @@ import {
   disconnect,
   sendMessage,
   sendPlayerUpdate,
+  sendRoomSettings,
   sendWorldbookSyncRequest,
   getSavedSession,
   clearSavedSessionManual,
@@ -260,6 +261,19 @@ function getLocalFeatures() {
   }
 }
 
+const roomDifficultyOptions = {
+  easy: { label: '简单', multiplier: 2, desc: '经验获取×2，适合轻松体验' },
+  normal: { label: '普通', multiplier: 1, desc: '经验获取×1，标准体验' },
+  hard: { label: '困难', multiplier: 0.75, desc: '经验获取×0.75，更具挑战' }
+}
+
+function formatDifficultyMultiplier(value) {
+  const num = Number(value)
+  if (!Number.isFinite(num) || num <= 0) return '1'
+  if (Number.isInteger(num)) return String(num)
+  return String(num).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1')
+}
+
 const gameStore = useGameStore()
 const mpStore = useMultiplayerStore()
 
@@ -339,6 +353,43 @@ const playerName = computed(() => {
   const char = characterName.value
   if (discord && char) return `${discord}（${char}）`
   return discord || char || 'Player'
+})
+
+const roomDifficultyInfo = computed(() => {
+  const key = mpStore.roomSettings?.difficulty || gameStore.settings?.difficulty || 'normal'
+  const option = roomDifficultyOptions[key] || roomDifficultyOptions.normal
+  const syncedMultiplier = Number(mpStore.roomSettings?.expMultiplier)
+  const multiplier = Number.isFinite(syncedMultiplier) && syncedMultiplier > 0 ? syncedMultiplier : option.multiplier
+  return {
+    key,
+    label: option.label,
+    desc: option.desc,
+    multiplier,
+    multiplierText: formatDifficultyMultiplier(multiplier)
+  }
+})
+
+const roomDifficultySummary = computed(() => `${roomDifficultyInfo.value.label} ×${roomDifficultyInfo.value.multiplierText}`)
+
+const hostDifficultySelection = computed({
+  get: () => roomDifficultyInfo.value.key,
+  set: (value) => {
+    if (!mpStore.isHost) return
+    const option = roomDifficultyOptions[value] || roomDifficultyOptions.normal
+    gameStore.settings.difficulty = value
+    gameStore.settings.expMultiplier = option.multiplier
+    if (mpStore.roomSettings) {
+      mpStore.roomSettings = {
+        ...mpStore.roomSettings,
+        difficulty: value,
+        expMultiplier: option.multiplier,
+      }
+    }
+    sendRoomSettings({
+      difficulty: value,
+      expMultiplier: option.multiplier,
+    })
+  }
 })
 
 const wbFilteredDiffItems = computed(() => {
@@ -577,6 +628,8 @@ async function handleCreate() {
         isPublic: createForm.value.isPublic,
         password: createForm.value.password || null,
         gameMode: gameStore.player?.gameMode || 'normal',
+        difficulty: gameStore.settings?.difficulty || 'normal',
+        expMultiplier: Number(gameStore.settings?.expMultiplier) > 0 ? Number(gameStore.settings?.expMultiplier) : 1,
         allowSpectators: true,
         trustPolicy: createForm.value.trustPolicy,
       },
@@ -908,6 +961,14 @@ function handleCharacterCreateBack() {
 function onCharacterCreated() {
   selectedPreset.value = null // 预设已通过 GameStart 应用，清除引用
 
+  if (mpStore.isHost) {
+    sendRoomSettings({
+      gameMode: gameStore.player?.gameMode || 'normal',
+      difficulty: gameStore.settings?.difficulty || 'normal',
+      expMultiplier: Number(gameStore.settings?.expMultiplier) > 0 ? Number(gameStore.settings?.expMultiplier) : 1,
+    })
+  }
+
   // 角色创建后更新服务器上的玩家名（含角色名）
   const newName = playerName.value
   const newRole = gameStore.player?.role || 'student'
@@ -1085,6 +1146,25 @@ function formatTime(ts) {
           <span class="room-id">{{ mpStore.roomId }}</span>
           <span class="room-name">{{ mpStore.roomName }}</span>
           <span v-if="mpStore.isHost" class="host-badge">房主</span>
+        </div>
+
+        <div class="room-difficulty-panel">
+          <div class="room-difficulty-header">
+            <span class="room-difficulty-title">当前房间经验难度</span>
+            <span class="room-difficulty-pill">{{ roomDifficultySummary }}</span>
+          </div>
+          <div v-if="mpStore.isHost" class="room-difficulty-controls">
+            <label class="room-difficulty-label">房主设置</label>
+            <select v-model="hostDifficultySelection" class="mp-select room-difficulty-select">
+              <option v-for="(opt, key) in roomDifficultyOptions" :key="key" :value="key">
+                {{ opt.label }} ({{ opt.desc }})
+              </option>
+            </select>
+          </div>
+          <div class="room-difficulty-desc">
+            {{ mpStore.isHost ? '修改后会实时同步到所有成员。' : '当前经验难度跟随房主设置。' }}
+            当前倍率 ×{{ roomDifficultyInfo.multiplierText }}。
+          </div>
         </div>
 
         <div class="waiting-player-list">
@@ -1618,6 +1698,63 @@ function formatTime(ts) {
   gap: 12px;
   margin-bottom: 18px;
   flex-wrap: wrap;
+}
+
+.room-difficulty-panel {
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.14);
+  border: 1px solid rgba(218, 165, 32, 0.16);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.room-difficulty-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.room-difficulty-title {
+  font-size: 0.88rem;
+  color: rgba(255, 248, 220, 0.82);
+}
+
+.room-difficulty-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(218, 165, 32, 0.18);
+  border: 1px solid rgba(218, 165, 32, 0.28);
+  color: #f0c040;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.room-difficulty-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.room-difficulty-label {
+  font-size: 0.78rem;
+  color: rgba(218, 165, 32, 0.72);
+}
+
+.room-difficulty-select {
+  font-size: 0.92rem;
+}
+
+.room-difficulty-desc {
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: rgba(255, 248, 220, 0.58);
 }
 
 .waiting-player-list {

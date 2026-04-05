@@ -1078,6 +1078,8 @@ export interface RoomSettings {
   isPublic: boolean
   password: string | null
   gameMode: string
+  difficulty?: 'easy' | 'normal' | 'hard'
+  expMultiplier?: number
   allowSpectators: boolean
 }
 

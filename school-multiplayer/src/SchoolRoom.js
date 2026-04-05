@@ -137,6 +137,10 @@ export class SchoolRoom extends DurableObject {
         isPublic: body.settings?.isPublic !== false,
         password: body.settings?.password || null,
         gameMode: body.settings?.gameMode || 'normal',
+        difficulty: body.settings?.difficulty || 'normal',
+        expMultiplier: (typeof body.settings?.expMultiplier === 'number' && Number.isFinite(body.settings.expMultiplier) && body.settings.expMultiplier > 0)
+          ? body.settings.expMultiplier
+          : 1,
         allowSpectators: body.settings?.allowSpectators !== false,
       },
       gameTime: body.gameTime || null,

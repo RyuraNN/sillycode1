@@ -32,6 +32,8 @@ const canEditRoster = computed(() => {
   return mpStore.isHost
 })
 
+const isMultiplayerGuest = computed(() => props.mode === 'multiplayer' && !mpStore.isHost)
+
 onMounted(async () => {
   await gameStore.loadClassData()
   if (mapData.length === 0) {
@@ -623,6 +625,14 @@ const expDifficultyOptions = {
   hard: { label: '困难', multiplier: 0.75, desc: '经验获取×0.75，更具挑战' }
 }
 
+watch(() => [isMultiplayerGuest.value, mpStore.roomSettings?.difficulty, gameStore.settings?.difficulty, formData.value.expDifficulty], () => {
+  if (!isMultiplayerGuest.value) return
+  const roomDifficulty = mpStore.roomSettings?.difficulty || gameStore.settings?.difficulty || 'normal'
+  if (roomDifficulty in expDifficultyOptions) {
+    formData.value.expDifficulty = roomDifficulty
+  }
+}, { immediate: true })
+
 // 游戏模式定义
 const gameModes = {
   dragon: { label: '天龙模式', points: 999 },
@@ -876,9 +886,16 @@ const confirmSignature = async () => {
   gameStore.player.gameMode = formData.value.gameMode // 保存游戏模式
 
   // 保存经验倍率设置
-  const selectedDifficulty = expDifficultyOptions[formData.value.expDifficulty] || expDifficultyOptions.normal
-  gameStore.settings.difficulty = formData.value.expDifficulty
-  gameStore.settings.expMultiplier = selectedDifficulty.multiplier
+  const difficultyKey = isMultiplayerGuest.value
+    ? (mpStore.roomSettings?.difficulty || gameStore.settings?.difficulty || 'normal')
+    : formData.value.expDifficulty
+  const selectedDifficulty = expDifficultyOptions[difficultyKey] || expDifficultyOptions.normal
+  const syncedExpMultiplier = Number(mpStore.roomSettings?.expMultiplier)
+  formData.value.expDifficulty = difficultyKey
+  gameStore.settings.difficulty = difficultyKey
+  gameStore.settings.expMultiplier = isMultiplayerGuest.value && Number.isFinite(syncedExpMultiplier) && syncedExpMultiplier > 0
+    ? syncedExpMultiplier
+    : selectedDifficulty.multiplier
 
   // 教师模式数据保存
   if (playerRole.value === 'teacher') {
@@ -1295,7 +1312,7 @@ const confirmSignature = async () => {
 
           <div class="form-row">
             <label>经验难度：</label>
-            <select v-model="formData.expDifficulty" class="input-field">
+            <select v-model="formData.expDifficulty" class="input-field" :disabled="isMultiplayerGuest" :title="isMultiplayerGuest ? '联机中跟随房主设置' : ''">
               <option v-for="(opt, key) in expDifficultyOptions" :key="key" :value="key">
                 {{ opt.label }} ({{ opt.desc }})
               </option>

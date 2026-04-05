@@ -93,6 +93,28 @@ onUnmounted(() => {
 
 const sameLocationPlayers = computed(() => mpStore.playersAtMyLocation)
 
+const roomDifficultyInfo = computed(() => {
+  const difficultyMap = {
+    easy: { label: '简单', multiplier: 2 },
+    normal: { label: '普通', multiplier: 1 },
+    hard: { label: '困难', multiplier: 0.75 },
+  }
+  const key = mpStore.roomSettings?.difficulty || 'normal'
+  const base = difficultyMap[key] || difficultyMap.normal
+  const rawMultiplier = Number(mpStore.roomSettings?.expMultiplier)
+  const multiplier = Number.isFinite(rawMultiplier) && rawMultiplier > 0 ? rawMultiplier : base.multiplier
+  const multiplierText = Number.isInteger(multiplier)
+    ? String(multiplier)
+    : String(multiplier).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1')
+
+  return {
+    label: base.label,
+    multiplierText,
+    shortLabel: `${base.label}×${multiplierText}`,
+    title: `当前房间经验难度：${base.label}（经验倍率×${multiplierText}）`
+  }
+})
+
 function getResolvedPlayerName(player) {
   if (!player) return ''
   return player.characterName || player.playerName || player.playerId || ''
@@ -329,6 +351,7 @@ function stopSpectating() {
         <span class="hud-room-id">{{ mpStore.roomId }}</span>
         <span class="hud-dot" :class="{ connected: mpStore.isConnected }"></span>
         <span class="hud-count">{{ mpStore.playerCount }}</span>
+        <span class="hud-difficulty" :title="roomDifficultyInfo.title">EXP {{ roomDifficultyInfo.shortLabel }}</span>
       </div>
       <button class="hud-copy-btn" @click.stop="copyRoomId" title="复制房间号">
         <svg v-if="!roomIdCopied" xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16"><path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/><path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/></svg>
@@ -578,6 +601,20 @@ function stopSpectating() {
   background: rgba(139, 69, 19, 0.15);
   vertical-align: middle;
   margin-right: 8px;
+}
+
+.hud-difficulty {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: #8b4513;
+  background: rgba(218, 165, 32, 0.16);
+  border: 1px solid rgba(218, 165, 32, 0.26);
+  white-space: nowrap;
 }
 
 /* ── AFK 标记 ── */
@@ -1264,6 +1301,11 @@ function stopSpectating() {
 :global(.dark-mode) .hud-room-id { color: rgba(255, 215, 0, 0.85); }
 :global(.dark-mode) .hud-count { color: rgba(218, 165, 32, 0.6); }
 :global(.dark-mode) .hud-count::before { background: rgba(218, 165, 32, 0.2); }
+:global(.dark-mode) .hud-difficulty {
+  color: rgba(255, 215, 0, 0.92);
+  background: rgba(218, 165, 32, 0.16);
+  border-color: rgba(255, 215, 0, 0.26);
+}
 :global(.dark-mode) .hud-copy-btn { color: rgba(218, 165, 32, 0.5); }
 :global(.dark-mode) .hud-copy-btn:hover { color: rgba(255, 248, 220, 0.9); background: rgba(218, 165, 32, 0.12); }
 :global(.dark-mode) .hud-copied-tick { color: rgba(140, 220, 140, 0.9); }

@@ -91,6 +91,8 @@ export const useMultiplayerStore = defineStore('multiplayer', {
     // ── 共享 RunId ──
     roomRunId: null as string | null,
     originalRunId: null as string | null, // 加入前保存的本地 runId，退出时恢复
+    originalDifficulty: null as 'easy' | 'normal' | 'hard' | null,
+    originalExpMultiplier: null as number | null,
 
     // ── NPC 记忆（联机共享） ──
     sharedNpcMemories: {} as Record<string, NpcMemoryEntry[]>,
@@ -150,6 +152,48 @@ export const useMultiplayerStore = defineStore('multiplayer', {
   },
 
   actions: {
+    applyRoomDifficultySettings(settings: RoomSettings | null, preserveOriginal = false) {
+      const difficulty = settings?.difficulty
+      const expMultiplier = settings?.expMultiplier
+      if (!difficulty || typeof expMultiplier !== 'number' || !Number.isFinite(expMultiplier) || expMultiplier <= 0) return
+
+      import('./gameStore').then(({ useGameStore }) => {
+        const gameStore = useGameStore()
+
+        if (preserveOriginal && !this.isHost) {
+          if (!this.originalDifficulty) {
+            this.originalDifficulty = gameStore.settings?.difficulty || 'normal'
+          }
+          if (this.originalExpMultiplier == null) {
+            const currentMultiplier = Number(gameStore.settings?.expMultiplier)
+            this.originalExpMultiplier = Number.isFinite(currentMultiplier) && currentMultiplier > 0 ? currentMultiplier : 1
+          }
+        }
+
+        gameStore.settings.difficulty = difficulty
+        gameStore.settings.expMultiplier = expMultiplier
+      }).catch((error) => {
+        console.warn('[MultiplayerStore] Failed to apply room difficulty settings:', error)
+      })
+    },
+
+    restoreOriginalDifficultySettings() {
+      const difficulty = this.originalDifficulty
+      const expMultiplier = this.originalExpMultiplier
+      this.originalDifficulty = null
+      this.originalExpMultiplier = null
+
+      if (this.isHost || !difficulty || expMultiplier == null) return
+
+      import('./gameStore').then(({ useGameStore }) => {
+        const gameStore = useGameStore()
+        gameStore.settings.difficulty = difficulty
+        gameStore.settings.expMultiplier = expMultiplier
+      }).catch((error) => {
+        console.warn('[MultiplayerStore] Failed to restore local difficulty settings:', error)
+      })
+    },
+
     refreshLocalClassGroups(reason: string) {
       import('./gameStore').then(({ useGameStore }) => {
         const gameStore = useGameStore()
@@ -184,6 +228,7 @@ export const useMultiplayerStore = defineStore('multiplayer', {
       this.hostId = data.roomInfo.hostId
       this.hostName = data.roomInfo.hostName
       this.gameMode = data.roomInfo.settings?.gameMode || 'normal'
+      this.applyRoomDifficultySettings(data.roomInfo.settings, !data.isHost)
       this.isConnected = true
       this.isConnecting = false
       this.connectionError = null
@@ -594,10 +639,14 @@ export const useMultiplayerStore = defineStore('multiplayer', {
     // ── 房间设置更新 ──
     handleRoomUpdate(data: { settings: RoomSettings }) {
       this.roomSettings = data.settings
+      this.gameMode = data.settings?.gameMode || this.gameMode
+      this.applyRoomDifficultySettings(data.settings, !this.isHost)
     },
 
     // ── 重置 ──
     reset() {
+      this.restoreOriginalDifficultySettings()
+
       // 恢复原始 runId（如果被覆盖过）
       if (this.originalRunId && this.roomRunId) {
         import('./gameStore').then(({ useGameStore }) => {
@@ -657,6 +706,8 @@ export const useMultiplayerStore = defineStore('multiplayer', {
       this.latency = 0
       this.roomRunId = null
       this.originalRunId = null
+      this.originalDifficulty = null
+      this.originalExpMultiplier = null
       this.typingPlayers = {}
       this.turnInitiator = null
       this.actionPhase = 'idle'
