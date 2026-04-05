@@ -293,6 +293,7 @@ export function createInitialState(): GameState {
         proactiveQueryGeneration: false
       },
       suggestedReplies: false,
+      aiMessageSound: false,
       enterToSend: true,
       independentImageGeneration: false,
       imageGenerationPrompt: '',

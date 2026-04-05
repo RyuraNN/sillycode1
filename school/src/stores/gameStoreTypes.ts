@@ -946,6 +946,7 @@ export interface GameState {
     summarySystem: SummarySystemSettings
     ragSystem: RAGSettings
     suggestedReplies: boolean
+    aiMessageSound: boolean
     enterToSend: boolean
     independentImageGeneration: boolean
     imageGenerationPrompt: string

@@ -640,6 +640,15 @@ const handleHomeClick = () => {
                         </label>
                       </div>
                       <p class="hint">在 AI 回复后生成 3-4 个建议回复选项</p>
+
+                      <div class="setting-item" style="margin-top: 15px;">
+                        <span class="setting-label">AI 消息提示音</span>
+                        <label class="switch">
+                          <input type="checkbox" v-model="gameStore.settings.aiMessageSound" @change="gameStore.saveToStorage()">
+                          <span class="slider"></span>
+                        </label>
+                      </div>
+                      <p class="hint">收到 AI 回复时播放提示音</p>
                     </div>
 
                     <div class="settings-section">

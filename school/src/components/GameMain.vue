@@ -75,6 +75,15 @@ const emit = defineEmits(['back'])
 const gameStore = useGameStore()
 const mpStore = useMultiplayerStore()
 
+function playAiMessageSound() {
+  if (!gameStore.settings?.aiMessageSound) return
+  try {
+    const audio = new Audio('./u_31vnwfmzt6-ding-126626.mp3')
+    audio.volume = 0.6
+    audio.play().catch(() => {})
+  } catch {}
+}
+
 // Composables
 const { imageCacheMap, queueImageLoad, saveAndCache, cleanup: cleanupImageCache } = useImageCache()
 const { autoScrollEnabled, showNewMessageTip, scrollToBottom, handleNewContent, handleUserScroll, resetAutoScroll, handleNewMessageTipClick } = useScrollControl()
@@ -1496,6 +1505,7 @@ const processAIResponse = async (response) => {
     gameStore.meta.currentFloor = gameLog.value.length
     gameStore.cleanupSnapshots(gameLog.value)
     handleNewContent(contentAreaRef.value)
+    playAiMessageSound()
 
     // 联机模式：提取 NPC 聊天片段并同步
     if (mpStore.isMultiplayerActive) {
@@ -2321,6 +2331,7 @@ function onMpAiResponse(event) {
   })
   gameStore.meta.currentFloor = gameLog.value.length
   handleNewContent(contentAreaRef.value)
+  playAiMessageSound()
   gameStore.createAutoSave(gameLog.value, gameStore.meta.currentFloor)
 }
 

@@ -366,6 +366,19 @@ const loadRerankModels = async () => {
 
             <div class="setting-row">
               <div class="setting-info">
+                <span class="setting-label">AI 消息提示音</span>
+                <span class="setting-hint">收到 AI 回复时播放提示音</span>
+              </div>
+              <div class="setting-control">
+                <label class="toggle-switch">
+                  <input type="checkbox" v-model="gameStore.settings.aiMessageSound" @change="gameStore.saveToStorage()">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-info">
                 <span class="setting-label">社交消息保留条数</span>
                 <span class="setting-hint">控制存入世界书的消息数量，影响 AI 上下文记忆</span>
               </div>
