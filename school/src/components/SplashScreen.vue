@@ -104,10 +104,7 @@ const announcements = [
     icon: '⚙️',
     text: '请关闭预设中的「文风」和「小总结/概要」避免与游戏系统冲突。'
   },
-  {
-    icon: '💎',
-    text: 'Gemini 用户：如使用 Gemini 3.0 Pro Preview，请在主菜单中开启「Gemini 3.0 Preview 模式」以获得最佳体验。'
-  },
+
   {
     icon: '🖼️',
     text: '独立生图功能请查看首楼说明。'

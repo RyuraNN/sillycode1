@@ -480,10 +480,9 @@ const loadRerankModels = async () => {
               </div>
               <div class="setting-control">
                 <label class="toggle-switch">
-                  <input type="checkbox" v-model="gameStore.settings.summarySystem.enabled" :disabled="gameStore.settings.useGeminiMode" @change="gameStore.saveToStorage()">
+                  <input type="checkbox" v-model="gameStore.settings.summarySystem.enabled" @change="gameStore.saveToStorage()">
                   <span class="toggle-slider"></span>
                 </label>
-                <span v-if="gameStore.settings.useGeminiMode" class="gemini-lock-hint">🔒 Gemini 3.0 Preview 模式下强制开启</span>
               </div>
             </div>
 
@@ -1248,11 +1247,6 @@ const loadRerankModels = async () => {
 </template>
 
 <style scoped>
-.gemini-lock-hint {
-  font-size: 0.75rem;
-  color: rgba(218, 165, 32, 0.8);
-  margin-left: 8px;
-}
 
 .summary-overlay-container {
   position: fixed;

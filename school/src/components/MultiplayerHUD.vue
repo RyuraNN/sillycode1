@@ -13,6 +13,9 @@ const toasts = ref([])
 let toastId = 0
 const hudPulse = ref(false)
 let pulseTimer = null
+const convFolded = ref(false)
+const turnFolded = ref(false)
+const roomIdCopied = ref(false)
 
 function triggerHudPulse() {
   hudPulse.value = false
@@ -26,13 +29,22 @@ function onNewMessage() {
   triggerHudPulse()
 }
 
+const MAX_TOASTS = 5
+
 function onToast(e) {
   const { text, type } = e.detail || {}
   if (!text) return
   const id = ++toastId
-  toasts.value.push({ id, text, type: type || 'info' })
+  toasts.value.push({ id, text, type: type || 'info', leaving: false })
+  if (toasts.value.length > MAX_TOASTS) {
+    toasts.value = toasts.value.slice(-MAX_TOASTS)
+  }
   setTimeout(() => {
-    toasts.value = toasts.value.filter(t => t.id !== id)
+    const t = toasts.value.find(t => t.id === id)
+    if (t) t.leaving = true
+    setTimeout(() => {
+      toasts.value = toasts.value.filter(t => t.id !== id)
+    }, 300)
   }, 4000)
 }
 
@@ -51,11 +63,22 @@ function onWbAlert(e) {
   }
 }
 
+function onDocumentClick(e) {
+  if (showPlayerList.value) {
+    const dropdown = document.querySelector('.hud-player-dropdown')
+    const trigger = document.querySelector('.hud-room')
+    if (dropdown && !dropdown.contains(e.target) && trigger && !trigger.contains(e.target)) {
+      showPlayerList.value = false
+    }
+  }
+}
+
 onMounted(() => {
   window.addEventListener('mp:worldbook_mismatch', onWbMismatch)
   window.addEventListener('mp:worldbook_alert', onWbAlert)
   window.addEventListener('mp:toast', onToast)
   window.addEventListener('mp:new_message', onNewMessage)
+  document.addEventListener('click', onDocumentClick, true)
 })
 
 onUnmounted(() => {
@@ -63,12 +86,157 @@ onUnmounted(() => {
   window.removeEventListener('mp:worldbook_alert', onWbAlert)
   window.removeEventListener('mp:toast', onToast)
   window.removeEventListener('mp:new_message', onNewMessage)
+  document.removeEventListener('click', onDocumentClick, true)
   clearTimeout(pulseTimer)
 })
 
-const onlinePlayers = computed(() => mpStore.playerList)
 
 const sameLocationPlayers = computed(() => mpStore.playersAtMyLocation)
+
+function getResolvedPlayerName(player) {
+  if (!player) return ''
+  return player.characterName || player.playerName || player.playerId || ''
+}
+
+const turnProgressEntries = computed(() => {
+  return Object.entries(mpStore.turnProgressPlayers || {}).map(([playerId, status]) => ({
+    playerId,
+    playerName: getResolvedPlayerName(mpStore.players[playerId]) || playerId,
+    status,
+  }))
+})
+
+const otherPendingTurnPlayers = computed(() => {
+  return turnProgressEntries.value.filter(player => player.status === 'pending' && player.playerId !== mpStore.localPlayerId)
+})
+
+const completedTurnPlayers = computed(() => {
+  return turnProgressEntries.value.filter(player => player.status === 'completed' || player.status === 'afk')
+})
+
+const afkTurnPlayers = computed(() => {
+  return turnProgressEntries.value.filter(player => player.status === 'afk')
+})
+
+const showTurnProgress = computed(() => mpStore.turnTotalCount > 0)
+
+const turnProgressPercent = computed(() => {
+  if (!mpStore.turnTotalCount) return 0
+  return Math.round((mpStore.turnCompletedCount / mpStore.turnTotalCount) * 100)
+})
+
+const turnProgressTone = computed(() => {
+  if (!showTurnProgress.value) return 'idle'
+  if (mpStore.roundStatus === 'waiting') return 'waiting'
+  if (mpStore.turnPendingCount === 0) return 'done'
+  return 'active'
+})
+
+const turnProgressTitle = computed(() => {
+  if (!showTurnProgress.value) return ''
+  if (mpStore.roundStatus === 'waiting') return '你已完成本轮，等待其他玩家'
+  if (mpStore.roundStatus === 'in_progress') return '本轮进行中'
+  return '回合同步中'
+})
+
+function formatTurnPlayerNames(players) {
+  const names = players.map(player => player.playerName)
+  if (names.length <= 3) return names.join('、')
+  return `${names.slice(0, 3).join('、')} 等${names.length}人`
+}
+
+const turnProgressHint = computed(() => {
+  if (!showTurnProgress.value) return ''
+  if (otherPendingTurnPlayers.value.length > 0) {
+    return `待完成：${formatTurnPlayerNames(otherPendingTurnPlayers.value)}`
+  }
+  if (mpStore.turnPendingCount > 0) {
+    return '待完成：你'
+  }
+  if (afkTurnPlayers.value.length > 0) {
+    return `AFK：${formatTurnPlayerNames(afkTurnPlayers.value)}`
+  }
+  return '所有玩家已完成，等待回合推进'
+})
+
+const turnProgressCompletedHint = computed(() => {
+  if (!completedTurnPlayers.value.length) return ''
+  return `已完成：${formatTurnPlayerNames(completedTurnPlayers.value)}`
+})
+
+const isInConversationGroup = computed(() => !!mpStore.conversationGroup)
+
+const isConversationHost = computed(() => {
+  const group = mpStore.conversationGroup
+  return !!group && group.hostPlayerId === mpStore.localPlayerId
+})
+
+const conversationMembers = computed(() => {
+  if (!mpStore.conversationGroup) return []
+  return mpStore.conversationGroup.memberIds
+    .map(playerId => ({
+      playerId,
+      playerName: getResolvedPlayerName(mpStore.players[playerId]) || playerId,
+      isHost: mpStore.conversationGroup?.hostPlayerId === playerId,
+    }))
+})
+
+const conversationTypingNames = computed(() => Object.values(mpStore.typingPlayers || {}))
+
+const conversationStatusTone = computed(() => {
+  if (!isInConversationGroup.value) return 'idle'
+  if (mpStore.turnPending) {
+    if (!isConversationHost.value && mpStore.actionPhase === 'warning') return 'warn'
+    if (!isConversationHost.value && mpStore.actionPhase === 'submitted') return 'waiting'
+    return 'active'
+  }
+  return isConversationHost.value ? 'idle' : 'waiting'
+})
+
+const conversationStatusTitle = computed(() => {
+  if (!isInConversationGroup.value) return ''
+  if (mpStore.turnPending) {
+    if (isConversationHost.value) {
+      if (conversationTypingNames.value.length > 0) return '成员输入中'
+      if (mpStore.pendingTurnActions.length > 0) return '收集中'
+      return '等待成员行动'
+    }
+    if (mpStore.actionPhase === 'submitted') return '等待其他玩家'
+    if (mpStore.actionPhase === 'typing') return '你正在输入'
+    if (mpStore.actionPhase === 'warning') return '即将自动提交'
+    return '轮到你行动'
+  }
+  return isConversationHost.value ? '等待下一轮' : '等待 AI 回复'
+})
+
+const conversationStatusDetail = computed(() => {
+  if (!isInConversationGroup.value) return ''
+  const memberNames = conversationMembers.value.map(member => member.playerName)
+  const memberText = memberNames.length > 0 ? `成员：${formatTurnPlayerNames(conversationMembers.value)}` : ''
+
+  if (mpStore.turnPending && isConversationHost.value) {
+    const targetCount = Math.max(0, conversationMembers.value.length - 1)
+    return `${memberText}${memberText ? ' · ' : ''}已收 ${mpStore.pendingTurnActions.length}/${targetCount}`
+  }
+
+  if (!mpStore.turnPending && !isConversationHost.value) {
+    const hostName = getResolvedPlayerName(mpStore.players[mpStore.conversationGroup?.hostPlayerId || '']) || '组内主持者'
+    return `${memberText}${memberText ? ' · ' : ''}当前由 ${hostName} 继续推进`
+  }
+
+  return memberText
+})
+
+const conversationTypingHint = computed(() => {
+  if (conversationTypingNames.value.length === 0) return ''
+  return `输入中：${conversationTypingNames.value.join('、')}`
+})
+
+function getConversationPlayerTag(playerId) {
+  const group = mpStore.conversationGroup
+  if (!group || !group.memberIds.includes(playerId)) return ''
+  return group.hostPlayerId === playerId ? '组Host' : '组内'
+}
 
 function getPlayerFeatures(playerId) {
   const p = mpStore.players[playerId]
@@ -80,6 +248,18 @@ function getPlayerTrust(playerId) {
   return p?.trustLevel || 'anonymous'
 }
 
+function getTurnPlayerState(playerId) {
+  return mpStore.turnProgressPlayers[playerId] || null
+}
+
+function getTurnPlayerLabel(playerId) {
+  const state = getTurnPlayerState(playerId)
+  if (state === 'completed') return '已完成'
+  if (state === 'afk') return 'AFK'
+  if (state === 'pending') return '行动中'
+  return ''
+}
+
 const showPlayerList = ref(false)
 
 function openLobby() {
@@ -88,6 +268,24 @@ function openLobby() {
 
 function togglePlayerList() {
   showPlayerList.value = !showPlayerList.value
+}
+
+async function copyRoomId() {
+  try {
+    await navigator.clipboard.writeText(mpStore.roomId || '')
+    roomIdCopied.value = true
+    setTimeout(() => { roomIdCopied.value = false }, 1500)
+  } catch {
+    // fallback
+    const ta = document.createElement('textarea')
+    ta.value = mpStore.roomId || ''
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+    roomIdCopied.value = true
+    setTimeout(() => { roomIdCopied.value = false }, 1500)
+  }
 }
 
 function openChat() {
@@ -105,7 +303,7 @@ function handleAfkExtend() {
 const spectateTargetName = computed(() => {
   if (!mpStore.isSpectating || !mpStore.spectateTarget) return null
   const p = mpStore.players[mpStore.spectateTarget]
-  return p?.playerName || mpStore.spectateTarget
+  return getResolvedPlayerName(p) || mpStore.spectateTarget
 })
 
 const spectateModeLabel = computed(() => {
@@ -132,6 +330,10 @@ function stopSpectating() {
         <span class="hud-dot" :class="{ connected: mpStore.isConnected }"></span>
         <span class="hud-count">{{ mpStore.playerCount }}</span>
       </div>
+      <button class="hud-copy-btn" @click.stop="copyRoomId" title="复制房间号">
+        <svg v-if="!roomIdCopied" xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16"><path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/><path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/></svg>
+        <span v-else class="hud-copied-tick">✓</span>
+      </button>
 
       <!-- AFK 自身提示 -->
       <span v-if="mpStore.isAfk" class="hud-afk-badge">AFK</span>
@@ -155,27 +357,74 @@ function stopSpectating() {
         <span class="trust-icon" :class="'trust-' + getPlayerTrust(p.playerId)">
           {{ { verified: '🟢', member: '🟡', logged_in: '⚪', anonymous: '⚫' }[getPlayerTrust(p.playerId)] }}
         </span>
-        <span class="hud-dropdown-name">{{ p.playerName }}</span>
+        <span class="hud-dropdown-name">{{ getResolvedPlayerName(p) }}</span>
+        <span v-if="getConversationPlayerTag(p.playerId)" class="hud-group-tag" :class="{ 'is-host': getConversationPlayerTag(p.playerId) === '组Host' }">{{ getConversationPlayerTag(p.playerId) }}</span>
         <span v-if="mpStore.afkPlayers[p.playerId]" class="hud-afk-tag">AFK</span>
+        <span v-if="getTurnPlayerState(p.playerId)" class="hud-turn-tag" :class="`is-${getTurnPlayerState(p.playerId)}`">{{ getTurnPlayerLabel(p.playerId) }}</span>
         <span class="hud-dropdown-role">{{ p.role === 'teacher' ? '教师' : '学生' }}</span>
       </div>
     </div>
 
     <!-- 同地点玩家提示 -->
-    <div v-if="sameLocationPlayers.length > 0" class="hud-location-players">
+    <div v-if="sameLocationPlayers.length > 0" class="hud-location-players hud-loc-wrap">
       <span class="loc-label">同地点:</span>
       <span v-for="p in sameLocationPlayers" :key="p.playerId" class="loc-player">
         <span class="trust-icon" :class="'trust-' + getPlayerTrust(p.playerId)"
               :title="{ verified: '已验证', member: '服务器成员', logged_in: '已登录', anonymous: '匿名' }[getPlayerTrust(p.playerId)]">
           {{ { verified: '🟢', member: '🟡', logged_in: '⚪', anonymous: '⚫' }[getPlayerTrust(p.playerId)] }}
         </span>
-        {{ p.playerName }}
+        {{ getResolvedPlayerName(p) }}
         <span class="player-features-inline">
           <span v-if="getPlayerFeatures(p.playerId)?.assistantAI" class="feat-dot feat-ai" title="变量辅助AI">AI</span>
           <span v-if="getPlayerFeatures(p.playerId)?.rag" class="feat-dot feat-rag" title="RAG记忆系统">R</span>
           <span v-if="getPlayerFeatures(p.playerId)?.summary" class="feat-dot feat-sum" title="总结系统">S</span>
         </span>
+        <span v-if="getConversationPlayerTag(p.playerId)" class="loc-group-tag" :class="{ 'is-host': getConversationPlayerTag(p.playerId) === '组Host' }">{{ getConversationPlayerTag(p.playerId) }}</span>
+        <span v-if="getTurnPlayerState(p.playerId)" class="loc-turn-tag" :class="`is-${getTurnPlayerState(p.playerId)}`">
+          {{ getTurnPlayerLabel(p.playerId) }}
+        </span>
       </span>
+    </div>
+
+    <!-- 对话组状态 -->
+    <div v-if="isInConversationGroup" class="hud-conversation hud-card-strip strip-conv" :class="`is-${conversationStatusTone}`">
+      <div class="hud-conv-row">
+        <span class="hud-conv-title">合并对话</span>
+        <span class="hud-conv-pill">{{ conversationStatusTitle }}</span>
+        <button class="hud-fold-btn" @click="convFolded = !convFolded">{{ convFolded ? '▸' : '▾' }}</button>
+      </div>
+      <template v-if="!convFolded">
+        <div v-if="conversationStatusDetail" class="hud-conv-row hud-conv-meta">
+          <span class="hud-conv-text">{{ conversationStatusDetail }}</span>
+        </div>
+        <div v-if="conversationTypingHint" class="hud-conv-row hud-conv-meta">
+          <span class="hud-conv-text">{{ conversationTypingHint }}</span>
+        </div>
+      </template>
+    </div>
+
+    <!-- 全局回合状态 -->
+    <div v-if="showTurnProgress" class="hud-turn-progress hud-card-strip strip-turn" :class="`is-${turnProgressTone}`">
+      <div class="hud-turn-row">
+        <span class="hud-turn-title">房间回合</span>
+        <span class="hud-turn-pill">{{ turnProgressTitle }}</span>
+        <button class="hud-fold-btn" @click="turnFolded = !turnFolded">{{ turnFolded ? '▸' : '▾' }}</button>
+      </div>
+      <div class="hud-progress-bar-wrap">
+        <div class="hud-progress-bar" :style="{ width: turnProgressPercent + '%' }" :class="`is-${turnProgressTone}`"></div>
+      </div>
+      <template v-if="!turnFolded">
+        <div class="hud-turn-row hud-turn-meta">
+          <span class="hud-turn-text">已完成 {{ mpStore.turnCompletedCount }}/{{ mpStore.turnTotalCount }}</span>
+          <span v-if="mpStore.roundNumber > 0" class="hud-turn-text">第 {{ mpStore.roundNumber }} 轮</span>
+        </div>
+        <div class="hud-turn-row hud-turn-meta">
+          <span class="hud-turn-text">{{ turnProgressHint }}</span>
+        </div>
+        <div v-if="turnProgressCompletedHint" class="hud-turn-row hud-turn-meta">
+          <span class="hud-turn-text">{{ turnProgressCompletedHint }}</span>
+        </div>
+      </template>
     </div>
 
     <!-- 观战指示器 -->
@@ -231,7 +480,7 @@ function stopSpectating() {
     </div>
 
     <!-- Toast 通知 -->
-    <div v-for="t in toasts" :key="t.id" class="hud-toast" :class="'hud-toast-' + t.type">
+    <div v-for="t in toasts" :key="t.id" class="hud-toast" :class="['hud-toast-' + t.type, { 'hud-toast-leaving': t.leaving }]">
       {{ t.text }}
     </div>
   </div>
@@ -278,6 +527,24 @@ function stopSpectating() {
   min-height: 32px;
 }
 .hud-room:hover { opacity: 0.8; }
+
+/* ── 复制房间号按钮 ── */
+.hud-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: #a1887f;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.2s;
+  min-width: 24px;
+  min-height: 24px;
+}
+.hud-copy-btn:hover { color: #5d4037; background: rgba(139, 69, 19, 0.08); }
+.hud-copied-tick { color: #16a34a; font-size: 0.8rem; font-weight: 700; }
 
 .hud-room-id {
   font-family: monospace;
@@ -402,6 +669,25 @@ function stopSpectating() {
   flex-shrink: 0;
 }
 
+.hud-group-tag {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  line-height: 1.2;
+  background: rgba(139, 69, 19, 0.08);
+  color: #8d6e63;
+  border: 1px solid rgba(139, 69, 19, 0.15);
+}
+
+.hud-group-tag.is-host {
+  background: rgba(218, 165, 32, 0.12);
+  color: #a16207;
+  border-color: rgba(218, 165, 32, 0.28);
+}
+
 .hud-chat-btn {
   display: flex;
   align-items: center;
@@ -459,6 +745,10 @@ function stopSpectating() {
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
+.hud-loc-wrap {
+  flex-wrap: wrap;
+  max-width: min(420px, calc(100vw - 24px));
+}
 
 .loc-label {
   color: #a1887f;
@@ -466,6 +756,37 @@ function stopSpectating() {
 
 .loc-player {
   color: #5d4037;
+}
+
+.loc-group-tag {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  line-height: 1.2;
+  background: rgba(139, 69, 19, 0.08);
+  color: #8d6e63;
+  border: 1px solid rgba(139, 69, 19, 0.15);
+}
+
+.loc-group-tag.is-host {
+  background: rgba(218, 165, 32, 0.12);
+  color: #a16207;
+  border-color: rgba(218, 165, 32, 0.28);
+}
+
+.loc-turn-tag {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  line-height: 1.2;
+  border: 1px solid rgba(139, 69, 19, 0.15);
+  background: rgba(139, 69, 19, 0.06);
 }
 
 .loc-player + .loc-player::before {
@@ -499,6 +820,221 @@ function stopSpectating() {
 .feat-ai { background: rgba(139, 92, 246, 0.2); color: #7c3aed; }
 .feat-rag { background: rgba(59, 130, 246, 0.2); color: #2563eb; }
 .feat-sum { background: rgba(245, 158, 11, 0.2); color: #d97706; }
+
+/* ── 折叠按钮 ── */
+.hud-fold-btn {
+  background: none;
+  border: none;
+  color: #a1887f;
+  cursor: pointer;
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: all 0.15s;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.hud-fold-btn:hover { color: #5d4037; background: rgba(139, 69, 19, 0.08); }
+
+/* ── 左侧色带 ── */
+.hud-card-strip {
+  position: relative;
+  overflow: hidden;
+}
+.hud-card-strip::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+}
+.strip-conv::before {
+  background: #3b82f6;
+}
+.strip-turn::before {
+  background: #f59e0b;
+}
+
+/* ── 进度条 ── */
+.hud-progress-bar-wrap {
+  width: 100%;
+  height: 3px;
+  background: rgba(139, 69, 19, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.hud-progress-bar {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s ease;
+  background: #f59e0b;
+}
+.hud-progress-bar.is-done { background: #22c55e; }
+.hud-progress-bar.is-active { background: #3b82f6; }
+.hud-progress-bar.is-waiting { background: #f59e0b; }
+
+.hud-conversation {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 250px;
+  max-width: min(420px, calc(100vw - 24px));
+  background: rgba(255, 253, 245, 0.62);
+  border: 1px solid rgba(139, 69, 19, 0.12);
+  border-radius: 12px;
+  padding: 8px 12px 8px 14px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 3px 12px rgba(139, 69, 19, 0.08);
+}
+
+.hud-conversation.is-active {
+  border-color: rgba(59, 130, 246, 0.24);
+}
+
+.hud-conversation.is-waiting {
+  border-color: rgba(245, 158, 11, 0.24);
+}
+
+.hud-conversation.is-warn {
+  border-color: rgba(239, 68, 68, 0.24);
+}
+
+.hud-conv-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.hud-conv-meta {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.hud-conv-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #8b4513;
+  flex-shrink: 0;
+}
+
+.hud-conv-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  background: rgba(139, 69, 19, 0.08);
+  color: #8d6e63;
+}
+
+.hud-conv-text {
+  font-size: 0.74rem;
+  color: #6d4c41;
+  line-height: 1.4;
+}
+
+.hud-turn-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 250px;
+  max-width: min(420px, calc(100vw - 24px));
+  background: rgba(255, 253, 245, 0.62);
+  border: 1px solid rgba(139, 69, 19, 0.12);
+  border-radius: 12px;
+  padding: 8px 12px 8px 14px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 3px 12px rgba(139, 69, 19, 0.08);
+}
+
+.hud-turn-progress.is-active {
+  border-color: rgba(59, 130, 246, 0.25);
+}
+
+.hud-turn-progress.is-waiting {
+  border-color: rgba(245, 158, 11, 0.28);
+}
+
+.hud-turn-progress.is-done {
+  border-color: rgba(34, 197, 94, 0.24);
+}
+
+.hud-turn-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.hud-turn-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #8b4513;
+  flex-shrink: 0;
+}
+
+.hud-turn-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  background: rgba(139, 69, 19, 0.08);
+  color: #8d6e63;
+}
+
+.hud-turn-meta {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.hud-turn-text {
+  font-size: 0.74rem;
+  color: #6d4c41;
+  line-height: 1.4;
+}
+
+.hud-turn-tag {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  line-height: 1.2;
+  border: 1px solid rgba(139, 69, 19, 0.15);
+  background: rgba(139, 69, 19, 0.06);
+  color: #8d6e63;
+}
+
+.hud-turn-tag.is-pending,
+.loc-turn-tag.is-pending {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.22);
+  color: #2563eb;
+}
+
+.hud-turn-tag.is-completed,
+.loc-turn-tag.is-completed {
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.22);
+  color: #15803d;
+}
+
+.hud-turn-tag.is-afk,
+.loc-turn-tag.is-afk {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.22);
+  color: #dc2626;
+}
 
 /* ── 观战指示器 ── */
 .hud-spectate-bar {
@@ -694,6 +1230,12 @@ function stopSpectating() {
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   animation: toast-in 0.3s ease-out;
+  transition: opacity 0.3s, transform 0.3s;
+}
+.hud-toast-leaving {
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
 }
 
 .hud-toast-info {
@@ -722,6 +1264,14 @@ function stopSpectating() {
 :global(.dark-mode) .hud-room-id { color: rgba(255, 215, 0, 0.85); }
 :global(.dark-mode) .hud-count { color: rgba(218, 165, 32, 0.6); }
 :global(.dark-mode) .hud-count::before { background: rgba(218, 165, 32, 0.2); }
+:global(.dark-mode) .hud-copy-btn { color: rgba(218, 165, 32, 0.5); }
+:global(.dark-mode) .hud-copy-btn:hover { color: rgba(255, 248, 220, 0.9); background: rgba(218, 165, 32, 0.12); }
+:global(.dark-mode) .hud-copied-tick { color: rgba(140, 220, 140, 0.9); }
+:global(.dark-mode) .hud-fold-btn { color: rgba(218, 165, 32, 0.5); }
+:global(.dark-mode) .hud-fold-btn:hover { color: rgba(255, 248, 220, 0.9); background: rgba(218, 165, 32, 0.12); }
+:global(.dark-mode) .hud-progress-bar-wrap { background: rgba(218, 165, 32, 0.1); }
+:global(.dark-mode) .strip-conv::before { background: rgba(100, 160, 255, 0.7); }
+:global(.dark-mode) .strip-turn::before { background: rgba(255, 200, 80, 0.7); }
 :global(.dark-mode) .hud-chat-btn { color: rgba(218, 165, 32, 0.6); }
 :global(.dark-mode) .hud-chat-btn:hover { color: rgba(255, 248, 220, 0.9); background: rgba(218, 165, 32, 0.12); }
 :global(.dark-mode) .hud-player-dropdown {
@@ -733,6 +1283,18 @@ function stopSpectating() {
 :global(.dark-mode) .hud-dropdown-item { color: rgba(255, 248, 220, 0.85); }
 :global(.dark-mode) .hud-dropdown-item.is-self { background: rgba(218, 165, 32, 0.1); }
 :global(.dark-mode) .hud-dropdown-role { color: rgba(218, 165, 32, 0.5); }
+:global(.dark-mode) .hud-group-tag,
+:global(.dark-mode) .loc-group-tag {
+  background: rgba(139, 69, 19, 0.15);
+  border-color: rgba(218, 165, 32, 0.22);
+  color: rgba(218, 165, 32, 0.72);
+}
+:global(.dark-mode) .hud-group-tag.is-host,
+:global(.dark-mode) .loc-group-tag.is-host {
+  background: rgba(218, 165, 32, 0.18);
+  border-color: rgba(255, 215, 0, 0.3);
+  color: rgba(255, 215, 0, 0.9);
+}
 :global(.dark-mode) .hud-location-players {
   background: rgba(30, 20, 12, 0.7);
   border-color: rgba(218, 165, 32, 0.15);
@@ -752,6 +1314,17 @@ function stopSpectating() {
 :global(.dark-mode) .feat-ai { background: rgba(218, 165, 32, 0.2); color: rgba(255, 215, 0, 0.8); }
 :global(.dark-mode) .feat-rag { background: rgba(139, 69, 19, 0.25); color: rgba(218, 165, 32, 0.8); }
 :global(.dark-mode) .feat-sum { background: rgba(184, 134, 11, 0.2); color: rgba(255, 200, 100, 0.8); }
+:global(.dark-mode) .hud-conversation {
+  background: rgba(30, 20, 12, 0.72);
+  border-color: rgba(218, 165, 32, 0.2);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.24);
+}
+:global(.dark-mode) .hud-conv-title { color: rgba(255, 215, 0, 0.88); }
+:global(.dark-mode) .hud-conv-pill {
+  background: rgba(139, 69, 19, 0.18);
+  color: rgba(218, 165, 32, 0.78);
+}
+:global(.dark-mode) .hud-conv-text { color: rgba(255, 248, 220, 0.76); }
 :global(.dark-mode) .hud-spectate-bar {
   background: rgba(139, 92, 246, 0.15);
   border-color: rgba(139, 92, 246, 0.3);
@@ -820,6 +1393,43 @@ function stopSpectating() {
   border-color: rgba(218, 165, 32, 0.3);
   color: rgba(255, 215, 0, 0.9);
 }
+:global(.dark-mode) .hud-turn-progress {
+  background: rgba(30, 20, 12, 0.72);
+  border-color: rgba(218, 165, 32, 0.2);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.24);
+}
+:global(.dark-mode) .hud-turn-progress.is-active { border-color: rgba(100, 160, 255, 0.3); }
+:global(.dark-mode) .hud-turn-progress.is-waiting { border-color: rgba(255, 200, 80, 0.3); }
+:global(.dark-mode) .hud-turn-progress.is-done { border-color: rgba(100, 200, 120, 0.3); }
+:global(.dark-mode) .hud-turn-title { color: rgba(255, 215, 0, 0.88); }
+:global(.dark-mode) .hud-turn-pill {
+  background: rgba(139, 69, 19, 0.18);
+  color: rgba(218, 165, 32, 0.78);
+}
+:global(.dark-mode) .hud-turn-text { color: rgba(255, 248, 220, 0.76); }
+:global(.dark-mode) .hud-turn-tag {
+  background: rgba(139, 69, 19, 0.12);
+  border-color: rgba(218, 165, 32, 0.2);
+  color: rgba(218, 165, 32, 0.72);
+}
+:global(.dark-mode) .hud-turn-tag.is-pending,
+:global(.dark-mode) .loc-turn-tag.is-pending {
+  background: rgba(80, 140, 255, 0.15);
+  border-color: rgba(100, 160, 255, 0.3);
+  color: rgba(140, 190, 255, 0.9);
+}
+:global(.dark-mode) .hud-turn-tag.is-completed,
+:global(.dark-mode) .loc-turn-tag.is-completed {
+  background: rgba(60, 180, 100, 0.15);
+  border-color: rgba(80, 200, 120, 0.3);
+  color: rgba(140, 220, 140, 0.9);
+}
+:global(.dark-mode) .hud-turn-tag.is-afk,
+:global(.dark-mode) .loc-turn-tag.is-afk {
+  background: rgba(220, 60, 60, 0.15);
+  border-color: rgba(220, 80, 60, 0.3);
+  color: rgba(255, 140, 120, 0.9);
+}
 
 @media (max-width: 768px) {
   .mp-hud {
@@ -837,6 +1447,12 @@ function stopSpectating() {
   .vote-btn {
     min-height: 44px;
     padding: 8px 14px;
+  }
+  .hud-conversation,
+  .hud-turn-progress {
+    min-width: unset;
+    width: calc(100vw - 24px);
+    max-width: calc(100vw - 24px);
   }
   .hud-vote {
     min-width: 200px;

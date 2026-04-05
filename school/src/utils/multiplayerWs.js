@@ -183,6 +183,7 @@ export function connectToRoom(roomId, playerInfo) {
   const params = new URLSearchParams({
     playerId: playerInfo.playerId,
     playerName: playerInfo.playerName,
+    characterName: playerInfo.characterName || '',
     role: playerInfo.role || 'student',
     classId: playerInfo.classId || '',
     avatar: playerInfo.avatar || '',
@@ -402,8 +403,8 @@ export function sendNpcRelationshipSync(updates) {
   return sendMessage('npc_relationship_sync', { updates })
 }
 
-export function sendJoinConversation(targetPlayerId) {
-  return sendMessage('join_conversation', { targetPlayerId })
+export function sendJoinConversation(targetPlayerId, aiReplySnapshot = '') {
+  return sendMessage('join_conversation', { targetPlayerId, aiReplySnapshot })
 }
 
 export function sendLeaveConversation() {
@@ -424,6 +425,10 @@ export function sendTurnSkip() {
 
 export function sendTurnTyping(isTyping = true) {
   return sendMessage('turn_typing', { isTyping })
+}
+
+export function sendTurnExtend(timeout = 20) {
+  return sendMessage('turn_extend', { timeout })
 }
 
 export function sendAfkExtend() {
@@ -587,7 +592,11 @@ function handleMessage(msg) {
       break
 
     case 'player_init':
-      mpStore.handlePlayerUpdate(msg.data, msg.from)
+      mpStore.handlePlayerUpdate({ publicState: msg.data?.publicState || {} }, msg.from)
+      break
+
+    case 'host_worldbook_hash':
+      mpStore.setHostWorldbookHash(msg.data?.hash || null)
       break
 
     case 'feature_update':
@@ -619,6 +628,7 @@ function handleMessage(msg) {
       mpStore.pendingTurnActions.push({
         playerId: msg.data.playerId,
         playerName: msg.data.playerName,
+        characterName: msg.data.characterName || '',
         content: msg.data.content,
         isSkip: false,
         playerInfo: msg.data.playerInfo || '',
@@ -629,6 +639,7 @@ function handleMessage(msg) {
       mpStore.pendingTurnActions.push({
         playerId: msg.data.playerId,
         playerName: msg.data.playerName,
+        characterName: msg.data.characterName || '',
         content: `${msg.data.playerName}看着大家`,
         isSkip: true,
       })
@@ -638,10 +649,20 @@ function handleMessage(msg) {
       // 对话组成员正在输入
       if (msg.data.isTyping) {
         if (!mpStore.typingPlayers) mpStore.typingPlayers = {}
-        mpStore.typingPlayers[msg.data.playerId] = msg.data.playerName
+        mpStore.typingPlayers[msg.data.playerId] = msg.data.characterName || msg.data.playerName
       } else if (mpStore.typingPlayers) {
         delete mpStore.typingPlayers[msg.data.playerId]
       }
+      break
+
+    case 'turn_extend':
+      import('./conversationMerge').then(({ extendActionWindow }) => {
+        extendActionWindow((Number(msg.data?.timeout || 20) || 20) * 1000)
+      }).catch(() => {})
+      break
+
+    case 'turn_progress':
+      mpStore.handleTurnProgress(msg.data)
       break
 
     case 'turn_advance':

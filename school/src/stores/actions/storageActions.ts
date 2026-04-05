@@ -164,9 +164,9 @@ function validateAndRepairSettings(settings: any): any {
     settings.bannedWords.position = 'style'
   }
 
-  // useGeminiMode 迁移：旧存档 useGeminiMode=true 时自动关闭禁词表
-  if (settings.useGeminiMode && settings.bannedWords.enabled !== false) {
-    settings.bannedWords.enabled = false
+  // 迁移：清理已废弃的 useGeminiMode 字段
+  if ('useGeminiMode' in settings) {
+    delete (settings as any).useGeminiMode
   }
 
   // 清除任何可能导致问题的非法字段

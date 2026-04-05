@@ -46,11 +46,24 @@ export const useMultiplayerStore = defineStore('multiplayer', {
     turnInitiator: null as string | null, // 发起本轮的玩家
     typingPlayers: {} as Record<string, string>, // playerId → playerName
     actionPhase: 'idle' as 'idle' | 'phase1' | 'typing' | 'warning' | 'submitted', // 非 host 行动阶段
+    turnExtendCount: 0,
+    turnExtendLocked: false,
+    conversationJoinContexts: [] as Array<{
+      groupId: string
+      joinedPlayerId: string
+      joinedPlayerName: string
+      aiReplySnapshot: string
+      createdAt: number
+    }>,
 
     // ── 时间同步 ──
     roundNumber: 0,
     roundStatus: 'idle' as 'idle' | 'waiting' | 'in_progress' | 'completed',
     timeWarning: null as TimeWarning | null,
+    turnProgressPlayers: {} as Record<string, 'pending' | 'completed' | 'afk'>,
+    turnTotalCount: 0,
+    turnCompletedCount: 0,
+    turnPendingCount: 0,
 
     // ── 观战 ──
     isSpectating: false,
@@ -89,7 +102,7 @@ export const useMultiplayerStore = defineStore('multiplayer', {
     roomGameTime: null as { year: number; month: number; day: number; hour: number; minute: number; weekDay?: number } | null,
 
     // ── 同地点玩家 ──
-    playersAtMyLocation: [] as Array<{ playerId: string; playerName: string }>,
+    playersAtMyLocation: [] as Array<{ playerId: string; playerName: string; characterName?: string }>,
 
     // ── 游戏状态 ──
     gameStarted: false, // 房间是否已开始游戏
@@ -288,11 +301,16 @@ export const useMultiplayerStore = defineStore('multiplayer', {
       }
     },
 
+    setHostWorldbookHash(hash: string | null) {
+      this.hostWorldbookHash = hash || null
+    },
+
     // ── 玩家状态更新 ──
-    handlePlayerUpdate(data: { stats: Partial<RemotePlayerInfo> }, from: string) {
+    handlePlayerUpdate(data: { stats?: Partial<RemotePlayerInfo>; publicState?: Partial<RemotePlayerInfo> }, from: string) {
       const player = this.players[from]
-      if (player) {
-        Object.assign(player, data.stats)
+      const payload = data.stats || data.publicState
+      if (player && payload) {
+        Object.assign(player, payload)
       }
     },
 
@@ -305,13 +323,21 @@ export const useMultiplayerStore = defineStore('multiplayer', {
     },
 
     // ── 同地点玩家更新 ──
-    handlePlayersAtLocation(data: { locationId: string; players: Array<{ playerId: string; playerName: string }> }) {
+    handlePlayersAtLocation(data: { locationId: string; players: Array<{ playerId: string; playerName: string; characterName?: string }> }) {
       this.playersAtMyLocation = data.players.filter(p => p.playerId !== this.localPlayerId)
     },
 
     // ── 对话组 ──
-    handleConversationJoined(data: { groupId: string; playerId: string; playerName: string; group: ConversationGroup }) {
+    handleConversationJoined(data: { groupId: string; playerId: string; playerName: string; characterName?: string; group: ConversationGroup; aiReplySnapshot?: string }) {
       this.conversationGroup = data.group
+      if (data.aiReplySnapshot && data.group?.hostPlayerId === this.localPlayerId && data.playerId !== this.localPlayerId) {
+        this.queueConversationJoinContext({
+          groupId: data.group.groupId,
+          joinedPlayerId: data.playerId,
+          joinedPlayerName: data.characterName || data.playerName,
+          aiReplySnapshot: data.aiReplySnapshot,
+        })
+      }
     },
 
     handleConversationLeft(data: { playerId: string; playerName: string; groupId: string }) {
@@ -319,15 +345,49 @@ export const useMultiplayerStore = defineStore('multiplayer', {
         // 如果是自己离开（如位置变更导致自动退出），直接清除对话组
         if (data.playerId === this.localPlayerId) {
           this.conversationGroup = null
+          this.conversationJoinContexts = this.conversationJoinContexts.filter(ctx => ctx.groupId !== data.groupId)
           return
         }
         this.conversationGroup.memberIds = this.conversationGroup.memberIds.filter(
           id => id !== data.playerId
         )
+        this.conversationJoinContexts = this.conversationJoinContexts.filter(ctx => !(ctx.groupId === data.groupId && ctx.joinedPlayerId === data.playerId))
         if (this.conversationGroup.memberIds.length <= 1) {
           this.conversationGroup = null
+          this.conversationJoinContexts = this.conversationJoinContexts.filter(ctx => ctx.groupId !== data.groupId)
         }
       }
+    },
+
+    queueConversationJoinContext(payload: {
+      groupId: string
+      joinedPlayerId: string
+      joinedPlayerName: string
+      aiReplySnapshot: string
+    }) {
+      if (!payload.groupId || !payload.joinedPlayerId || !payload.aiReplySnapshot) return
+      this.conversationJoinContexts = this.conversationJoinContexts.filter(ctx => !(ctx.groupId === payload.groupId && ctx.joinedPlayerId === payload.joinedPlayerId))
+      this.conversationJoinContexts.push({
+        ...payload,
+        createdAt: Date.now(),
+      })
+    },
+
+    consumeConversationJoinContexts(groupId: string) {
+      if (!groupId) return [] as typeof this.conversationJoinContexts
+      const contexts = this.conversationJoinContexts.filter(ctx => ctx.groupId === groupId)
+      this.conversationJoinContexts = this.conversationJoinContexts.filter(ctx => ctx.groupId !== groupId)
+      return contexts
+    },
+
+    resetTurnExtendState() {
+      this.turnExtendCount = 0
+      this.turnExtendLocked = false
+    },
+
+    markTurnExtended() {
+      this.turnExtendCount += 1
+      this.turnExtendLocked = this.turnExtendCount >= 2
     },
 
     // ── 回合 ──
@@ -335,12 +395,54 @@ export const useMultiplayerStore = defineStore('multiplayer', {
       this.turnPending = true
       this.turnTimeout = data.timeout
       this.turnInitiator = data.initiator
+      this.turnExtendCount = 0
+      this.turnExtendLocked = false
+    },
+
+    handleTurnProgress(data: {
+      roundNumber?: number
+      players?: Array<{ playerId: string; status: 'pending' | 'completed' | 'afk' }>
+      totalCount?: number
+      completedCount?: number
+      pendingCount?: number
+    }) {
+      const nextStates: Record<string, 'pending' | 'completed' | 'afk'> = {}
+      const players = Array.isArray(data.players) ? data.players : []
+      for (const player of players) {
+        if (!player?.playerId) continue
+        nextStates[player.playerId] = player.status === 'afk'
+          ? 'afk'
+          : player.status === 'completed'
+            ? 'completed'
+            : 'pending'
+      }
+
+      this.turnProgressPlayers = nextStates
+      this.turnTotalCount = Number(data.totalCount ?? players.length) || 0
+      this.turnCompletedCount = Number(data.completedCount ?? players.filter(player => player?.status === 'completed' || player?.status === 'afk').length) || 0
+      this.turnPendingCount = Number(data.pendingCount ?? players.filter(player => player?.status === 'pending').length) || 0
+      if (typeof data.roundNumber === 'number') {
+        this.roundNumber = data.roundNumber
+      }
+
+      const localState = this.localPlayerId ? nextStates[this.localPlayerId] : null
+      if (!this.turnTotalCount) {
+        this.roundStatus = 'idle'
+      } else if (localState === 'completed' || localState === 'afk') {
+        this.roundStatus = 'waiting'
+      } else {
+        this.roundStatus = 'in_progress'
+      }
     },
 
     handleTurnAdvance(data: { roundNumber: number; roomGameTime?: any }) {
       this.roundNumber = data.roundNumber
       this.roundStatus = 'idle'
       this.timeWarning = null
+      this.turnProgressPlayers = {}
+      this.turnTotalCount = 0
+      this.turnCompletedCount = 0
+      this.turnPendingCount = 0
       // 新回合开始，清除所有 AFK 状态
       this.isAfk = false
       this.afkPlayers = {}
@@ -482,6 +584,10 @@ export const useMultiplayerStore = defineStore('multiplayer', {
       this.roundNumber = 0
       this.roundStatus = 'idle'
       this.timeWarning = null
+      this.turnProgressPlayers = {}
+      this.turnTotalCount = 0
+      this.turnCompletedCount = 0
+      this.turnPendingCount = 0
       this.isSpectating = false
       this.spectateTarget = null
       this.spectateLog = []
@@ -514,6 +620,9 @@ export const useMultiplayerStore = defineStore('multiplayer', {
       this.turnInitiator = null
       this.actionPhase = 'idle'
       this.turnTimeout = 0
+      this.turnExtendCount = 0
+      this.turnExtendLocked = false
+      this.conversationJoinContexts = []
       this.hostWorldbookHash = null
       this.gameMode = 'normal'
     },

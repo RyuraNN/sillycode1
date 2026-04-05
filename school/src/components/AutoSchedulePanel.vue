@@ -162,7 +162,7 @@ async function handleConfirm({ clubMode }) {
         createClubInWorldbook,
         addNpcToClubInWorldbook
       )
-      await syncClubWorldbookState(props.gameStore.meta.currentRunId, props.gameStore.settings?.useGeminiMode)
+      await syncClubWorldbookState(props.gameStore.meta.currentRunId)
     }
 
     // 5. 触发保存（复用父组件的保存流程）

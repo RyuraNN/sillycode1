@@ -917,11 +917,10 @@ const handleHomeClick = () => {
                       <div class="setting-item">
                         <span class="setting-label">启用总结系统</span>
                         <label class="switch">
-                          <input type="checkbox" v-model="gameStore.settings.summarySystem.enabled" :disabled="gameStore.settings.useGeminiMode" @change="gameStore.saveToStorage()">
+                          <input type="checkbox" v-model="gameStore.settings.summarySystem.enabled" @change="gameStore.saveToStorage()">
                           <span class="slider"></span>
                         </label>
                       </div>
-                      <span v-if="gameStore.settings.useGeminiMode" class="gemini-lock-hint">🔒 Gemini 3.0 Preview 模式下强制开启</span>
 
                       <div v-if="gameStore.settings.summarySystem.enabled">
                         <div class="setting-item">
@@ -1282,12 +1281,6 @@ const handleHomeClick = () => {
 </template>
 
 <style scoped>
-.gemini-lock-hint {
-  font-size: 0.7rem;
-  color: rgba(218, 165, 32, 0.8);
-  margin-left: 8px;
-  display: block;
-}
 
 .phone-overlay {
   position: fixed;

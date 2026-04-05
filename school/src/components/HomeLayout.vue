@@ -4,7 +4,6 @@ import { useGameStore } from '../stores/gameStore'
 import { switchSaveSlot, restoreWorldbookFromStore } from '../utils/socialWorldbook'
 import { clearAllData } from '../utils/indexedDB'
 import { getAllBookNames } from '../utils/worldbookHelper'
-import { syncClubWorldbookState, syncClassWorldbookState, setPlayerClass } from '../utils/worldbookParser'
 import { getErrorMessage } from '../utils/errorUtils'
 
 // inlineDynamicImports: true 已将所有代码合并到单文件，动态 import 无代码分割效果
@@ -97,30 +96,6 @@ const toggleFullscreen = () => {
   }
 }
 
-const onGeminiModeChange = async () => {
-  if (gameStore.settings.useGeminiMode) {
-    gameStore.settings.summarySystem.enabled = true
-  }
-  gameStore.saveToStorage()
-
-  // 同步世界书灯光颜色状态
-  try {
-    // 同步社团世界书状态（蓝灯/绿灯切换）
-    await syncClubWorldbookState(gameStore.meta.currentRunId, gameStore.settings.useGeminiMode)
-
-    // 同步班级世界书状态（蓝灯/绿灯切换）
-    await syncClassWorldbookState(gameStore.meta.currentRunId, gameStore.world.allClassData, gameStore.settings.useGeminiMode)
-
-    // 如果玩家已经选择了班级，重新设置玩家班级（确保玩家班级始终是蓝灯）
-    if (gameStore.player.classId) {
-      await setPlayerClass(gameStore.player.classId, gameStore.settings.useGeminiMode)
-    }
-
-    console.log('[HomeLayout] Worldbook lamp colors synced for Gemini mode:', gameStore.settings.useGeminiMode)
-  } catch (e) {
-    console.error('[HomeLayout] Failed to sync worldbook state:', e)
-  }
-}
 
 async function clearRunIdWorldbookEntries() {
   if (typeof window.deleteWorldbookEntries !== 'function') return
@@ -238,11 +213,6 @@ async function resetGame() {
         <button v-if="mpStore.worldbookBackups.length > 0" class="menu-btn wb-restore-btn" @click="showWorldbookBackups = true">恢复世界书</button>
       </div>
 
-      <label class="gemini-mode-toggle" :class="{ active: gameStore.settings.useGeminiMode }">
-        <input type="checkbox" v-model="gameStore.settings.useGeminiMode" @change="onGeminiModeChange">
-        <span class="gemini-checkbox"></span>
-        <span class="gemini-label">Gemini 3.0 Preview 模式</span>
-      </label>
     </div>
 
     <!-- 子面板 -->
@@ -556,54 +526,6 @@ async function resetGame() {
   gap: 12px;
 }
 
-.gemini-mode-toggle {
-  position: absolute;
-  bottom: 12%;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  user-select: none;
-  color: rgba(255, 248, 220, 0.5);
-  font-size: 0.9rem;
-  transition: color 0.3s ease;
-}
-
-.gemini-mode-toggle.active {
-  color: rgba(255, 215, 0, 0.9);
-}
-
-.gemini-mode-toggle input[type="checkbox"] {
-  display: none;
-}
-
-.gemini-checkbox {
-  width: 16px;
-  height: 16px;
-  border: 1px solid rgba(218, 165, 32, 0.5);
-  border-radius: 3px;
-  background: rgba(0, 0, 0, 0.3);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.3s ease;
-  flex-shrink: 0;
-}
-
-.gemini-mode-toggle.active .gemini-checkbox {
-  background: rgba(218, 165, 32, 0.6);
-  border-color: rgba(255, 215, 0, 0.8);
-}
-
-.gemini-mode-toggle.active .gemini-checkbox::after {
-  content: '✓';
-  font-size: 11px;
-  color: #fff;
-}
-
-.gemini-mode-toggle:hover {
-  color: rgba(255, 248, 220, 0.8);
-}
 
 .menu-btn.mp-btn {
   background: linear-gradient(135deg, 

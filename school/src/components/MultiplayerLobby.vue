@@ -16,6 +16,7 @@ import {
   clearSavedSessionManual,
   sendGameStart,
   sendPlayerStatus,
+  sendPlayerInit,
   sendKick,
 } from '../utils/multiplayerWs'
 import {
@@ -72,6 +73,7 @@ function formatRoomTime(rawGameTime, weekNumber) {
 
 const WB_DIFF_MAX_ITEMS = 300
 const WB_HIDE_CONTEXT_PREF_KEY = 'school_mp_wb_hide_context'
+const WB_HOST_HASH_WAIT_MS = 6000
 
 function normalizeDiffValue(value) {
   if (Array.isArray(value)) return value.map(normalizeDiffValue)
@@ -360,6 +362,55 @@ watch(wbHideContextRows, (value) => {
   } catch {}
 })
 
+function getInitialPublicState() {
+  return {
+    location: gameStore.player?.location || '',
+    classId: gameStore.player?.classId || '',
+    role: gameStore.player?.role || 'student',
+    avatar: gameStore.player?.avatar || '',
+    characterName: gameStore.player?.name || '',
+  }
+}
+
+async function reportInitialPlayerState() {
+  if (!mpStore.isConnected) return
+
+  let worldbookHash = null
+  if (mpStore.isHost) {
+    worldbookHash = mpStore.hostWorldbookHash
+    if (!worldbookHash) {
+      try {
+        worldbookHash = await generateWorldbookHash()
+        if (worldbookHash) {
+          mpStore.setHostWorldbookHash(worldbookHash)
+        }
+      } catch (e) {
+        console.warn('[MultiplayerLobby] Failed to generate host worldbook hash:', e)
+      }
+    }
+  }
+
+  sendPlayerInit(getInitialPublicState(), worldbookHash)
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function waitForHostWorldbookHash(timeoutMs = WB_HOST_HASH_WAIT_MS) {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    if (mpStore.hostWorldbookHash) return mpStore.hostWorldbookHash
+    await sleep(200)
+  }
+  return mpStore.hostWorldbookHash
+}
+
+function canProceedPastWorldbookSync() {
+  if (mpStore.isHost || joinAsSpectator.value) return true
+  return wbSyncStatus.value === 'done'
+}
+
 // ── 生命周期 ──
 onMounted(() => {
   loadPresets()
@@ -510,10 +561,17 @@ async function handleCreate() {
 
   try {
     const playerId = getOrCreatePlayerId()
+    let worldbookHash = null
+    try {
+      worldbookHash = await generateWorldbookHash()
+    } catch (e) {
+      console.warn('[MultiplayerLobby] Failed to generate room worldbook hash:', e)
+    }
     const result = await createRoom({
       roomName: createForm.value.roomName.trim(),
       hostId: playerId,
       hostName: playerName.value,
+      worldbookHash: worldbookHash || undefined,
       settings: {
         maxPlayers: createForm.value.maxPlayers,
         isPublic: createForm.value.isPublic,
@@ -528,10 +586,15 @@ async function handleCreate() {
       roomRunId: gameStore.meta?.currentRunId || null,
     })
 
+    if (worldbookHash) {
+      mpStore.setHostWorldbookHash(worldbookHash)
+    }
+
     // 创建后立即连接
     connectToRoom(result.roomId, {
       playerId,
       playerName: playerName.value,
+      characterName: gameStore.player?.name || '',
       role: gameStore.player?.role || 'student',
       classId: gameStore.player?.classId || '',
       avatar: gameStore.player?.avatar || '',
@@ -585,6 +648,7 @@ function doConnect() {
 
   // 如果选择了预设，使用预设中的角色信息
   let pName = playerName.value
+  let pCharacterName = gameStore.player?.name || ''
   let pRole = gameStore.player?.role || 'student'
   let pClassId = gameStore.player?.classId || ''
   let pAvatar = gameStore.player?.avatar || ''
@@ -592,13 +656,17 @@ function doConnect() {
   if (selectedPreset.value?.data) {
     const d = selectedPreset.value.data
     pRole = d.playerRole || pRole
-    if (d.formData?.name) pName = d.formData.name
+    if (d.formData?.name) {
+      pName = d.formData.name
+      pCharacterName = d.formData.name
+    }
     if (d.formData?.classId) pClassId = d.formData.classId
   }
 
   connectToRoom(joinRoomId.value.trim().toUpperCase(), {
     playerId,
     playerName: pName,
+    characterName: pCharacterName,
     role: pRole,
     classId: pClassId,
     avatar: pAvatar,
@@ -641,6 +709,9 @@ function waitForConnection() {
   const check = () => {
     if (mpStore.isConnected) {
       isLoading.value = false
+      reportInitialPlayerState().catch((e) => {
+        console.warn('[MultiplayerLobby] Failed to report initial player state:', e)
+      })
       // 连接成功后检查世界书同步
       checkWorldbookAfterConnect()
       return
@@ -665,6 +736,13 @@ function waitForConnection() {
 
 /** 连接成功后检查世界书同步 */
 async function checkWorldbookAfterConnect() {
+  wbSyncError.value = ''
+  wbDiffError.value = ''
+  wbDiffLoading.value = false
+  if (joinAsSpectator.value) {
+    checkPostConnectFlow()
+    return
+  }
   // 房主不需要同步，但需要上传抽查样本
   if (mpStore.isHost) {
     // Phase 4: 异步上传世界书抽查样本
@@ -677,15 +755,15 @@ async function checkWorldbookAfterConnect() {
     return
   }
 
-  const hostHash = mpStore.hostWorldbookHash
-  if (!hostHash) {
-    // 房主没有设置世界书 hash，跳过同步
-    checkPostConnectFlow()
-    return
-  }
-
   wbSyncStatus.value = 'checking'
   view.value = 'wb_sync'
+
+  const hostHash = mpStore.hostWorldbookHash || await waitForHostWorldbookHash()
+  if (!hostHash) {
+    wbSyncStatus.value = 'error'
+    wbSyncError.value = '房主的世界书校验信息尚未准备好。完成同步前不能进入游戏，请稍后重试。'
+    return
+  }
 
   try {
     const result = await checkAndSyncWorldbook(hostHash)
@@ -707,6 +785,10 @@ async function checkWorldbookAfterConnect() {
 
 /** 用户确认同步世界书 */
 function acceptWorldbookSync() {
+  if (wbSyncStatus.value === 'error' || !mpStore.hostWorldbookHash) {
+    checkWorldbookAfterConnect()
+    return
+  }
   wbSyncStatus.value = 'syncing'
   wbDiffLoading.value = false
   if (wbHostSnapshotCache.value) {
@@ -726,6 +808,14 @@ function rejectWorldbookSync() {
 
 /** 连接成功后根据角色路由到正确视图 */
 function checkPostConnectFlow() {
+  if (!canProceedPastWorldbookSync()) {
+    view.value = 'wb_sync'
+    if (!wbSyncStatus.value) {
+      wbSyncStatus.value = 'checking'
+    }
+    return
+  }
+
   if (joinAsSpectator.value) {
     // 纯观战者：跳过角色创建
     mpStore.isSpectatorOnly = true
@@ -785,6 +875,10 @@ function selectPresetForHost(preset) {
 }
 
 function goToCharacterCreate() {
+  if (!canProceedPastWorldbookSync()) {
+    view.value = 'wb_sync'
+    return
+  }
   view.value = 'character_create'
   sendPlayerStatus('creating')
 }
@@ -820,6 +914,7 @@ function onCharacterCreated() {
   const newClassId = gameStore.player?.classId || ''
   sendPlayerUpdate({
     playerName: newName,
+    characterName: gameStore.player?.name || '',
     role: newRole,
     classId: newClassId,
   })
@@ -828,6 +923,7 @@ function onCharacterCreated() {
   const localPlayer = mpStore.players[mpStore.localPlayerId]
   if (localPlayer) {
     localPlayer.playerName = newName
+    localPlayer.characterName = gameStore.player?.name || ''
     localPlayer.role = newRole
     localPlayer.classId = newClassId
   }
@@ -926,6 +1022,10 @@ function handleBack() {
 
 /** 从等待大厅进入游戏 */
 function enterGame() {
+  if (!canProceedPastWorldbookSync()) {
+    view.value = 'wb_sync'
+    return
+  }
   console.log('[MultiplayerLobby] enterGame: isConnected =', mpStore.isConnected, 'roomId =', mpStore.roomId, 'isMultiplayerActive =', mpStore.isMultiplayerActive)
   hasEnteredGame.value = true
   // 房主开始游戏时通知后端

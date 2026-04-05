@@ -473,7 +473,8 @@ export function syncLocationChange(newLocation) {
  * @param {Object} remotePlayer { playerName, role, classId }
  */
 export async function injectStudentIntoClassEntry(remotePlayer) {
-  if (!remotePlayer || remotePlayer.role !== 'student' || !remotePlayer.classId || !remotePlayer.playerName) return
+  const resolvedName = remotePlayer?.characterName || remotePlayer?.playerName || ''
+  if (!remotePlayer || remotePlayer.role !== 'student' || !remotePlayer.classId || !resolvedName) return
 
   const gameStore = useGameStore()
   const mpStore = useMultiplayerStore()
@@ -489,7 +490,7 @@ export async function injectStudentIntoClassEntry(remotePlayer) {
   const runId = gameStore.meta.currentRunId
   if (!runId) return
 
-  console.log(`[MultiplayerSync] Injecting student "${remotePlayer.playerName}" into class ${remotePlayer.classId}`)
+  console.log(`[MultiplayerSync] Injecting student "${resolvedName}" into class ${remotePlayer.classId}`)
 
   try {
     const { createRunSpecificClassEntry } = await import('./worldbookParser')
@@ -500,13 +501,13 @@ export async function injectStudentIntoClassEntry(remotePlayer) {
 
     // 检查学生是否已在列表中
     const students = classData.students || []
-    const alreadyExists = students.some(s => s.name === remotePlayer.playerName)
+    const alreadyExists = students.some(s => s.name === resolvedName)
     if (alreadyExists) return
 
     // 添加学生到本地数据
     if (!classData.students) classData.students = []
     classData.students.push({
-      name: remotePlayer.playerName,
+      name: resolvedName,
       gender: 'unknown',
       origin: '联机玩家',
       role: 'student',
@@ -521,7 +522,7 @@ export async function injectStudentIntoClassEntry(remotePlayer) {
       gameStore.player.classId
     )
 
-    console.log(`[MultiplayerSync] Student "${remotePlayer.playerName}" injected into class ${remotePlayer.classId} entry`)
+    console.log(`[MultiplayerSync] Student "${resolvedName}" injected into class ${remotePlayer.classId} entry`)
   } catch (e) {
     console.warn('[MultiplayerSync] Failed to inject student into class entry:', e)
   }

@@ -964,7 +964,7 @@ export interface GameState {
     debugUnlocked: boolean
     snapshotLimit: number
     snapshotMode: 'full' | 'delta'
-    useGeminiMode: boolean
+
     maxManualSaves: number
     autoCleanupEnabled: boolean
     storageWarningThreshold: number
@@ -1018,6 +1018,7 @@ export interface NpcMemoryEntry {
 /** NPC 聊天片段（跨玩家交互历史） */
 export interface NpcChatSnippet {
   playerName: string    // 与 NPC 交互的玩家名
+  characterName?: string
   snippet: string       // 交互摘要/对话片段
   gameTime: string      // 游戏内时间
   createdAt?: number    // 真实时间戳
@@ -1058,6 +1059,7 @@ export type TrustLevel = 'anonymous' | 'logged_in' | 'member' | 'verified'
 export interface RemotePlayerInfo {
   playerId: string
   playerName: string
+  characterName?: string
   role: 'student' | 'teacher'
   classId: string
   avatar: string
@@ -1132,6 +1134,7 @@ export interface VoteData {
 export interface TurnAction {
   playerId: string
   playerName: string
+  characterName?: string
   content: string
   isSkip: boolean
   playerInfo?: string

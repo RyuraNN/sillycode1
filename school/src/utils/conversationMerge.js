@@ -17,10 +17,10 @@
 import { useMultiplayerStore } from '../stores/multiplayerStore'
 import { useGameStore } from '../stores/gameStore'
 import {
-  sendMessage,
   sendTurnAction,
   sendTurnSkip,
   sendTurnTyping,
+  sendTurnExtend,
   sendAiResponse,
 } from './multiplayerWs'
 import { buildCondensedPlayerInfo } from './prompts'
@@ -35,12 +35,32 @@ let phase1Countdown = null
 let inactivityTimer = null   // 阶段2: 30s 无活动检测
 let finalCountdown = null    // 阶段2: 10s 最终倒计时
 let finalInterval = null
+let hostTurnDeadline = 0
+let hostWindowOnTimeout = null
+let turnDeadline = 0
+let lastExtendSyncAt = 0
+let localTurnTimeoutCallback = null
 
 /**
  * 当前非 host 的行动阶段
  * 'idle' | 'phase1' | 'typing' | 'warning' | 'submitted'
  */
 let actionPhase = 'idle'
+let previousInteractivePhase = 'phase1'
+
+const TURN_LIMIT_SECONDS = 20
+const TURN_ACTIVITY_SYNC_INTERVAL_MS = 1500
+const WARNING_THRESHOLD_SECONDS = 5
+
+export function getConversationTurnLimitSeconds() {
+  return TURN_LIMIT_SECONDS
+}
+
+function resolveConversationPlayerName(playerId, fallbackName = '') {
+  const mpStore = useMultiplayerStore()
+  const remote = playerId ? mpStore.players[playerId] : null
+  return remote?.characterName || fallbackName || remote?.playerName || '其他玩家'
+}
 
 /**
  * 对话组 host: 在发送自己的消息后，开始行动收集窗口
@@ -57,17 +77,32 @@ export function startActionWindow(timeoutMs = 10000, onTimeout) {
   mpStore.turnTimeout = Math.ceil(timeoutMs / 1000)
   mpStore.pendingTurnActions = []
   mpStore.typingPlayers = {}
+  hostTurnDeadline = Date.now() + timeoutMs
+  hostWindowOnTimeout = onTimeout || null
 
   // 倒计时（显示用）
   turnTimer = setInterval(() => {
-    mpStore.turnTimeout = Math.max(0, mpStore.turnTimeout - 1)
-  }, 1000)
+    syncHostRemainingTurnTime()
+  }, 250)
+  syncHostRemainingTurnTime()
 
   // 超时后自动结束
-  turnTimeoutCallback = setTimeout(() => {
-    clearActionWindow()
-    if (onTimeout) onTimeout()
-  }, timeoutMs)
+  scheduleHostWindowTimeout()
+}
+
+export function extendActionWindow(timeoutMs = TURN_LIMIT_SECONDS * 1000) {
+  const mpStore = useMultiplayerStore()
+  if (!mpStore.turnPending) return false
+
+  const nextDeadline = Date.now() + timeoutMs
+  if (nextDeadline <= hostTurnDeadline) {
+    return false
+  }
+
+  hostTurnDeadline = nextDeadline
+  syncHostRemainingTurnTime()
+  scheduleHostWindowTimeout()
+  return true
 }
 
 /**
@@ -77,27 +112,22 @@ export function startActionWindow(timeoutMs = 10000, onTimeout) {
 export function startPhase1(onAutoSkip) {
   const mpStore = useMultiplayerStore()
   clearLocalTimers()
+  const initialSeconds = Math.max(1, Math.min(TURN_LIMIT_SECONDS, Number(mpStore.turnTimeout) || 10))
 
   actionPhase = 'phase1'
+  previousInteractivePhase = 'phase1'
   mpStore.turnPending = true
-  mpStore.turnTimeout = 10
+  mpStore.turnTimeout = initialSeconds
   mpStore.actionPhase = 'phase1'
+  mpStore.resetTurnExtendState()
+  turnDeadline = Date.now() + (initialSeconds * 1000)
+  localTurnTimeoutCallback = onAutoSkip || null
 
   phase1Countdown = setInterval(() => {
-    mpStore.turnTimeout = Math.max(0, mpStore.turnTimeout - 1)
-  }, 1000)
+    syncRemainingTurnTime()
+  }, 250)
 
-  phase1Timer = setTimeout(() => {
-    // 10s 到了还没开始输入 → 自动跳过
-    if (actionPhase === 'phase1') {
-      clearLocalTimers()
-      actionPhase = 'idle'
-      mpStore.turnPending = false
-      mpStore.actionPhase = 'idle'
-      sendTurnSkip()
-      if (onAutoSkip) onAutoSkip()
-    }
-  }, 10000)
+  scheduleLocalTurnTimeout()
 }
 
 /**
@@ -107,71 +137,126 @@ export function enterTypingPhase() {
   if (actionPhase !== 'phase1') return
   const mpStore = useMultiplayerStore()
 
-  // 取消阶段1计时
-  if (phase1Timer) { clearTimeout(phase1Timer); phase1Timer = null }
-  if (phase1Countdown) { clearInterval(phase1Countdown); phase1Countdown = null }
-
   actionPhase = 'typing'
+  previousInteractivePhase = 'typing'
   mpStore.actionPhase = 'typing'
-  mpStore.turnTimeout = 0 // 不再显示倒计时
 
   // 通知其他玩家正在输入
   sendTurnTyping(true)
+  syncTurnExtendActivity(true)
 
-  // 启动30s无活动检测
-  resetInactivityTimer()
+  replenishTurnTime(true)
 }
 
 /**
  * 非 host: 每次输入内容变化时调用，重置30s无活动计时
  */
 export function onTypingActivity() {
+  const mpStore = useMultiplayerStore()
   if (actionPhase === 'typing') {
-    resetInactivityTimer()
+    previousInteractivePhase = 'typing'
+    syncTurnExtendActivity()
+    replenishTurnTime(true)
   } else if (actionPhase === 'warning') {
-    // 在警告阶段恢复输入 → 回到 typing 阶段
-    if (finalCountdown) { clearTimeout(finalCountdown); finalCountdown = null }
-    if (finalInterval) { clearInterval(finalInterval); finalInterval = null }
-
-    const mpStore = useMultiplayerStore()
+    previousInteractivePhase = 'typing'
     actionPhase = 'typing'
     mpStore.actionPhase = 'typing'
-    mpStore.turnTimeout = 0
-    resetInactivityTimer()
+    syncTurnExtendActivity(true)
+    replenishTurnTime(true)
   }
 }
 
-/**
- * 重置30s无活动检测计时
- */
-function resetInactivityTimer() {
-  if (inactivityTimer) { clearTimeout(inactivityTimer); inactivityTimer = null }
+export function requestTurnExtend() {
+  const mpStore = useMultiplayerStore()
+  if (!mpStore.turnPending || actionPhase === 'submitted' || !turnDeadline || mpStore.turnTimeout >= TURN_LIMIT_SECONDS) {
+    return false
+  }
 
-  inactivityTimer = setTimeout(() => {
-    // 30s 无输入 → 进入10s最终警告
-    if (actionPhase === 'typing') {
-      startFinalWarning()
-    }
-  }, 30000)
+  if (actionPhase === 'warning') {
+    actionPhase = previousInteractivePhase
+    mpStore.actionPhase = previousInteractivePhase
+  }
+  syncTurnExtendActivity(true)
+  replenishTurnTime(false)
+  return true
 }
 
-/**
- * 启动10s最终倒计时警告
- */
-function startFinalWarning() {
+function syncHostRemainingTurnTime() {
   const mpStore = useMultiplayerStore()
-  actionPhase = 'warning'
-  mpStore.actionPhase = 'warning'
-  mpStore.turnTimeout = 10
+  if (!hostTurnDeadline) {
+    mpStore.turnTimeout = 0
+    return
+  }
 
-  finalInterval = setInterval(() => {
-    mpStore.turnTimeout = Math.max(0, mpStore.turnTimeout - 1)
-  }, 1000)
+  mpStore.turnTimeout = Math.max(0, Math.ceil((hostTurnDeadline - Date.now()) / 1000))
+}
 
-  finalCountdown = setTimeout(() => {
-    // 10s 到了 → 自动提交已输入内容或跳过
-    autoSubmitOrSkip()
-  }, 10000)
+function scheduleHostWindowTimeout() {
+  if (turnTimeoutCallback) {
+    clearTimeout(turnTimeoutCallback)
+  }
+  const remainingMs = Math.max(0, hostTurnDeadline - Date.now())
+  turnTimeoutCallback = setTimeout(() => {
+    const callback = hostWindowOnTimeout
+    clearActionWindow()
+    if (callback) callback()
+  }, remainingMs)
+}
+
+function syncRemainingTurnTime() {
+  const mpStore = useMultiplayerStore()
+  if (!turnDeadline) {
+    mpStore.turnTimeout = 0
+    return
+  }
+
+  const remainingSeconds = Math.max(0, Math.ceil((turnDeadline - Date.now()) / 1000))
+  mpStore.turnTimeout = remainingSeconds
+
+  if (actionPhase !== 'submitted' && remainingSeconds <= WARNING_THRESHOLD_SECONDS) {
+    actionPhase = 'warning'
+    mpStore.actionPhase = 'warning'
+  }
+}
+
+function replenishTurnTime(resetExtendState) {
+  const mpStore = useMultiplayerStore()
+  turnDeadline = Date.now() + (TURN_LIMIT_SECONDS * 1000)
+  if (resetExtendState) {
+    mpStore.resetTurnExtendState()
+  }
+  if (actionPhase === 'warning') {
+    actionPhase = previousInteractivePhase
+    mpStore.actionPhase = previousInteractivePhase
+  }
+  syncRemainingTurnTime()
+  scheduleLocalTurnTimeout()
+}
+
+function scheduleLocalTurnTimeout() {
+  if (phase1Timer) {
+    clearTimeout(phase1Timer)
+  }
+  const remainingMs = Math.max(0, turnDeadline - Date.now())
+  phase1Timer = setTimeout(() => {
+    const callback = localTurnTimeoutCallback
+    if (actionPhase === 'phase1' || actionPhase === 'typing' || actionPhase === 'warning') {
+      stopLocalTimerHandles()
+      turnDeadline = 0
+      sendTurnTyping(false)
+      autoSubmitOrSkip()
+    }
+    if (callback) callback()
+  }, remainingMs)
+}
+
+function syncTurnExtendActivity(force = false) {
+  const now = Date.now()
+  if (!force && now - lastExtendSyncAt < TURN_ACTIVITY_SYNC_INTERVAL_MS) {
+    return
+  }
+  lastExtendSyncAt = now
+  sendTurnExtend(TURN_LIMIT_SECONDS)
 }
 
 /**
@@ -182,16 +267,26 @@ function autoSubmitOrSkip() {
   window.dispatchEvent(new CustomEvent('mp:auto_submit_action'))
 }
 
-/**
- * 清除非 host 端的所有本地计时器
- */
-function clearLocalTimers() {
+function stopLocalTimerHandles() {
   if (phase1Timer) { clearTimeout(phase1Timer); phase1Timer = null }
   if (phase1Countdown) { clearInterval(phase1Countdown); phase1Countdown = null }
   if (inactivityTimer) { clearTimeout(inactivityTimer); inactivityTimer = null }
   if (finalCountdown) { clearTimeout(finalCountdown); finalCountdown = null }
   if (finalInterval) { clearInterval(finalInterval); finalInterval = null }
+}
+
+/**
+ * 清除非 host 端的所有本地计时器
+ */
+function clearLocalTimers() {
+  const mpStore = useMultiplayerStore()
+  stopLocalTimerHandles()
+  turnDeadline = 0
+  lastExtendSyncAt = 0
+  localTurnTimeoutCallback = null
   actionPhase = 'idle'
+  previousInteractivePhase = 'phase1'
+  mpStore.resetTurnExtendState()
 }
 
 /**
@@ -209,6 +304,8 @@ export function clearActionWindow() {
     clearTimeout(turnTimeoutCallback)
     turnTimeoutCallback = null
   }
+  hostTurnDeadline = 0
+  hostWindowOnTimeout = null
 
   // 非 host 端计时器
   clearLocalTimers()
@@ -217,6 +314,7 @@ export function clearActionWindow() {
   mpStore.turnTimeout = 0
   mpStore.actionPhase = 'idle'
   mpStore.typingPlayers = {}
+  mpStore.resetTurnExtendState()
 }
 
 /**
@@ -244,10 +342,11 @@ export function mergeActionsIntoMessage(hostMessage) {
   const parts = [`${hostName}：${hostMessage}`]
 
   for (const action of mpStore.pendingTurnActions) {
+    const actorName = resolveConversationPlayerName(action.playerId, action.characterName || action.playerName)
     if (action.isSkip) {
-      parts.push(`${action.playerName}：${action.playerName}看着大家`)
+      parts.push(`${actorName}：${actorName}看着大家`)
     } else {
-      parts.push(`${action.playerName}：${action.content}`)
+      parts.push(`${actorName}：${action.content}`)
     }
   }
 
@@ -322,8 +421,18 @@ export function getConversationContextPrompt() {
 
   if (members.length === 0) return ''
 
-  const names = members.map(m => m.playerName).join('、')
+  const names = members.map(m => m.characterName || m.playerName).join('、')
   let prompt = `\n[合并对话模式] 当前对话组成员：${names}\n`
+
+  const joinContexts = mpStore.consumeConversationJoinContexts(mpStore.conversationGroup.groupId)
+  if (joinContexts.length > 0) {
+    prompt += '[加入当轮视角补充]\n'
+    for (const ctx of joinContexts) {
+      const snapshot = String(ctx.aiReplySnapshot || '').replace(/\s+/g, ' ').trim().slice(0, 600)
+      if (!snapshot) continue
+      prompt += `- ${ctx.joinedPlayerName} 加入对话组时，最近一次 AI 回复摘录：${snapshot}\n`
+    }
+  }
 
   // 添加其他玩家的精简个人信息
   const playerInfos = mpStore.pendingTurnActions
@@ -340,10 +449,11 @@ export function getConversationContextPrompt() {
   if (mpStore.pendingTurnActions.length > 0) {
     prompt += '[本轮行动]\n'
     for (const action of mpStore.pendingTurnActions) {
+      const actorName = resolveConversationPlayerName(action.playerId, action.characterName || action.playerName)
       if (action.isSkip) {
-        prompt += `- ${action.playerName} 看着大家\n`
+        prompt += `- ${actorName} 看着大家\n`
       } else {
-        prompt += `- ${action.playerName}：${action.content}\n`
+        prompt += `- ${actorName}：${action.content}\n`
       }
     }
   }

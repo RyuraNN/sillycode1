@@ -48,16 +48,17 @@ export async function generateReply(userInput, customHistory = null) {
         // 注入系统提示词
         // 根据 generate.d.ts, injects 是 Omit<InjectionPrompt, 'id'>[]
         injects: [injection],
-        should_stream: false
+        should_stream: false,
+        overrides: {
+          persona_description: '' // 清空 ST 用户人设，由游戏系统通过 injection 提供玩家信息
+        }
       }
 
       // 如果提供了自定义历史，使用 overrides 覆盖默认聊天记录
       if (customHistory) {
         console.log('[ST Client] Using custom chat history (summary system active)')
-        options.overrides = {
-          chat_history: {
-            prompts: customHistory
-          }
+        options.overrides.chat_history = {
+          prompts: customHistory
         }
       }
 
@@ -150,14 +151,15 @@ export async function generateStreaming(userInput, onChunk, customHistory = null
     const options = {
       user_input: userInput,
       injects: [injection],
-      should_stream: shouldStream // 使用配置值
+      should_stream: shouldStream, // 使用配置值
+      overrides: {
+        persona_description: '' // 清空 ST 用户人设，由游戏系统通过 injection 提供玩家信息
+      }
     }
 
     if (customHistory) {
-      options.overrides = {
-        chat_history: {
-          prompts: customHistory
-        }
+      options.overrides.chat_history = {
+        prompts: customHistory
       }
     }
 

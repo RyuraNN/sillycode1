@@ -38,6 +38,16 @@ const SCHOOL_RULE_ROLE_MAP = {
   staff: '教职人员'
 }
 
+const getRemoteCharacterName = (player) => {
+  if (!player) return ''
+  return player.characterName || player.playerName || ''
+}
+
+const getSnippetCharacterName = (snippet) => {
+  if (!snippet) return ''
+  return snippet.characterName || snippet.playerName || ''
+}
+
 /**
  * 判断地点是否在校园内
  * @param {string} locationId 地点ID
@@ -1304,13 +1314,13 @@ export const buildSystemPromptContent = (gameState) => {
 
           // 过滤掉当前玩家自己的片段（避免重复），取最近 10 条
           const otherPlayerSnippets = chatSnippets
-            .filter(s => s.playerName !== gameState.player?.name)
+            .filter(s => getSnippetCharacterName(s) !== gameState.player?.name)
             .slice(-10)
 
           if (otherPlayerSnippets.length > 0) {
             details += `Cross-player Interaction History:\n`
             for (const s of otherPlayerSnippets) {
-              details += `  [${s.gameTime}] (with ${s.playerName}) ${s.snippet}\n`
+              details += `  [${s.gameTime}] (with ${getSnippetCharacterName(s)}) ${s.snippet}\n`
             }
           }
         }
@@ -1621,7 +1631,7 @@ ${homeroomClassIds.length > 0 ? `你是 ${homeroomClassIds.join('、')} 的班�
 
       // 同地点的其他玩家
       if (mpStore.playersAtMyLocation.length > 0) {
-        const names = mpStore.playersAtMyLocation.map(p => p.playerName).join('、')
+        const names = mpStore.playersAtMyLocation.map(p => getRemoteCharacterName(p)).filter(Boolean).join('、')
         parts.push(`[同地点玩家] 以下玩家也在当前位置：${names}`)
       }
 
@@ -1630,7 +1640,7 @@ ${homeroomClassIds.length > 0 ? `你是 ${homeroomClassIds.join('、')} 的班�
         const occupied = mpStore.conversationGroup.sharedNpcs || []
         if (occupied.length > 0) {
           const hostPlayer = mpStore.players[mpStore.conversationGroup.hostPlayerId]
-          const hostName = hostPlayer?.playerName || '其他玩家'
+          const hostName = getRemoteCharacterName(hostPlayer) || '其他玩家'
           parts.push(`[NPC占用] 以下角色正在与${hostName}互动，处于占用状态：${occupied.join('、')}`)
         }
 
@@ -1643,7 +1653,8 @@ ${homeroomClassIds.length > 0 ? `你是 ${homeroomClassIds.join('、')} 的班�
 
         for (const p of (mpStore.playersAtMyLocation || [])) {
           if (memberIds.has(p.playerId)) {
-            humanPlayersInScene.push(p.playerName)
+            const remoteName = getRemoteCharacterName(p)
+            if (remoteName) humanPlayersInScene.push(remoteName)
           }
         }
 

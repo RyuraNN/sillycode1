@@ -1004,7 +1004,7 @@ export async function addPlayerToClubInWorldbook(clubId, playerName, clubData, r
  * @param {string|null} runId 当前存档ID（如果为null，则创建通用原始条目）
  * @returns {Promise<boolean>}
  */
-export async function ensureClubExistsInWorldbook(clubData, runId, useGeminiMode = false) {
+export async function ensureClubExistsInWorldbook(clubData, runId) {
   if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
     return false
   }
@@ -1051,15 +1051,7 @@ export async function ensureClubExistsInWorldbook(clubData, runId, useGeminiMode
           ? `[Club:${clubData.id}:${runId}] ${clubData.name}`
           : `[Club:${clubData.id}] ${clubData.name}`
         
-        // 确定策略类型：
-        // 1. 非 gemini 模式全部蓝灯 (constant)
-        // 2. 学生会 (student_council) 始终为常驻 (constant/蓝灯)
-        // 3. restricted 模式社团为常驻 (constant/蓝灯)
-        // 4. 指定了 runId (isRunSpecific) 的条目为常驻 (constant/蓝灯)
-        // 5. 其他通用初始条目为选择性 (selective/绿灯)
-        const isStudentCouncil = clubData.id === 'student_council'
-        const isRestricted = clubData.mode === 'restricted'
-        const strategyType = (!useGeminiMode || isStudentCouncil || isRestricted || isRunSpecific) ? 'constant' : 'selective'
+        const strategyType = 'constant'
         
         // 确定优先级：
         // 学生会优先级较高 (5)，其他默认为 50
@@ -1229,9 +1221,8 @@ export async function removeClubFromWorldbook(clubId, permanent = false) {
 /**
  * 同步社团世界书状态（切换存档时调用）
  * @param {string} currentRunId 当前存档ID
- * @param {boolean} useGeminiMode 是否使用 3.0 Preview 模式
  */
-export async function syncClubWorldbookState(currentRunId, useGeminiMode = false) {
+export async function syncClubWorldbookState(currentRunId) {
   if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
     return
   }
@@ -1239,7 +1230,7 @@ export async function syncClubWorldbookState(currentRunId, useGeminiMode = false
   try {
     const bookNames = getAllBookNames()
 
-    console.log(`[WorldbookParser] Syncing club state for run ${currentRunId} (geminiMode: ${useGeminiMode})`)
+    console.log(`[WorldbookParser] Syncing club state for run ${currentRunId}`)
 
     for (const name of bookNames) {
       try {
@@ -1279,8 +1270,7 @@ export async function syncClubWorldbookState(currentRunId, useGeminiMode = false
             // 如果该社团在当前存档有激活副本，则禁用原始条目；否则启用
             const shouldDisable = activeClubIds.has(clubId)
 
-            // 非 gemini 模式全部蓝灯；gemini 模式下学生会蓝灯，其他绿灯
-            const strategyType = (!useGeminiMode || clubId === 'student_council') ? 'constant' : 'selective'
+            const strategyType = 'constant'
 
             return {
               ...entry,
@@ -1458,9 +1448,8 @@ export async function fetchClassDataFromWorldbook() {
 /**
  * 设置玩家班级（修改世界书策略）
  * @param {string} classId 班级ID (如 '1-A')
- * @param {boolean} useGeminiMode 是否使用 3.0 Preview 模式
  */
-export async function setPlayerClass(classId, useGeminiMode = false) {
+export async function setPlayerClass(classId) {
   if (typeof window.updateWorldbookWith !== 'function') {
     console.warn('[WorldbookParser] updateWorldbookWith API not available')
     return
@@ -1469,7 +1458,7 @@ export async function setPlayerClass(classId, useGeminiMode = false) {
   try {
     const bookNames = getAllBookNames()
 
-    console.log(`[WorldbookParser] Setting player class to ${classId} in worldbooks: ${bookNames} (geminiMode: ${useGeminiMode})`)
+    console.log(`[WorldbookParser] Setting player class to ${classId} in worldbooks: ${bookNames}`)
 
     for (const bookName of bookNames) {
       try {
@@ -1490,14 +1479,13 @@ export async function setPlayerClass(classId, useGeminiMode = false) {
                   }
                 }
               } else {
-                // 其他班级：非 gemini 模式全部蓝灯，gemini 模式绿灯
-                const type = useGeminiMode ? 'selective' : 'constant'
-                console.log(`[WorldbookParser] Setting entry ${entry.name} to ${type}`)
+                // 其他班级：蓝灯 (constant)
+                console.log(`[WorldbookParser] Setting entry ${entry.name} to constant`)
                 return {
                   ...entry,
                   strategy: {
                     ...entry.strategy,
-                    type
+                    type: 'constant'
                   }
                 }
               }
@@ -2559,7 +2547,7 @@ export async function setupTeacherClassEntries(teachingClasses, homeroomClassIds
   }
 }
 
-export async function syncClassWorldbookState(currentRunId, allClassData, useGeminiMode = false) {
+export async function syncClassWorldbookState(currentRunId, allClassData) {
   if (typeof window.getCharWorldbookNames !== 'function' || typeof window.updateWorldbookWith !== 'function') {
     return
   }
@@ -2608,7 +2596,7 @@ export async function syncClassWorldbookState(currentRunId, allClassData, useGem
                 enabled: true,
                 strategy: {
                   ...entry.strategy,
-                  type: useGeminiMode ? 'selective' : 'constant'
+                  type: 'constant'
                 }
               }
             } else {
@@ -2649,8 +2637,7 @@ export async function syncClassWorldbookState(currentRunId, allClassData, useGem
               }
             } else {
               // 没有活跃的 runId 副本 → 启用原始条目
-              // 非 gemini 模式全部蓝灯
-              const strategyType = useGeminiMode ? (entry.strategy?.type || 'selective') : 'constant'
+              const strategyType = 'constant'
               return {
                 ...entry,
                 enabled: true,

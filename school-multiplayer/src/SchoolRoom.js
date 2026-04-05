@@ -177,6 +177,7 @@ export class SchoolRoom extends DurableObject {
     const url = new URL(request.url)
     const playerId = url.searchParams.get('playerId')
     const playerName = url.searchParams.get('playerName') || 'Anonymous'
+    const characterName = url.searchParams.get('characterName') || ''
     const role = url.searchParams.get('role') || 'student'
     const classId = url.searchParams.get('classId') || ''
     const avatar = url.searchParams.get('avatar') || ''
@@ -246,6 +247,7 @@ export class SchoolRoom extends DurableObject {
     const sessionData = {
       playerId,
       playerName,
+      characterName,
       role,
       classId,
       avatar,
@@ -309,6 +311,7 @@ export class SchoolRoom extends DurableObject {
         players: [...this.sessions.values()].map(s => ({
           playerId: s.playerId,
           playerName: s.playerName,
+          characterName: s.characterName || '',
           role: s.role,
           classId: s.classId,
           avatar: s.avatar,
@@ -334,7 +337,7 @@ export class SchoolRoom extends DurableObject {
     this.broadcast(JSON.stringify({
       type: 'player_joined',
       data: {
-        playerId, playerName, role, classId, avatar,
+        playerId, playerName, characterName: sessionData.characterName || '', role, classId, avatar,
         lobbyStatus: sessionData.lobbyStatus || 'not_ready',
         trustLevel: sessionData.trustLevel,
         features: sessionData.features,
@@ -409,6 +412,7 @@ export class SchoolRoom extends DurableObject {
       case 'turn_action': this.handleTurnAction(ws, session, msg.data); break
       case 'turn_skip': this.handleTurnSkip(ws, session); break
       case 'turn_typing': this.handleTurnTyping(ws, session, msg.data); break
+      case 'turn_extend': this.handleTurnExtend(ws, session, msg.data); break
       case 'turn_complete': this.handleTurnComplete(ws, session, msg.data); break
       case 'afk_extend': this.handleAfkExtend(ws, session); break
       case 'activity_ping': this.handleActivityPing(ws, session); break
@@ -487,6 +491,7 @@ export class SchoolRoom extends DurableObject {
     if (!data?.stats) return
     // 同步更新 session，保证后续 welcome 给新加入玩家的数据是最新的
     if (data.stats.playerName) session.playerName = data.stats.playerName
+    if (data.stats.characterName !== undefined) session.characterName = data.stats.characterName
     if (data.stats.role) session.role = data.stats.role
     if (data.stats.classId !== undefined) session.classId = data.stats.classId
     if (data.stats.avatar !== undefined) session.avatar = data.stats.avatar
@@ -527,10 +532,25 @@ export class SchoolRoom extends DurableObject {
   }
 
   handlePlayerInit(ws, session, data) {
+    const config = this.getConfig()
+    if (data?.worldbookHash && config?.hostId === session.playerId) {
+      this.ctx.storage.sql.exec(
+        `INSERT OR REPLACE INTO worldbook_hash (key, hash, updated_at) VALUES ('host', ?, ?)`,
+        data.worldbookHash, Date.now()
+      )
+
+      this.broadcast(JSON.stringify({
+        type: 'host_worldbook_hash',
+        data: { hash: data.worldbookHash },
+        ts: Date.now()
+      }))
+    }
+
     if (data?.publicState) {
       // 更新 session 中的玩家信息
       if (data.publicState.location) session.location = data.publicState.location
       if (data.publicState.classId) session.classId = data.publicState.classId
+      if (data.publicState.characterName !== undefined) session.characterName = data.publicState.characterName
       ws.serializeAttachment(session)
 
       this.broadcast(JSON.stringify({
@@ -665,6 +685,9 @@ export class SchoolRoom extends DurableObject {
     if (!data?.targetPlayerId) return
     const targetSession = this.findPlayerSession(data.targetPlayerId)
     if (!targetSession) return
+    const aiReplySnapshot = typeof data?.aiReplySnapshot === 'string'
+      ? data.aiReplySnapshot.slice(0, 1200)
+      : ''
 
     // 查找或创建对话组
     let group = this.findConversationGroupByPlayer(data.targetPlayerId)
@@ -692,7 +715,9 @@ export class SchoolRoom extends DurableObject {
           groupId: group.groupId,
           playerId: session.playerId,
           playerName: session.playerName,
+          characterName: session.characterName || '',
           group: { ...group },
+          aiReplySnapshot,
         },
         ts: Date.now()
       }))
@@ -755,7 +780,7 @@ export class SchoolRoom extends DurableObject {
     // 转发给对话组的 host（AI 生成者）
     this.sendToPlayer(group.hostPlayerId, JSON.stringify({
       type: 'turn_action',
-      data: { content: data?.content || '', playerInfo: data?.playerInfo || '', playerId: session.playerId, playerName: session.playerName },
+      data: { content: data?.content || '', playerInfo: data?.playerInfo || '', playerId: session.playerId, playerName: session.playerName, characterName: session.characterName || '' },
       from: session.playerId,
       ts: Date.now()
     }))
@@ -768,7 +793,7 @@ export class SchoolRoom extends DurableObject {
 
     this.sendToPlayer(group.hostPlayerId, JSON.stringify({
       type: 'turn_skip',
-      data: { playerId: session.playerId, playerName: session.playerName },
+      data: { playerId: session.playerId, playerName: session.playerName, characterName: session.characterName || '' },
       from: session.playerId,
       ts: Date.now()
     }))
@@ -784,10 +809,100 @@ export class SchoolRoom extends DurableObject {
       if (memberId === session.playerId) continue
       this.sendToPlayer(memberId, JSON.stringify({
         type: 'turn_typing',
-        data: { playerId: session.playerId, playerName: session.playerName, isTyping: data?.isTyping ?? true },
+        data: { playerId: session.playerId, playerName: session.playerName, characterName: session.characterName || '', isTyping: data?.isTyping ?? true },
         ts: Date.now()
       }))
     }
+  }
+
+  handleTurnExtend(ws, session, data) {
+    session.afkDeadline = Infinity
+    const group = this.findConversationGroupByPlayer(session.playerId)
+    if (!group) return
+
+    const timeout = Math.max(1, Math.min(20, Number(data?.timeout || 20)))
+    this.sendToPlayer(group.hostPlayerId, JSON.stringify({
+      type: 'turn_extend',
+      data: { timeout, playerId: session.playerId, playerName: session.playerName },
+      from: session.playerId,
+      ts: Date.now()
+    }))
+  }
+
+  getActiveTurnSessions() {
+    const spectatorIds = new Set(this.spectateMap.keys())
+    return [...this.sessions.values()].filter(s => !s.spectatorOnly && !spectatorIds.has(s.playerId))
+  }
+
+  broadcastTurnProgress() {
+    const activeSessions = this.getActiveTurnSessions()
+    const players = activeSessions.map(s => {
+      const state = this.turnState.get(s.playerId)
+      let status = 'pending'
+      if (state?.afk) status = 'afk'
+      else if (state?.completed) status = 'completed'
+      return {
+        playerId: s.playerId,
+        playerName: s.playerName,
+        status,
+      }
+    })
+    const completedCount = players.filter(player => player.status === 'completed' || player.status === 'afk').length
+
+    this.broadcast(JSON.stringify({
+      type: 'turn_progress',
+      data: {
+        roundNumber: this.roundNumber,
+        players,
+        totalCount: players.length,
+        completedCount,
+        pendingCount: Math.max(0, players.length - completedCount),
+      },
+      ts: Date.now()
+    }))
+  }
+
+  advanceRoundIfReady() {
+    const activeSessions = this.getActiveTurnSessions()
+    const onlineIds = activeSessions.map(s => s.playerId)
+    if (onlineIds.length === 0) {
+      this.turnState.clear()
+      return false
+    }
+
+    const allDone = onlineIds.every(id => this.turnState.get(id)?.completed)
+    if (!allDone) return false
+
+    const deltas = onlineIds.map(id => this.turnState.get(id)?.timeDelta || 0)
+    const minDelta = Math.min(...deltas)
+
+    for (const [ws2, s] of this.sessions) {
+      const playerDelta = this.turnState.get(s.playerId)?.timeDelta || 0
+      if (playerDelta - minDelta > 20) {
+        ws2.send(JSON.stringify({
+          type: 'time_warning',
+          data: { diff: playerDelta - minDelta, baseDelta: minDelta, yourDelta: playerDelta },
+          ts: Date.now()
+        }))
+      }
+    }
+
+    this.roundNumber++
+    this.turnState.clear()
+
+    const advanceTs = Date.now()
+    this.broadcast(JSON.stringify({
+      type: 'turn_advance',
+      data: { roundNumber: this.roundNumber, roomGameTime: this.roomGameTime },
+      ts: advanceTs
+    }))
+
+    for (const s of activeSessions) {
+      s.afkDeadline = advanceTs + 60000
+    }
+
+    this.checkTimeGapSpectators(minDelta)
+    return true
   }
 
   handleTurnComplete(ws, session, data) {
@@ -816,11 +931,6 @@ export class SchoolRoom extends DurableObject {
 
     // AFK 检查：超过截止时间的玩家自动视为完成
     const now = Date.now()
-    // 排除观战者和纯观战加入的玩家
-    const spectatorIds = new Set(this.spectateMap.keys())
-    const onlineIds = [...this.sessions.values()]
-      .filter(s => !s.spectatorOnly && !spectatorIds.has(s.playerId))
-      .map(s => s.playerId)
 
     for (const s of this.sessions.values()) {
       if (s.afkDeadline && now > s.afkDeadline && !this.turnState.get(s.playerId)?.completed) {
@@ -846,46 +956,8 @@ export class SchoolRoom extends DurableObject {
       }
     }
 
-    const allDone = onlineIds.every(id => this.turnState.get(id)?.completed)
-
-    if (allDone) {
-      // 计算基准时间（最小 timeDelta）
-      const deltas = onlineIds.map(id => this.turnState.get(id)?.timeDelta || 0)
-      const minDelta = Math.min(...deltas)
-
-      // 检查时间差警告
-      for (const [ws2, s] of this.sessions) {
-        const playerDelta = this.turnState.get(s.playerId)?.timeDelta || 0
-        if (playerDelta - minDelta > 20) {
-          ws2.send(JSON.stringify({
-            type: 'time_warning',
-            data: { diff: playerDelta - minDelta, baseDelta: minDelta, yourDelta: playerDelta },
-            ts: Date.now()
-          }))
-        }
-      }
-
-      this.roundNumber++
-      this.turnState.clear()
-
-      // 广播 turn_advance 并为所有玩家设置 AFK 截止时间
-      const advanceTs = Date.now()
-      this.broadcast(JSON.stringify({
-        type: 'turn_advance',
-        data: { roundNumber: this.roundNumber, roomGameTime: this.roomGameTime },
-        ts: advanceTs
-      }))
-
-      // 回合推进后，开始计60s AFK 倒计时（排除观战者）
-      const spectatorIdsForAfk = new Set(this.spectateMap.keys())
-      for (const s of this.sessions.values()) {
-        if (!s.spectatorOnly && !spectatorIdsForAfk.has(s.playerId)) {
-          s.afkDeadline = advanceTs + 60000
-        }
-      }
-
-      // 检查时间差观战者是否应该自动退出
-      this.checkTimeGapSpectators(minDelta)
+    if (!this.advanceRoundIfReady()) {
+      this.broadcastTurnProgress()
     }
   }
 
@@ -1327,6 +1399,7 @@ export class SchoolRoom extends DurableObject {
     this.sessions.delete(ws)
 
     if (!session) return
+    this.turnState.delete(session.playerId)
 
     // 更新最后在线
     this.ctx.storage.sql.exec(
@@ -1373,7 +1446,7 @@ export class SchoolRoom extends DurableObject {
       if (group.hostPlayerId !== session.playerId) {
         this.sendToPlayer(group.hostPlayerId, JSON.stringify({
           type: 'turn_skip',
-          data: { playerId: session.playerId, playerName: session.playerName, auto: true },
+          data: { playerId: session.playerId, playerName: session.playerName, characterName: session.characterName || '', auto: true },
           from: session.playerId,
           ts: Date.now()
         }))
@@ -1413,6 +1486,10 @@ export class SchoolRoom extends DurableObject {
     if (this.sessions.size === 0) {
       await this.destroyRoom()
       return
+    }
+
+    if (this.turnState.size > 0 && !this.advanceRoundIfReady()) {
+      this.broadcastTurnProgress()
     }
 
     // 更新房间索引的人数
@@ -1754,7 +1831,7 @@ export class SchoolRoom extends DurableObject {
   broadcastPlayersAtLocation(locationId) {
     const playersHere = [...this.sessions.values()]
       .filter(s => s.location === locationId)
-      .map(s => ({ playerId: s.playerId, playerName: s.playerName }))
+      .map(s => ({ playerId: s.playerId, playerName: s.playerName, characterName: s.characterName || '' }))
 
     for (const [ws, session] of this.sessions) {
       if (session.location === locationId) {

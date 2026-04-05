@@ -1674,7 +1674,7 @@ const handleSaveClub = async () => {
       } else {
         showMessage('社团已更新')
       }
-      await syncClubWorldbookState(gameStore.meta.currentRunId, gameStore.settings?.useGeminiMode)
+      await syncClubWorldbookState(gameStore.meta.currentRunId)
     }
   } else if (form.customId?.trim()) {
     // 自定义ID新建 — 直接写入 allClubs
@@ -1697,8 +1697,8 @@ const handleSaveClub = async () => {
     if (!gameStore.player.joinedClubs.includes(clubId)) {
       gameStore.player.joinedClubs.push(clubId)
     }
-    await ensureClubExistsInWorldbook(newClub, null, gameStore.settings?.useGeminiMode)
-    await syncClubWorldbookState(gameStore.meta.currentRunId, gameStore.settings?.useGeminiMode)
+    await ensureClubExistsInWorldbook(newClub, null)
+    await syncClubWorldbookState(gameStore.meta.currentRunId)
     gameStore.saveToStorage(true)
     showMessage('社团已创建')
   } else {
@@ -1713,8 +1713,8 @@ const handleSaveClub = async () => {
       if (newClub) {
         newClub.mode = form.mode
         if (form.mode !== 'normal') {
-          await ensureClubExistsInWorldbook(newClub, null, gameStore.settings?.useGeminiMode)
-          await syncClubWorldbookState(gameStore.meta.currentRunId, gameStore.settings?.useGeminiMode)
+          await ensureClubExistsInWorldbook(newClub, null)
+          await syncClubWorldbookState(gameStore.meta.currentRunId)
         }
       }
     }
@@ -1752,7 +1752,7 @@ const handleRestoreClub = async (clubId) => {
   const restored = deletedClubs.value.splice(idx, 1)[0]
   if (!gameStore.world.allClubs) gameStore.world.allClubs = {}
   gameStore.world.allClubs[clubId] = restored.data
-  await syncClubWorldbookState(gameStore.meta.currentRunId, gameStore.settings?.useGeminiMode)
+  await syncClubWorldbookState(gameStore.meta.currentRunId)
   gameStore.saveToStorage(true)
 }
 
@@ -1826,7 +1826,7 @@ async function handleDeduplicateMembers() {
     msg += `【${detail.clubName}】: 移除 ${detail.removed} 个重复\n`
   }
 
-  await syncClubWorldbookState(gameStore.meta.currentRunId, gameStore.settings?.useGeminiMode)
+  await syncClubWorldbookState(gameStore.meta.currentRunId)
   gameStore.saveToStorage(true)
   showMessage(msg)
 }
@@ -1840,7 +1840,7 @@ async function handleClearAllMembers() {
     return
   }
 
-  await syncClubWorldbookState(gameStore.meta.currentRunId, gameStore.settings?.useGeminiMode)
+  await syncClubWorldbookState(gameStore.meta.currentRunId)
   gameStore.saveToStorage(true)
   showMessage(`已清空所有社团成员，共 ${count} 人`)
 }
@@ -1882,7 +1882,7 @@ async function handleApplyGeneratedClubs() {
       addNpcToClubInWorldbook,
       null  // 游戏外管理，不创建 run-specific 副本
     )
-    await syncClubWorldbookState(gameStore.meta.currentRunId, gameStore.settings?.useGeminiMode)
+    await syncClubWorldbookState(gameStore.meta.currentRunId)
     gameStore.saveToStorage(true)
     resetGeneratedClubs()
     const parts = []
