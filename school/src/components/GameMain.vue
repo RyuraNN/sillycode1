@@ -70,6 +70,7 @@ import VariableChangesPanel from './game/VariableChangesPanel.vue'
 
 // 样式
 import '../styles/game-main.css'
+import dingSoundUrl from '../assets/u_31vnwfmzt6-ding-126626.mp3'
 
 const emit = defineEmits(['back'])
 const gameStore = useGameStore()
@@ -78,7 +79,7 @@ const mpStore = useMultiplayerStore()
 function playAiMessageSound() {
   if (!gameStore.settings?.aiMessageSound) return
   try {
-    const audio = new Audio('./u_31vnwfmzt6-ding-126626.mp3')
+    const audio = new Audio(dingSoundUrl)
     audio.volume = 0.6
     audio.play().catch(() => {})
   } catch {}
