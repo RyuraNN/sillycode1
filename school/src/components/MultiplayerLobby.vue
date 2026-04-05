@@ -89,9 +89,9 @@ function normalizeDiffValue(value) {
 }
 
 function entryDiffKey(entry, index) {
+  if (entry?.name) return entry.name
   if (entry?.uid != null) return `uid:${entry.uid}`
   if (entry?.id != null) return `id:${entry.id}`
-  if (entry?.name) return `name:${entry.name}`
   return `#${index}`
 }
 
