@@ -1096,7 +1096,8 @@ export class SchoolRoom extends DurableObject {
   }
 
   handleSaveChunk(ws, session, data) {
-    // 房主发送的存档块 → 转发给目标玩家
+    // 仅房主可以转发存档块
+    if (session.playerId !== this.hostId) return
     if (!data?.targetPlayerId) return
     this.sendToPlayer(data.targetPlayerId, JSON.stringify({
       type: 'save_chunk',
@@ -1107,7 +1108,8 @@ export class SchoolRoom extends DurableObject {
   }
 
   handleOfflineGrowth(ws, session, data) {
-    // 房主发送的离线成长数据 → 转发给目标玩家
+    // 仅房主可以转发离线成长数据
+    if (session.playerId !== this.hostId) return
     if (!data?.targetPlayerId) return
     this.sendToPlayer(data.targetPlayerId, JSON.stringify({
       type: 'offline_growth',

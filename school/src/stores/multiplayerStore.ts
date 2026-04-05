@@ -505,9 +505,17 @@ export const useMultiplayerStore = defineStore('multiplayer', {
       this.afkPlayers = {}
       this.offlinePlayers = {}
       this.showLobby = false
+      this.showChat = false
+      this.showSpectateList = false
       this.latency = 0
       this.roomRunId = null
       this.originalRunId = null
+      this.typingPlayers = {}
+      this.turnInitiator = null
+      this.actionPhase = 'idle'
+      this.turnTimeout = 0
+      this.hostWorldbookHash = null
+      this.gameMode = 'normal'
     },
 
     // ── 世界书备份管理 ──

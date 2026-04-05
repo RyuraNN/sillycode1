@@ -20,6 +20,7 @@ const MAX_RECONNECT_ATTEMPTS = 5
 let lastConnectedAt = 0
 let stableResetTimer = null
 let rapidReconnectTimestamps = []
+let hasReceivedWelcome = false
 
 const SAVED_SESSION_KEY = 'mp_saved_session'
 
@@ -94,10 +95,24 @@ export function getApiBaseUrl() {
 export function getOrCreatePlayerId() {
   let id = localStorage.getItem('school_multiplayer_id')
   if (!id) {
-    id = crypto.randomUUID()
+    id = _generatePlayerId()
     localStorage.setItem('school_multiplayer_id', id)
   }
   return id
+}
+
+function _generatePlayerId() {
+  const c = globalThis.crypto
+  if (c?.randomUUID) return c.randomUUID()
+  if (c?.getRandomValues) {
+    const bytes = new Uint8Array(16)
+    c.getRandomValues(bytes)
+    bytes[6] = (bytes[6] & 0x0f) | 0x40
+    bytes[8] = (bytes[8] & 0x3f) | 0x80
+    const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0'))
+    return `${hex.slice(0,4).join('')}-${hex.slice(4,6).join('')}-${hex.slice(6,8).join('')}-${hex.slice(8,10).join('')}-${hex.slice(10,16).join('')}`
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
 }
 
 // ── REST API ──
@@ -190,6 +205,8 @@ export function connectToRoom(roomId, playerInfo) {
 
   const url = `${WS_BASE_URL}/ws/room/${roomId}?${params}`
 
+  hasReceivedWelcome = false
+
   try {
     ws = new WebSocket(url)
   } catch (e) {
@@ -243,13 +260,24 @@ export function connectToRoom(roomId, playerInfo) {
     if (event.code === 1000 && event.reason === 'user disconnect') {
       // 用户主动断开
       mpStore.reset()
-    } else if (event.code === 403 || event.reason === 'kicked') {
-      // 被踢出或密码错误
+    } else if (event.code === 1000 && event.reason === 'kicked') {
+      // 被房主踢出
+      mpStore.reset()
+      mpStore.connectionError = '被踢出房间'
+      clearSavedSession()
+    } else if (event.code === 1000 && event.reason === 'replaced') {
+      // 相同 playerId 的新连接顶替了旧连接
+      mpStore.reset()
+      clearSavedSession()
+    } else if (!hasReceivedWelcome) {
+      // 握手阶段失败（密码错、房间满、准入不足、token 过期等）
+      // 不触发自动重连，清理残留状态并提示用户
       mpStore.isConnecting = false
       mpStore.isConnected = false
-      mpStore.connectionError = event.reason || '连接被拒绝'
+      mpStore.connectionError = _mapHandshakeRejection(event)
+      clearSavedSession()
     } else {
-      // 异常断开，尝试重连
+      // 已成功接入但意外断开，尝试重连
       mpStore.isConnected = false
       scheduleReconnect()
     }
@@ -257,8 +285,20 @@ export function connectToRoom(roomId, playerInfo) {
 
   ws.onerror = (error) => {
     console.error('[MultiplayerWs] WebSocket error:', error)
-    mpStore.connectionError = '连接出错'
+    if (!hasReceivedWelcome) {
+      mpStore.connectionError = '无法连接到服务器，请检查网络'
+    }
   }
+}
+
+function _mapHandshakeRejection(event) {
+  const reason = event.reason || ''
+  if (reason === 'kicked') return '被踢出房间'
+  if (reason.includes('Wrong password')) return '房间密码错误'
+  if (reason.includes('Room is full')) return '房间已满'
+  if (reason.includes('准入要求')) return reason
+  if (reason.includes('unstable connection')) return '连接不稳定，请检查网络后重新加入'
+  return '连接被拒绝，请检查密码或准入要求'
 }
 
 /**
@@ -500,6 +540,7 @@ function handleMessage(msg) {
 
   switch (msg.type) {
     case 'welcome':
+      hasReceivedWelcome = true
       mpStore.handleWelcome(msg.data)
       // 存储房间游戏时间（用于检测时间差）
       if (msg.data.roomGameTime) {
@@ -904,6 +945,7 @@ async function computeSHA256(input) {
 // ── 重连 ──
 
 function scheduleReconnect() {
+  if (!hasReceivedWelcome) return
   if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
     const mpStore = useMultiplayerStore()
     mpStore.connectionError = '重连失败，请手动重新加入'
@@ -914,9 +956,18 @@ function scheduleReconnect() {
   reconnectAttempts++
   console.log(`[MultiplayerWs] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`)
 
-  reconnectTimer = setTimeout(() => {
+  reconnectTimer = setTimeout(async () => {
     if (currentRoomId && currentPlayerInfo) {
-      connectToRoom(currentRoomId, currentPlayerInfo)
+      let freshInfo = { ...currentPlayerInfo }
+      try {
+        const { getAuthToken, isAuthenticated } = await import('./multiplayerAuth')
+        if (isAuthenticated()) {
+          freshInfo.token = getAuthToken() || undefined
+        } else {
+          freshInfo.token = undefined
+        }
+      } catch {}
+      connectToRoom(currentRoomId, freshInfo)
     }
   }, delay)
 }

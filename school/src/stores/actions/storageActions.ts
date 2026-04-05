@@ -362,6 +362,8 @@ function buildRecoveredSnapshotMeta(snapshotId: string, details: any, index: num
   const timestampNum = Number(snapshotId)
   const timestamp = Number.isFinite(timestampNum) && timestampNum > 0 ? timestampNum : fallbackTimestamp
   const roomId = gs?.meta?.roomId || gs?.roomId
+  const runId = gs?.meta?.currentRunId || gs?.currentRunId || details?.runId ||
+    (snapshotId.startsWith('autosave_') ? snapshotId.replace('autosave_', '') : undefined)
   const saveMode: 'single' | 'multiplayer' = roomId ? 'multiplayer' : 'single'
   const label = saveMode === 'multiplayer'
     ? `联机恢复存档 ${index + 1}`
@@ -393,9 +395,8 @@ function buildRecoveredSnapshotMeta(snapshotId: string, details: any, index: num
     snapshot.location = location
   }
 
-  if (roomId) {
-    snapshot.roomId = roomId
-  }
+  if (roomId) snapshot.roomId = roomId
+  if (typeof runId === 'string' && runId.length > 0) snapshot.runId = runId
 
   return snapshot
 }

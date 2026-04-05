@@ -537,6 +537,7 @@ async function handleCreate() {
       avatar: gameStore.player?.avatar || '',
       token: getAuthToken() || undefined,
       features: getLocalFeatures(),
+      password: createForm.value.password || undefined,
     })
 
     view.value = 'connecting'
