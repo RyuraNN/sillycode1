@@ -1055,6 +1055,7 @@ export async function ensureClubExistsInWorldbook(clubData, runId) {
         
         // 确定优先级：
         // 学生会优先级较高 (5)，其他默认为 50
+        const isStudentCouncil = clubData.id === 'student_council'
         const order = isStudentCouncil ? 5 : 50
 
         const newEntry = {

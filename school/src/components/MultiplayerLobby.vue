@@ -497,9 +497,10 @@ onUnmounted(() => {
 /** 房主端：收到其他玩家请求世界书数据 */
 async function onWorldbookDataRequest(event) {
   if (!mpStore.isHost) return
+  const requesterId = event.detail?.requesterId || null
   try {
     const snapshot = await getSyncWorldbookSnapshot()
-    sendMessage('worldbook_data', { snapshot })
+    sendMessage('worldbook_data', { snapshot, requesterId })
   } catch (e) {
     console.error('[MultiplayerLobby] Failed to send worldbook data:', e)
   }

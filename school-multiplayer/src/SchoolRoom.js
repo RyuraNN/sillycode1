@@ -405,6 +405,7 @@ export class SchoolRoom extends DurableObject {
       case 'player_init': this.handlePlayerInit(ws, session, msg.data); break
       case 'worldbook_sync_request': this.handleWorldbookSyncRequest(ws, session); break
       case 'worldbook_sync_complete': this.handleWorldbookSyncComplete(ws, session, msg.data); break
+      case 'worldbook_data': this.handleWorldbookData(ws, session, msg.data); break
       case 'npc_memory_sync': this.handleNpcMemorySync(ws, session, msg.data); break
       case 'npc_move_sync': this.handleNpcMoveSync(ws, session, msg.data); break
       case 'npc_relationship_sync': this.handleNpcRelationshipSync(ws, session, msg.data); break
@@ -582,6 +583,24 @@ export class SchoolRoom extends DurableObject {
       hostWs.send(JSON.stringify({
         type: 'worldbook_data_request',
         data: { requesterId: session.playerId, requesterName: session.playerName },
+        ts: Date.now()
+      }))
+    }
+  }
+
+  handleWorldbookData(ws, session, data) {
+    // 只允许房主发送世界书数据
+    const config = this.getConfig()
+    if (!config || session.playerId !== config.hostId) return
+
+    const requesterId = data?.requesterId
+    if (!requesterId) return
+
+    const requesterWs = this.findPlayerWs(requesterId)
+    if (requesterWs) {
+      requesterWs.send(JSON.stringify({
+        type: 'worldbook_data',
+        data: { snapshot: data.snapshot },
         ts: Date.now()
       }))
     }
