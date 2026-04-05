@@ -174,82 +174,84 @@ function computeLineDiff(leftText, rightText) {
 }
 
 function buildWorldbookSnapshotDiff(localSnapshot, hostSnapshot) {
-  const localBooks = new Map((localSnapshot || []).map(book => [book.bookName, Array.isArray(book.entries) ? book.entries : []]))
-  const hostBooks = new Map((hostSnapshot || []).map(book => [book.bookName, Array.isArray(book.entries) ? book.entries : []]))
-  const allBookNames = new Set([...localBooks.keys(), ...hostBooks.keys()])
-
   const diffItems = []
   let added = 0
   let removed = 0
   let changed = 0
-  let totalLocal = 0
-  let totalHost = 0
   let truncated = false
 
-  for (const entries of localBooks.values()) totalLocal += entries.length
-  for (const entries of hostBooks.values()) totalHost += entries.length
+  // 打平所有书的条目，按条目名建索引（忽略所在世界书名）
+  const flatEntries = (snapshot) => {
+    const map = new Map()
+    let idx = 0
+    for (const book of (snapshot || [])) {
+      for (const entry of (Array.isArray(book.entries) ? book.entries : [])) {
+        const key = entryDiffKey(entry, idx++)
+        if (!map.has(key)) map.set(key, { entry, bookName: book.bookName })
+      }
+    }
+    return map
+  }
 
-  for (const bookName of allBookNames) {
-    const localEntries = localBooks.get(bookName) || []
-    const hostEntries = hostBooks.get(bookName) || []
+  const localMap = flatEntries(localSnapshot)
+  const hostMap = flatEntries(hostSnapshot)
+  const totalLocal = localMap.size
+  const totalHost = hostMap.size
+  const allKeys = new Set([...localMap.keys(), ...hostMap.keys()])
 
-    const localMap = new Map(localEntries.map((entry, idx) => [entryDiffKey(entry, idx), entry]))
-    const hostMap = new Map(hostEntries.map((entry, idx) => [entryDiffKey(entry, idx), entry]))
-    const allEntryKeys = new Set([...localMap.keys(), ...hostMap.keys()])
+  for (const key of allKeys) {
+    const local = localMap.get(key)
+    const host = hostMap.get(key)
+    const localEntry = local?.entry ?? null
+    const hostEntry = host?.entry ?? null
+    const bookName = host?.bookName || local?.bookName || ''
 
-    for (const entryKey of allEntryKeys) {
-      const localEntry = localMap.get(entryKey)
-      const hostEntry = hostMap.get(entryKey)
-      const entryId = `${bookName}::${entryKey}`
-      if (!localEntry && hostEntry) {
-        added += 1
+    if (!localEntry && hostEntry) {
+      added += 1
+      diffItems.push({
+        id: `${key}::added`,
+        type: 'added',
+        bookName,
+        entryName: hostEntry.name || key,
+        localPreview: '（本地无此条目）',
+        hostPreview: entryDiffPreview(hostEntry),
+        localRaw: entryDiffRaw(null),
+        hostRaw: entryDiffRaw(hostEntry)
+      })
+    } else if (localEntry && !hostEntry) {
+      removed += 1
+      diffItems.push({
+        id: `${key}::removed`,
+        type: 'removed',
+        bookName,
+        entryName: localEntry.name || key,
+        localPreview: entryDiffPreview(localEntry),
+        hostPreview: '（房主无此条目）',
+        localRaw: entryDiffRaw(localEntry),
+        hostRaw: entryDiffRaw(null)
+      })
+    } else {
+      const localSig = JSON.stringify(normalizeDiffValue(localEntry))
+      const hostSig = JSON.stringify(normalizeDiffValue(hostEntry))
+      if (localSig !== hostSig) {
+        changed += 1
         diffItems.push({
-          id: `${entryId}::added`,
-          type: 'added',
+          id: `${key}::changed`,
+          type: 'changed',
           bookName,
-          entryName: hostEntry?.name || entryKey,
-          localPreview: '（本地无此条目）',
+          entryName: localEntry?.name || hostEntry?.name || key,
+          localPreview: entryDiffPreview(localEntry),
           hostPreview: entryDiffPreview(hostEntry),
-          localRaw: entryDiffRaw(null),
+          localRaw: entryDiffRaw(localEntry),
           hostRaw: entryDiffRaw(hostEntry)
         })
-      } else if (localEntry && !hostEntry) {
-        removed += 1
-        diffItems.push({
-          id: `${entryId}::removed`,
-          type: 'removed',
-          bookName,
-          entryName: localEntry?.name || entryKey,
-          localPreview: entryDiffPreview(localEntry),
-          hostPreview: '（房主无此条目）',
-          localRaw: entryDiffRaw(localEntry),
-          hostRaw: entryDiffRaw(null)
-        })
-      } else {
-        const localSig = JSON.stringify(normalizeDiffValue(localEntry))
-        const hostSig = JSON.stringify(normalizeDiffValue(hostEntry))
-        if (localSig !== hostSig) {
-          changed += 1
-          diffItems.push({
-            id: `${entryId}::changed`,
-            type: 'changed',
-            bookName,
-            entryName: localEntry?.name || hostEntry?.name || entryKey,
-            localPreview: entryDiffPreview(localEntry),
-            hostPreview: entryDiffPreview(hostEntry),
-            localRaw: entryDiffRaw(localEntry),
-            hostRaw: entryDiffRaw(hostEntry)
-          })
-        }
-      }
-
-      if (diffItems.length >= WB_DIFF_MAX_ITEMS) {
-        truncated = true
-        break
       }
     }
 
-    if (truncated) break
+    if (diffItems.length >= WB_DIFF_MAX_ITEMS) {
+      truncated = true
+      break
+    }
   }
 
   return { diffItems, added, removed, changed, totalLocal, totalHost, truncated }
