@@ -1062,7 +1062,7 @@ export const buildCondensedPlayerInfo = (gameState) => {
   else if (player.classRoster?.name) className = player.classRoster.name
   const locObj = getItem(player.location)
   const locName = locObj ? locObj.name : player.location
-  parts.push(`[玩家: ${player.name}] 性别:${genderStr} ${player.role === 'teacher' ? '教师' : '学生'} 班级:${className} 位置:${locName}`)
+  parts.push(`[角色: ${player.name}] 性别:${genderStr} ${player.role === 'teacher' ? '教师' : '学生'} 班级:${className} 位置:${locName}`)
   if (player.attributes) {
     const a = player.attributes
     parts.push(`属性: IQ(${a.iq}) EQ(${a.eq}) 体质(${a.physique}) 灵活(${a.flexibility}) 魅力(${a.charm}) 心情(${a.mood})`)
@@ -1318,7 +1318,7 @@ export const buildSystemPromptContent = (gameState) => {
             .slice(-10)
 
           if (otherPlayerSnippets.length > 0) {
-            details += `Cross-player Interaction History:\n`
+            details += `Other Recent Interactions:\n`
             for (const s of otherPlayerSnippets) {
               details += `  [${s.gameTime}] (with ${getSnippetCharacterName(s)}) ${s.snippet}\n`
             }
@@ -1447,7 +1447,7 @@ As the president or person in charge, please decide whether to approve or reject
 [社团邀请]
 ${player.name}邀请"${targetName}"加入"${clubName}"(社团ID: ${clubId})。
 该邀请将在 ${remainingTurns} 回合后过期。
-请扮演${targetName}，根据角色性格和与玩家的关系决定是否接受邀请。
+请扮演${targetName}，根据角色性格和与${player.name}的关系决定是否接受邀请。
 - 接受邀请: <club_invite_accept id="${clubId}" name="${targetName}" />
 - 拒绝邀请: <club_invite_reject id="${clubId}" name="${targetName}" reason="拒绝理由" />
 `
@@ -1629,42 +1629,42 @@ ${homeroomClassIds.length > 0 ? `你是 ${homeroomClassIds.join('、')} 的班�
     if (mpStore.isMultiplayerActive) {
       const parts = []
 
-      // 同地点的其他玩家
+      // 同地点的其他角色
       if (mpStore.playersAtMyLocation.length > 0) {
         const names = mpStore.playersAtMyLocation.map(p => getRemoteCharacterName(p)).filter(Boolean).join('、')
-        parts.push(`[同地点玩家] 以下玩家也在当前位置：${names}`)
+        parts.push(`[同地点角色] 以下角色也在当前位置：${names}`)
       }
 
-      // NPC 占用状态（被其他玩家 isAlive 的 NPC）
+      // NPC 占用状态
       if (mpStore.conversationGroup) {
         const occupied = mpStore.conversationGroup.sharedNpcs || []
         if (occupied.length > 0) {
           const hostPlayer = mpStore.players[mpStore.conversationGroup.hostPlayerId]
-          const hostName = getRemoteCharacterName(hostPlayer) || '其他玩家'
+          const hostName = getRemoteCharacterName(hostPlayer) || '其他人'
           parts.push(`[NPC占用] 以下角色正在与${hostName}互动，处于占用状态：${occupied.join('、')}`)
         }
 
         const memberIds = new Set(mpStore.conversationGroup.memberIds || [])
-        const humanPlayersInScene = []
+        const autonomousChars = []
 
         if (mpStore.localPlayerId && memberIds.has(mpStore.localPlayerId) && player?.name) {
-          humanPlayersInScene.push(player.name)
+          autonomousChars.push(player.name)
         }
 
         for (const p of (mpStore.playersAtMyLocation || [])) {
           if (memberIds.has(p.playerId)) {
             const remoteName = getRemoteCharacterName(p)
-            if (remoteName) humanPlayersInScene.push(remoteName)
+            if (remoteName) autonomousChars.push(remoteName)
           }
         }
 
-        const uniqueHumanPlayers = [...new Set(humanPlayersInScene.filter(Boolean))]
-        if (uniqueHumanPlayers.length >= 2) {
-          parts.push(`[玩家身份约束] 当前场景中以下角色由真实玩家扮演：${uniqueHumanPlayers.join('、')}。这些角色不是NPC。你不得代替这些玩家角色发言、行动、做决定、补写台词或心理活动；涉及这些角色时只能依据玩家已给出的输入推进。若某玩家尚未发言，请留出互动空间并等待其后续指令。`)
+        const uniqueAutonomous = [...new Set(autonomousChars.filter(Boolean))]
+        if (uniqueAutonomous.length >= 2) {
+          parts.push(`[角色自主约束] 当前场景中以下角色自主行动：${uniqueAutonomous.join('、')}。你不得代替这些角色发言、行动、做决定、补写台词或心理活动；涉及这些角色时只能依据其已给出的行动推进。若某角色尚未行动，请留出互动空间等待后续。`)
         }
       }
 
-      // 时间差检测：玩家的本地游戏时间落后于房间游戏时间（AFK/断线重连）
+      // 时间差检测
       if (mpStore.roomGameTime && gameState.world?.gameTime) {
         const local = gameState.world.gameTime
         const room = mpStore.roomGameTime
@@ -1683,12 +1683,15 @@ ${homeroomClassIds.length > 0 ? `你是 ${homeroomClassIds.join('、')} 的班�
             const hours = Math.round(gapMinutes / 60)
             gapStr = `${hours}个小时`
           }
-          parts.push(`[重要：时间跳跃] 游戏内时间过去了${gapStr}，玩家在这段时间里没有进行任何操作（挂机/离线）。请在回复中合理安排这段时间内发生的事情，自然地过渡到当前时间点，简要提及这段时间里可能发生的日常事件。`)
+          parts.push(`[重要：时间跳跃] 游戏内时间过去了${gapStr}，${player.name}在这段时间里处于日常状态。请在回复中合理安排这段时间内发生的事情，自然地过渡到当前时间点，简要提及这段时间里可能发生的日常事件。`)
         }
       }
 
       // NPC 记忆指令提示
-      parts.push(`[联机模式] 当NPC目睹/经历重要事件或获得重要信息时，请使用 <npc_memory name="NPC名">记忆内容</npc_memory> 记录。例如 <npc_memory name="NPC1">玩家A告诉我周六去约会，我好开心。</npc_memory> 记忆内容必须简短，直截了当，不带过多冗余信息，只保留核心内容`)
+      parts.push(`[NPC记忆] 当NPC目睹/经历重要事件或获得重要信息时，请使用 <npc_memory name="NPC名">记忆内容</npc_memory> 记录。例如 <npc_memory name="小明">小红告诉我周六去约会，我好开心。</npc_memory> 记忆内容必须简短，直截了当，只保留核心内容`)
+
+      // 反元叙述指令
+      parts.push(`[绝对禁止] 你的回复正文中严禁出现任何元叙述词汇，包括但不限于："玩家"、"另一个玩家"、"其他玩家"、"联机"、"多人游戏"、"对话组"、"合并对话"、"回合"、"行动窗口"。所有角色必须用其姓名称呼，不得以“玩家”或类似词汇指代任何人。叙述应完全以故事内视角展开，不得暗示角色在“游戏”中。`)
 
       if (parts.length > 0) {
         multiplayerContextPrompt = '\n' + parts.join('\n') + '\n'
@@ -1817,16 +1820,17 @@ ${homeroomClassIds.length > 0 ? `你是 ${homeroomClassIds.join('、')} 的班�
       群聊: { format: '<group_msg group="群组名称" sender="角色姓名">消息内容</group_msg>', notes: ["群组名称必须完全一致", `严禁sender设为"${player.name}"`] }
     },
     club: {
-      _note: "当接收到社团申请或社团邀请时必须立即处理，不论相关角色是否在场",
+      _description: '社团相关系统指令',
+      申请入社: '<apply_club id="club_id" name="申请人" reason="理由" />',
       拒绝入社: '<reject_club id="club_id" from="拒绝人" reason="理由" />',
       同意入社: '<join_club id="club_id" />',
       教师顾问: '<advise_club id="club_id" />',
       NPC接受邀请: '<club_invite_accept id="club_id" name="角色名" />',
       NPC拒绝邀请: '<club_invite_reject id="club_id" name="角色名" reason="拒绝理由" />',
-      邀请判断因素: ["角色性格和兴趣是否与社团契合", "是否已有其他社团（时间冲突）", "与玩家关系亲疏", "日程安排和个人状况", "社团性质和声誉"]
+      邀请判断因素: ["角色性格和兴趣是否与社团契合", "是否已有其他社团（时间冲突）", `与${player.name}关系亲疏`, "日程安排和个人状况", "社团性质和声誉"]
     },
     forum: {
-      _warning: `from属性严禁使用玩家"${player.name}"的名字！AI不得代替玩家发帖、回帖或点赞！`,
+      _warning: `from属性严禁使用${player.name}的名字！AI不得代替玩家发帖、回帖或点赞！`,
       _note: "论坛是校园生活的重要组成部分，应自然反映校园舆论氛围",
       发帖: '<forum_post board="版块" title="标题" from="作者" pinned="false">帖子内容</forum_post>',
       回复: '<forum_reply post_id="post_xxx" from="作者">回复内容</forum_reply>',
@@ -1848,7 +1852,7 @@ ${homeroomClassIds.length > 0 ? `你是 ${homeroomClassIds.join('、')} 的班�
     promptObj.minor_summary_requirement = {
       instruction: "你必须在每次回复的正文底部生成一个剧情小总结（100-200字）",
       format: {
-        fields: ["日期|年月日时分", "标题|20字左右", "地点|当前位置", "人物|当前场景角色", "描述|摘要总结", "人物关系|关系变化", "重要信息|重要信息", "角色意图|各角色目标", "互动内容|与玩家的关键互动", "待办事项|未完成的约定或任务"],
+        fields: ["日期|年月日时分", "标题|20字左右", "地点|当前位置", "人物|当前场景角色", "描述|摘要总结", "人物关系|关系变化", "重要信息|重要信息", "角色意图|各角色目标", "互动内容|与主角的关键互动", "待办事项|未完成的约定或任务"],
         tag: "<minor_summary>总结内容</minor_summary>"
       },
       notes: "客观记录，不添加主观评价。不可与其他标签混淆，也绝不可遗漏输出。"

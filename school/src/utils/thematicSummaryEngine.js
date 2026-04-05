@@ -76,7 +76,7 @@ export async function synthesizeThematicSummary(entityName, relatedSummaries) {
   const prompt = `请根据以下与"${entityName}"相关的多条历史记录，生成一份关于"${entityName}"的主题总结。
 
 要求：
-1. 总结"${entityName}"在这些记录中的核心经历、性格特征、与玩家的关系变化
+1. 总结“${entityName}”在这些记录中的核心经历、性格特征、与主角的关系变化
 2. 按时间线梳理关键事件
 3. 突出仍然有效的信息（承诺、约定、未解决的冲突等）
 4. 忽略已经完成或过时的事项
@@ -86,7 +86,7 @@ export async function synthesizeThematicSummary(entityName, relatedSummaries) {
 主题|${entityName}
 关键经历|（按时间线列出2-5个关键事件）
 性格印象|（基于记录总结的性格特点）
-关系状态|（当前与玩家的关系状态）
+关系状态|（当前与主角的关系状态）
 未解决事项|（尚未完结的约定、冲突、计划等，如果没有则写"无"）
 </thematic_summary>
 

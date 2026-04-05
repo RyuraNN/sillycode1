@@ -59,7 +59,7 @@ export function getConversationTurnLimitSeconds() {
 function resolveConversationPlayerName(playerId, fallbackName = '') {
   const mpStore = useMultiplayerStore()
   const remote = playerId ? mpStore.players[playerId] : null
-  return remote?.characterName || fallbackName || remote?.playerName || '其他玩家'
+  return remote?.characterName || fallbackName || remote?.playerName || '其他人'
 }
 
 /**
@@ -422,24 +422,24 @@ export function getConversationContextPrompt() {
   if (members.length === 0) return ''
 
   const names = members.map(m => m.characterName || m.playerName).join('、')
-  let prompt = `\n[合并对话模式] 当前对话组成员：${names}\n`
+  let prompt = `\n[当前场景参与者] 以下角色正在参与当前互动：${names}\n`
 
   const joinContexts = mpStore.consumeConversationJoinContexts(mpStore.conversationGroup.groupId)
   if (joinContexts.length > 0) {
-    prompt += '[加入当轮视角补充]\n'
+    prompt += '[新加入角色的背景补充]\n'
     for (const ctx of joinContexts) {
       const snapshot = String(ctx.aiReplySnapshot || '').replace(/\s+/g, ' ').trim().slice(0, 600)
       if (!snapshot) continue
-      prompt += `- ${ctx.joinedPlayerName} 加入对话组时，最近一次 AI 回复摘录：${snapshot}\n`
+      prompt += `- ${ctx.joinedPlayerName} 加入时，当时场景摘录：${snapshot}\n`
     }
   }
 
-  // 添加其他玩家的精简个人信息
+  // 添加其他角色的精简个人信息
   const playerInfos = mpStore.pendingTurnActions
     .filter(a => a.playerInfo)
     .map(a => a.playerInfo)
   if (playerInfos.length > 0) {
-    prompt += '[对话组成员信息]\n'
+    prompt += '[参与角色信息]\n'
     for (const info of playerInfos) {
       prompt += info + '\n'
     }
@@ -447,7 +447,7 @@ export function getConversationContextPrompt() {
 
   // 添加已收集的行动
   if (mpStore.pendingTurnActions.length > 0) {
-    prompt += '[本轮行动]\n'
+    prompt += '[已给出的行动]\n'
     for (const action of mpStore.pendingTurnActions) {
       const actorName = resolveConversationPlayerName(action.playerId, action.characterName || action.playerName)
       if (action.isSkip) {
@@ -458,10 +458,10 @@ export function getConversationContextPrompt() {
     }
   }
 
-  // NPC 占用状态
+  // NPC 参与状态
   const sharedNpcs = mpStore.conversationGroup.sharedNpcs || []
   if (sharedNpcs.length > 0) {
-    prompt += `[共享NPC] 以下NPC在对话组中共享：${sharedNpcs.join('、')}\n`
+    prompt += `[场景内NPC] 以下NPC正在参与当前互动：${sharedNpcs.join('、')}\n`
   }
 
   return prompt

@@ -768,7 +768,7 @@ function handleMessage(msg) {
       console.log(`[MultiplayerWs] NPC transfer: ${msg.data.npcName} from ${msg.data.fromPlayer}`)
       appendMultiplayerPromptCommand(
         gameStore,
-        `[联机事件] ${msg.data?.npcName || '某角色'} 从${msg.data?.fromPlayer || '其他玩家'}那边来到你这里${msg.data?.reason ? `（原因：${msg.data.reason}）` : ''}。`
+        `[场景变化] ${msg.data?.npcName || '某角色'}来到了你这边${msg.data?.reason ? `（缘由：${msg.data.reason}）` : ''}。`
       )
       if (msg.data?.npcName) {
         sendNpcTransferAck(msg.data.npcName)
@@ -778,7 +778,7 @@ function handleMessage(msg) {
     case 'npc_follow':
       appendMultiplayerPromptCommand(
         gameStore,
-        `[联机事件] ${msg.data?.npcName || '某角色'}${msg.data?.action === 'stop' ? '停止' : '开始'}跟随你。`
+        `[角色动态] ${msg.data?.npcName || '某角色'}${msg.data?.action === 'stop' ? '不再跟着你了' : '开始跟在你身边'}。`
       )
       break
 
