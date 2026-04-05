@@ -984,6 +984,8 @@ export interface GameState {
     mpSaveSnapshots: SaveSnapshot[]
     currentChatLog: ChatLogEntry[]
     pendingRestoreLog: ChatLogEntry[] | null
+    classScheduleCacheKey: string
+    classScheduleCache: Record<string, any>
     worldbookLoadResults: {
       classData: boolean | null
       clubData: boolean | null

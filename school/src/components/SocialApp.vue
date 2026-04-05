@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useGameStore } from '../stores/gameStore'
-import { syncSocialToStore, getSocialData, saveSocialData, saveMomentToWorldbook } from '../utils/socialWorldbook'
+import { syncSocialToStore, getSocialData, saveSocialData, saveMomentToWorldbook, resolveSocialMemberProfile } from '../utils/socialWorldbook'
 import { setItem, getItem, removeItem } from '../utils/indexedDB'
 import { getAllCharacterNames } from '../utils/relationshipManager'
 
@@ -200,18 +200,7 @@ const currentGroupMembers = computed(() => {
   if (!group) return []
   
   return group.members.map(memberId => {
-    if (memberId === 'player') {
-      return { id: 'player', name: gameStore.player.name, avatar: gameStore.player.avatar }
-    }
-    const friend = friends.value.find(f => f.id === memberId)
-    if (friend) return friend
-    const npc = gameStore.world.npcs.find(n => n.id === memberId)
-    if (npc) return { id: npc.id, name: npc.name, avatar: '👤', gender: npc.gender }
-    // 如果ID本身看起来像名字（非ID格式），直接使用
-    if (!memberId.startsWith('char_') && !memberId.startsWith('npc_')) {
-      return { id: memberId, name: memberId, avatar: '👤' }
-    }
-    return { id: memberId, name: '未知成员', avatar: '?' }
+    return resolveSocialMemberProfile(memberId, gameStore) || { id: memberId, name: '未知成员', avatar: '?' }
   })
 })
 

@@ -1804,9 +1804,13 @@ export function resolveLocationPlaceholder(locationId, npcData, gameStore) {
         const classInfo = gameStore.world.allClassData?.[currentClassId] || {}
         const termInfo = getTermInfo(year, month, day)
         // 确保同一周的课表一致
-        const schedule = generateWeeklySchedule(currentClassId, classInfo, termInfo.weekNumber)
+        const schedule = typeof gameStore.getAuthoritativeClassSchedule === 'function'
+          ? gameStore.getAuthoritativeClassSchedule(currentClassId, termInfo.weekNumber)
+          : generateWeeklySchedule(currentClassId, classInfo, termInfo.weekNumber, {
+              runId: gameStore.meta?.currentRunId || 'default'
+            })
         const weekdayEng = getWeekdayEnglish(gameStore.world.gameTime.weekday)
-        const todaySchedule = schedule[weekdayEng]
+        const todaySchedule = schedule?.[weekdayEng]
         
         if (todaySchedule) {
           const currentClass = todaySchedule.find(c => c.period === currentPeriod)

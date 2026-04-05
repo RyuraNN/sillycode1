@@ -1,8 +1,10 @@
 import { useGameStore } from '../stores/gameStore'
+import { useMultiplayerStore } from '../stores/multiplayerStore'
 import { getCurrentBookName } from './worldbookHelper'
 
 const ENTRY_PREFIX = '[Social:'
 const MOMENT_PREFIX = '[Moment:'
+export const MULTIPLAYER_GROUP_MEMBER_PREFIX = 'mp_player:'
 
 // 获取当前运行 ID
 function getCurrentRunId() {
@@ -26,6 +28,65 @@ function normalizeId(id) {
     return id.replace('npc_', 'char_')
   }
   return id
+}
+
+export function createMultiplayerGroupMemberId(playerId) {
+  return `${MULTIPLAYER_GROUP_MEMBER_PREFIX}${playerId}`
+}
+
+export function isMultiplayerGroupMemberId(id) {
+  return typeof id === 'string' && id.startsWith(MULTIPLAYER_GROUP_MEMBER_PREFIX)
+}
+
+function getMultiplayerGroupPlayerId(memberId) {
+  if (!isMultiplayerGroupMemberId(memberId)) return ''
+  return memberId.slice(MULTIPLAYER_GROUP_MEMBER_PREFIX.length)
+}
+
+export function resolveSocialMemberProfile(memberId, gameStore = useGameStore()) {
+  if (!memberId) return null
+
+  if (memberId === 'player') {
+    return { id: 'player', name: gameStore.player.name, avatar: gameStore.player.avatar }
+  }
+
+  if (isMultiplayerGroupMemberId(memberId)) {
+    const mpStore = useMultiplayerStore()
+    const playerId = getMultiplayerGroupPlayerId(memberId)
+    const remotePlayer = mpStore.players[playerId]
+    if (remotePlayer) {
+      return {
+        id: memberId,
+        name: remotePlayer.characterName || remotePlayer.playerName || '联机玩家',
+        avatar: remotePlayer.avatar || '👤'
+      }
+    }
+    const offlinePlayer = mpStore.offlinePlayers?.[playerId]
+    if (offlinePlayer) {
+      return {
+        id: memberId,
+        name: offlinePlayer.playerName || '离线玩家',
+        avatar: '👤'
+      }
+    }
+    return { id: memberId, name: '联机玩家', avatar: '👤' }
+  }
+
+  const friend = gameStore.player.social.friends.find(f => f.id === memberId)
+  if (friend) return friend
+
+  const npc = gameStore.world.npcs.find(n => n.id === memberId)
+  if (npc) return { id: npc.id, name: npc.name, avatar: '👤', gender: npc.gender }
+
+  if (!memberId.startsWith('char_') && !memberId.startsWith('npc_')) {
+    return { id: memberId, name: memberId, avatar: '👤' }
+  }
+
+  return null
+}
+
+export function resolveSocialMemberName(memberId, gameStore = useGameStore()) {
+  return resolveSocialMemberProfile(memberId, gameStore)?.name || null
 }
 
 // 解析条目内容 (支持 JSON 和 纯文本)
@@ -227,16 +288,7 @@ export async function saveSocialData(id, name, data, keys = [], floor = 0) {
   // 自动获取群成员作为关键词
   let allKeys = [...keys]
   if (isGroup && storeItem.members) {
-    // 获取所有成员的名字
-    const memberNames = storeItem.members.map(memberId => {
-      if (memberId === 'player') return gameStore.player.name
-      const friend = gameStore.player.social.friends.find(f => f.id === memberId)
-      if (friend) return friend.name
-      // 如果不是好友，尝试从 NPC 列表获取（这里假设 NPC 列表存在且包含所有 NPC）
-      const npc = gameStore.world.npcs.find(n => n.id === memberId)
-      if (npc) return npc.name
-      return null
-    }).filter(n => n)
+    const memberNames = storeItem.members.map(memberId => resolveSocialMemberName(memberId, gameStore)).filter(n => n)
     allKeys = [...allKeys, ...memberNames]
   }
 
@@ -247,14 +299,7 @@ export async function saveSocialData(id, name, data, keys = [], floor = 0) {
   // 获取成员名称列表（仅用于群聊）
   let memberNames = null
   if (isGroup && storeItem.members) {
-    memberNames = storeItem.members.map(memberId => {
-      if (memberId === 'player') return gameStore.player.name
-      const friend = gameStore.player.social.friends.find(f => f.id === memberId)
-      if (friend) return friend.name
-      const npc = gameStore.world.npcs.find(n => n.id === memberId)
-      if (npc) return npc.name
-      return null
-    }).filter(n => n)
+    memberNames = storeItem.members.map(memberId => resolveSocialMemberName(memberId, gameStore)).filter(n => n)
   }
   
   const content = formatEntryContent(data, name, memberNames) // 传入成员列表
@@ -523,14 +568,7 @@ export async function saveSocialRelationshipOverview() {
       const unreadInfo = group.unreadCount > 0 ? ` (${group.unreadCount}条未读)` : ''
       let memberInfo = ''
       if (group.members && group.members.length > 0) {
-        const memberNames = group.members.map(memberId => {
-          if (memberId === 'player') return gameStore.player.name
-          const friend = gameStore.player.social.friends.find(f => f.id === memberId)
-          if (friend) return friend.name
-          const npc = gameStore.world.npcs.find(n => n.id === memberId)
-          if (npc) return npc.name
-          return null
-        }).filter(n => n)
+        const memberNames = group.members.map(memberId => resolveSocialMemberName(memberId, gameStore)).filter(n => n)
         memberInfo = ` [成员: ${memberNames.join(', ')}]`
       }
       content += `- ${group.name}${unreadInfo}${memberInfo}\n`

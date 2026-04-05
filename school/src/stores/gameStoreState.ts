@@ -326,11 +326,13 @@ export function createInitialState(): GameState {
     _ui: {
       mapSelectionMode: false,
       mapSelectionCallback: null,
-      saveError: null as string | null,
+      saveError: null,
       saveSnapshots: [],
       mpSaveSnapshots: [],
       currentChatLog: [],
       pendingRestoreLog: null,
+      classScheduleCacheKey: '',
+      classScheduleCache: {},
       worldbookLoadResults: {
         classData: null,
         clubData: null,

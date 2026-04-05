@@ -15,7 +15,7 @@ import MapEditorPanel from './MapEditorPanel.vue'
 import { setPlayerClass, setupTeacherClassEntries, fetchMapDataFromWorldbook } from '../utils/worldbookParser'
 import { DEFAULT_FORUM_POSTS, saveForumToWorldbook } from '../utils/forumWorldbook'
 import { getCoursePoolState, getElectiveCourses, getRequiredCourses, UNIVERSAL_ELECTIVES, GRADE_1_COURSES, GRADE_2_COURSES, GRADE_3_COURSES, registerCustomCourse, saveCoursePoolToWorldbook, ELECTIVE_PREFERENCES } from '../data/coursePoolData'
-import { generateIndependentTeacherSchedule, getTermInfo, LOCATION_NAMES } from '../utils/scheduleGenerator'
+import { generateIndependentTeacherSchedule, LOCATION_NAMES } from '../utils/scheduleGenerator'
 import { mapData, setMapData } from '../data/mapData'
 
 const props = defineProps({
@@ -932,6 +932,7 @@ const confirmSignature = async () => {
       month: gameStore.world.gameTime.month,
       day: gameStore.world.gameTime.day
     }
+    const currentWeekNumber = gameStore.getWeekNumber()
     
     // 构造完整的教师信息对象
     const fullTeacherInfo = {
@@ -943,10 +944,19 @@ const confirmSignature = async () => {
       customCourses: teacherData.value.customCourses
     }
     
+    gameStore.clearClassScheduleCache?.()
+    const classSchedules = gameStore.getAuthoritativeClassSchedules?.(currentWeekNumber) || {}
+
     gameStore.player.schedule = generateIndependentTeacherSchedule(
       fullTeacherInfo,
       currentDate,
-      gameStore.world.allClassData
+      gameStore.world.allClassData,
+      {
+        weekNumber: currentWeekNumber,
+        runId: gameStore.meta.currentRunId || 'default',
+        teacherName: gameStore.player.name,
+        classSchedules
+      }
     )
     console.log('[GameStart] Generated independent teacher schedule:', gameStore.player.schedule)
     

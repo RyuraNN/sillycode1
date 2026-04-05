@@ -150,6 +150,22 @@ export const useMultiplayerStore = defineStore('multiplayer', {
   },
 
   actions: {
+    refreshLocalClassGroups(reason: string) {
+      import('./gameStore').then(({ useGameStore }) => {
+        const gameStore = useGameStore()
+        if (typeof gameStore.clearClassScheduleCache === 'function') {
+          gameStore.clearClassScheduleCache()
+        }
+        if (typeof gameStore.refreshJoinedClassGroups === 'function') {
+          Promise.resolve(gameStore.refreshJoinedClassGroups()).catch((error) => {
+            console.warn('[MultiplayerStore] Failed to refresh class groups:', reason, error)
+          })
+        }
+      }).catch((error) => {
+        console.warn('[MultiplayerStore] Failed to load gameStore for class group refresh:', reason, error)
+      })
+    },
+
     // ── Welcome 处理 ──
     handleWelcome(data: {
       roomInfo: RoomInfo
@@ -201,8 +217,20 @@ export const useMultiplayerStore = defineStore('multiplayer', {
             this.originalRunId = gameStore.meta.currentRunId
             gameStore.meta.currentRunId = data.roomInfo.roomRunId!
             console.log('[MultiplayerStore] Override local runId to room runId:', data.roomInfo.roomRunId)
+            if (typeof gameStore.clearClassScheduleCache === 'function') {
+              gameStore.clearClassScheduleCache()
+            }
+            if (typeof gameStore.refreshJoinedClassGroups === 'function') {
+              Promise.resolve(gameStore.refreshJoinedClassGroups()).catch((error) => {
+                console.warn('[MultiplayerStore] Failed to refresh class groups after welcome:', error)
+              })
+            }
           })
+        } else {
+          this.refreshLocalClassGroups('welcome')
         }
+      } else {
+        this.refreshLocalClassGroups('welcome')
       }
 
       // NPC 记忆
@@ -234,6 +262,8 @@ export const useMultiplayerStore = defineStore('multiplayer', {
           }))
         }
       }
+
+      this.refreshLocalClassGroups('player_joined')
     },
 
     handlePlayerStatusChange(data: { playerId: string; playerName: string; lobbyStatus: string }) {
@@ -263,6 +293,8 @@ export const useMultiplayerStore = defineStore('multiplayer', {
           this.conversationGroup = null
         }
       }
+
+      this.refreshLocalClassGroups('player_left')
     },
 
     // ── 聊天 ──
@@ -310,7 +342,16 @@ export const useMultiplayerStore = defineStore('multiplayer', {
       const player = this.players[from]
       const payload = data.stats || data.publicState
       if (player && payload) {
+        const shouldRefreshClassGroups = (
+          'classId' in payload ||
+          'role' in payload ||
+          'characterName' in payload ||
+          'playerName' in payload
+        )
         Object.assign(player, payload)
+        if (shouldRefreshClassGroups) {
+          this.refreshLocalClassGroups('player_update')
+        }
       }
     },
 

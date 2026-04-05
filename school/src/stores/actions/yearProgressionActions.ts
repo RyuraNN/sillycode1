@@ -8,8 +8,7 @@
  * - 存档回溯时通过 syncClassWorldbookState 恢复正确的开关状态
  */
 
-import type { ClubData, NpcStats, GraduatedNpc, Group } from '../gameStoreTypes'
-import { generateWeeklySchedule } from '../../utils/scheduleGenerator'
+import type { ClubData, NpcStats, GraduatedNpc } from '../gameStoreTypes'
 import { generateCharId } from '../../data/relationshipData'
 import { getGradeFromClassId } from '../../data/coursePoolData'
 import { clearAllCache } from '../../utils/npcScheduleSystem'
@@ -966,6 +965,8 @@ export const yearProgressionActions = {
     console.log('[YearProgression] Step 7: Regenerating schedules...')
 
     const weekNumber = this.getWeekNumber()
+    this.clearClassScheduleCache?.()
+    const classSchedules = this.getAuthoritativeClassSchedules?.(weekNumber) || {}
 
     // 重新生成玩家课表
     if (this.player.role === 'teacher') {
@@ -981,7 +982,13 @@ export const yearProgressionActions = {
           customCourses: this.player.customCourses || []
         },
         { year: this.world.gameTime.year, month: this.world.gameTime.month, day: this.world.gameTime.day },
-        this.world.allClassData
+        this.world.allClassData,
+        {
+          weekNumber,
+          runId: this.meta.currentRunId || 'default',
+          teacherName: this.player.name,
+          classSchedules
+        }
       )
       console.log('[YearProgression] Regenerated teacher schedule')
     } else if (this.player.classId) {
@@ -989,7 +996,7 @@ export const yearProgressionActions = {
       const classInfo = this.world.allClassData[this.player.classId]
       if (classInfo) {
         this.player.classRoster = classInfo
-        this.player.schedule = generateWeeklySchedule(this.player.classId, classInfo, weekNumber)
+        this.player.schedule = this.getAuthoritativeClassSchedule?.(this.player.classId, weekNumber)
         console.log('[YearProgression] Regenerated player schedule for', this.player.classId)
       }
     }
@@ -1010,29 +1017,7 @@ export const yearProgressionActions = {
 
     // 重新初始化所有班级NPC
     this.initializeAllClassNpcs()
-
-    // 重建班级群
-    // 先移除所有旧班级群
-    this.player.social.groups = this.player.social.groups.filter(
-      (g: Group) => !g.id.startsWith('group_')
-    )
-
-    // 为玩家当前班级创建新群
-    if (this.player.role === 'teacher') {
-      // 教师加入所有教授班级的群
-      for (const classId of this.player.teachingClasses) {
-        const classInfo = this.world.allClassData[classId]
-        if (classInfo) {
-          await this.joinClassGroup(classId, classInfo)
-        }
-      }
-    } else if (this.player.classId) {
-      // 学生加入自己班级的群
-      const classInfo = this.world.allClassData[this.player.classId]
-      if (classInfo) {
-        await this.joinClassGroup(this.player.classId, classInfo)
-      }
-    }
+    await this.refreshJoinedClassGroups?.()
 
     console.log('[YearProgression] NPC data and groups refreshed')
   },

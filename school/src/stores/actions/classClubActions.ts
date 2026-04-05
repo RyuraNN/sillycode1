@@ -3,12 +3,13 @@
  */
 
 import type { ClubData, Group, NpcStats } from '../gameStoreTypes'
+import { useMultiplayerStore } from '../multiplayerStore'
 import { fetchClassDataFromWorldbook, fetchClubDataFromWorldbook, addPlayerToClubInWorldbook, removePlayerFromClubInWorldbook, syncClubWorldbookState, syncClassWorldbookState, setPlayerClass, setVariableParsingWorldbookStatus, addNpcToClubInWorldbook, createClubInWorldbook, ensureClubExistsInWorldbook, setupTeacherClassEntries, fetchMapDataFromWorldbook, fetchAcademicDataFromWorldbook, fetchTagDataFromWorldbook } from '../../utils/worldbookParser'
 import { DEFAULT_FORUM_POSTS, saveForumToWorldbook, switchForumSlot } from '../../utils/forumWorldbook'
-import { saveSocialData, switchSaveSlot, saveSocialRelationshipOverview, restoreWorldbookFromStore } from '../../utils/socialWorldbook'
+import { createMultiplayerGroupMemberId, saveSocialData, switchSaveSlot, saveSocialRelationshipOverview, restoreWorldbookFromStore } from '../../utils/socialWorldbook'
 import { switchPartTimeSaveSlot, restorePartTimeWorldbookFromStore } from '../../utils/partTimeWorldbook'
 import { saveImpressionData, switchImpressionSlot, restoreImpressionWorldbookFromStore } from '../../utils/impressionWorldbook'
-import { generateWeeklySchedule } from '../../utils/scheduleGenerator'
+import { generateAllClassSchedules } from '../../utils/scheduleGenerator'
 import { generateCharId } from '../../data/relationshipData'
 import { createInitialPlayerState, createInitialGameTime, createInitialWorldState } from '../gameStoreState'
 import { getCurrentBookName } from '../../utils/worldbookHelper'
@@ -24,9 +25,11 @@ export const classClubActions = {
     if (worldbookData) {
       console.log('[GameStore] Loaded class data from Worldbook', worldbookData)
       this.world.allClassData = worldbookData
+      this.clearClassScheduleCache?.()
     } else {
       console.warn('[GameStore] Failed to load class data from Worldbook')
       this.world.allClassData = {}
+      this.clearClassScheduleCache?.()
     }
     
     // 初始化所有班级的 NPC 数据
@@ -92,6 +95,141 @@ export const classClubActions = {
     }
     
     console.log(`[GameStore] Initialized ${count} new NPCs from class data. Total NPCs: ${this.world.npcs.length}`)
+  },
+
+  getAuthoritativeClassScheduleCacheKey(this: any, weekNumber?: number) {
+    const targetWeekNumber = Number.isFinite(Number(weekNumber)) ? Number(weekNumber) : (this.getWeekNumber?.() ?? 1)
+    return `${this.meta.currentRunId || 'default'}:${targetWeekNumber}`
+  },
+
+  clearClassScheduleCache(this: any) {
+    this._ui.classScheduleCacheKey = ''
+    this._ui.classScheduleCache = {}
+  },
+
+  getAuthoritativeClassSchedules(this: any, weekNumber?: number) {
+    const targetWeekNumber = Number.isFinite(Number(weekNumber)) ? Number(weekNumber) : (this.getWeekNumber?.() ?? 1)
+    const cacheKey = this.getAuthoritativeClassScheduleCacheKey(targetWeekNumber)
+    if (this._ui.classScheduleCacheKey !== cacheKey || !this._ui.classScheduleCache || Object.keys(this._ui.classScheduleCache).length === 0) {
+      const teacherOverrides = this.player.role === 'teacher'
+        ? {
+            teacherName: this.player.name,
+            classSubjectMap: this.player.classSubjectMap || {}
+          }
+        : null
+      this._ui.classScheduleCache = generateAllClassSchedules(
+        this.world.allClassData || {},
+        targetWeekNumber,
+        this.meta.currentRunId || 'default',
+        teacherOverrides || undefined
+      )
+      this._ui.classScheduleCacheKey = cacheKey
+    }
+    return this._ui.classScheduleCache || {}
+  },
+
+  getAuthoritativeClassSchedule(this: any, classId: string, weekNumber?: number) {
+    if (!classId) return null
+    const schedules = this.getAuthoritativeClassSchedules(weekNumber)
+    const schedule = schedules?.[classId]
+    return schedule ? JSON.parse(JSON.stringify(schedule)) : null
+  },
+
+  pruneClassGroups(this: any, classIds: string[] = []) {
+    const allowedGroupIds = new Set(classIds.filter(Boolean).map((classId: string) => `group_${classId}`))
+    this.player.social.groups = this.player.social.groups.filter((group: Group) => !group.id.startsWith('group_') || allowedGroupIds.has(group.id))
+  },
+
+  buildClassGroupMembers(this: any, classId: string, classInfo: any) {
+    const mpStore = useMultiplayerStore()
+    const members: string[] = ['player']
+    const seenNames = new Set<string>([this.player.name])
+
+    const addNpcMember = (name: string, role: 'student' | 'teacher' = 'student') => {
+      if (!name || seenNames.has(name)) return
+      seenNames.add(name)
+      const charId = generateCharId(name)
+      if (!members.includes(charId)) {
+        members.push(charId)
+      }
+      if (!this.world.npcs.find((npc: NpcStats) => npc.id === charId)) {
+        this.world.npcs.push({
+          id: charId,
+          name,
+          relationship: 0,
+          isAlive: false,
+          location: classId,
+          classId,
+          role
+        })
+      }
+    }
+
+    const addRemoteMember = (remotePlayer: any) => {
+      const displayName = remotePlayer?.characterName || remotePlayer?.playerName || ''
+      if (!displayName || seenNames.has(displayName)) return
+      seenNames.add(displayName)
+      const memberId = createMultiplayerGroupMemberId(remotePlayer.playerId)
+      if (!members.includes(memberId)) {
+        members.push(memberId)
+      }
+    }
+
+    if (classInfo?.headTeacher?.name) {
+      addNpcMember(classInfo.headTeacher.name, 'teacher')
+    }
+
+    if (Array.isArray(classInfo?.teachers)) {
+      classInfo.teachers.forEach((teacher: any) => {
+        if (teacher?.name) addNpcMember(teacher.name, 'teacher')
+      })
+    }
+
+    if (Array.isArray(classInfo?.students)) {
+      classInfo.students.forEach((student: any) => {
+        if (student?.name) addNpcMember(student.name, 'student')
+      })
+    }
+
+    const remotePlayers = Object.values(mpStore.players || {})
+      .filter((player: any) => player?.playerId && player.playerId !== mpStore.localPlayerId)
+      .sort((a: any, b: any) => {
+        const nameA = a?.characterName || a?.playerName || ''
+        const nameB = b?.characterName || b?.playerName || ''
+        return nameA.localeCompare(nameB)
+      })
+
+    remotePlayers.forEach((remotePlayer: any) => {
+      if (remotePlayer?.role === 'student' && remotePlayer?.classId === classId) {
+        addRemoteMember(remotePlayer)
+      }
+      if (remotePlayer?.role === 'teacher' && remotePlayer?.classId === classId) {
+        addRemoteMember(remotePlayer)
+      }
+    })
+
+    return members
+  },
+
+  async refreshJoinedClassGroups(this: any) {
+    const targetClassIds: string[] = this.player.role === 'teacher'
+      ? ((this.player.teachingClasses && this.player.teachingClasses.length > 0) ? this.player.teachingClasses : (this.player.classId ? [this.player.classId] : []))
+      : (this.player.classId ? [this.player.classId] : [])
+
+    const uniqueClassIds: string[] = [...new Set((targetClassIds || []).filter((classId: string) => Boolean(classId)))]
+    this.pruneClassGroups(uniqueClassIds)
+
+    for (const classId of uniqueClassIds) {
+      const classInfo = this.world.allClassData?.[classId]
+      if (classInfo) {
+        await this.joinClassGroup(classId, classInfo, { forceRefresh: true })
+      }
+    }
+
+    if (uniqueClassIds.length === 0) {
+      await saveSocialRelationshipOverview()
+      this.saveToStorage()
+    }
   },
 
   /**
@@ -199,20 +337,23 @@ export const classClubActions = {
     if (classInfo) {
       this.player.classRoster = classInfo
       const weekNumber = this.getWeekNumber()
-      this.player.schedule = generateWeeklySchedule(classId, classInfo, weekNumber)
+      this.clearClassScheduleCache()
+      this.player.schedule = this.getAuthoritativeClassSchedule(classId, weekNumber)
       console.log('[GameStore] Generated schedule for class:', classId, this.player.schedule)
 
       // 如果是教师，加入所有执教班级的群聊
       if (this.player.role === 'teacher' && this.player.teachingClasses && this.player.teachingClasses.length > 0) {
+        this.pruneClassGroups(this.player.teachingClasses)
         for (const teachingClassId of this.player.teachingClasses) {
           const teachingClassInfo = this.world.allClassData[teachingClassId]
           if (teachingClassInfo) {
-            await this.joinClassGroup(teachingClassId, teachingClassInfo)
+            await this.joinClassGroup(teachingClassId, teachingClassInfo, { forceRefresh: true })
           }
         }
       } else {
         // 学生只加入自己班级的群聊
-        await this.joinClassGroup(classId, classInfo)
+        this.pruneClassGroups([classId])
+        await this.joinClassGroup(classId, classInfo, { forceRefresh: true })
       }
       
       this.saveToStorage()
@@ -222,78 +363,44 @@ export const classClubActions = {
   /**
    * 自动加入班级群
    */
-  async joinClassGroup(this: any, classId: string, classInfo: any) {
+  async joinClassGroup(this: any, classId: string, classInfo: any, options: { forceRefresh?: boolean } = {}) {
     const groupId = `group_${classId}`
-    
-    // 如果是教师，不要清除旧的班级群，允许加入多个
-    // 如果是学生，清除旧的班级群（模拟转班）
-    if (this.player.role !== 'teacher') {
-      this.player.social.groups = this.player.social.groups.filter((g: Group) => !g.id.startsWith('group_'))
-    }
-    
-    if (this.player.social.groups.some((g: Group) => g.id === groupId)) return
+    const nextMembers = this.buildClassGroupMembers(classId, classInfo)
+    const nextName = `${classInfo.name || classId}群`
+    const nextAnnouncement = `欢迎加入${classInfo.name || classId}大家庭！`
+    let classGroup = this.player.social.groups.find((group: Group) => group.id === groupId)
 
-    const members: string[] = ['player']
-    
-    const addMember = (name: string, role: 'student' | 'teacher' = 'student') => {
-      const charId = generateCharId(name)
-      if (members.includes(charId)) return
-
-      members.push(charId)
-      
-      if (!this.world.npcs.find((n: NpcStats) => n.id === charId)) {
-        this.world.npcs.push({
-          id: charId,
-          name: name,
-          relationship: 0,
-          isAlive: false,
-          location: classId,
-          classId: classId, // 显式设置 classId，用于日程系统
-          role: role
-        })
+    if (classGroup) {
+      const sameMembers = JSON.stringify(classGroup.members || []) === JSON.stringify(nextMembers)
+      const sameMeta = classGroup.name === nextName && classGroup.announcement === nextAnnouncement
+      if (sameMembers && sameMeta && !options.forceRefresh) {
+        return classGroup
       }
+      classGroup.name = nextName
+      classGroup.avatar = '🏫'
+      classGroup.members = nextMembers
+      classGroup.announcement = nextAnnouncement
+      classGroup.messages = classGroup.messages || []
+      classGroup.unreadCount = classGroup.unreadCount || 0
+    } else {
+      classGroup = {
+        id: groupId,
+        name: nextName,
+        avatar: '🏫',
+        members: nextMembers,
+        announcement: nextAnnouncement,
+        messages: [],
+        unreadCount: 0
+      }
+      this.player.social.groups.push(classGroup)
+      console.log('[GameStore] Auto joined class group:', classGroup.name)
     }
-
-    if (classInfo.headTeacher && classInfo.headTeacher.name) {
-      addMember(classInfo.headTeacher.name, 'teacher')
-    }
-    
-    if (classInfo.teachers && Array.isArray(classInfo.teachers)) {
-      classInfo.teachers.forEach((t: any) => {
-        if (t.name) addMember(t.name, 'teacher')
-      })
-    }
-    
-    if (classInfo.students && Array.isArray(classInfo.students)) {
-      classInfo.students.forEach((s: any) => {
-        if (s.name && s.name !== this.player.name) {
-          addMember(s.name, 'student')
-        }
-      })
-    }
-
-    const classGroup: Group = {
-      id: groupId,
-      name: `${classInfo.name || classId}群`,
-      avatar: '🏫',
-      members: members,
-      announcement: `欢迎加入${classInfo.name || classId}大家庭！`,
-      messages: [],
-      unreadCount: 0
-    }
-
-    this.player.social.groups.push(classGroup)
-    console.log('[GameStore] Auto joined class group:', classGroup.name)
     
     try {
       await saveSocialData(classGroup.id, classGroup.name, {
-        messages: [],
-        unreadCount: 0
-      }, members.map((memberId: string) => {
-        if (memberId === 'player') return this.player.name
-        const npc = this.world.npcs.find((n: NpcStats) => n.id === memberId)
-        return npc ? npc.name : null
-      }).filter((n: any) => n), this.meta.currentFloor)
+        messages: classGroup.messages || [],
+        unreadCount: classGroup.unreadCount || 0
+      }, [], this.meta.currentFloor)
       
       console.log('[GameStore] Class group worldbook entry created')
       await saveSocialRelationshipOverview()
