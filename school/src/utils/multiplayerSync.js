@@ -342,19 +342,24 @@ async function applySyncWorldbookSnapshot(syncSnapshot) {
     throw new Error('updateWorldbookWith API 不可用')
   }
 
+  // 打平房主所有书的同步条目，按条目名建索引（忽略书名）
+  const hostEntryMap = new Map()
   for (const book of syncSnapshot) {
-    const hostEntryMap = new Map()
     for (const entry of book.entries) {
       if (entry.name) hostEntryMap.set(entry.name, entry)
     }
+  }
 
-    await window.updateWorldbookWith(book.bookName, (localEntries) => {
+  // 对本地每一本世界书做替换/删除，并记录已匹配条目
+  const matched = new Set()
+  const localBookNames = getAllBookNames()
+
+  for (const bookName of localBookNames) {
+    await window.updateWorldbookWith(bookName, (localEntries) => {
       const result = []
-      const matched = new Set()
-
       for (const local of localEntries) {
         if (isSyncableEntry(local.name) && hostEntryMap.has(local.name)) {
-          // 用房主版本替换本地同步条目
+          // 用房主版本替换
           result.push(hostEntryMap.get(local.name))
           matched.add(local.name)
         } else if (isSyncableEntry(local.name) && !hostEntryMap.has(local.name)) {
@@ -364,15 +369,16 @@ async function applySyncWorldbookSnapshot(syncSnapshot) {
           result.push(local)
         }
       }
-
-      // 房主有但本地没有的同步条目 → 新增
-      for (const [name, entry] of hostEntryMap) {
-        if (!matched.has(name)) {
-          result.push(entry)
-        }
-      }
-
       return result
+    })
+  }
+
+  // 房主有但本地任何书都没有的同步条目 → 追加到第一本本地世界书
+  const unmatched = [...hostEntryMap.entries()].filter(([name]) => !matched.has(name))
+  if (unmatched.length > 0 && localBookNames.length > 0) {
+    const targetBook = localBookNames[0]
+    await window.updateWorldbookWith(targetBook, (localEntries) => {
+      return [...localEntries, ...unmatched.map(([, entry]) => entry)]
     })
   }
 }

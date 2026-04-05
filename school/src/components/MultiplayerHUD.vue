@@ -117,7 +117,9 @@ const roomDifficultyInfo = computed(() => {
 
 function getResolvedPlayerName(player) {
   if (!player) return ''
-  return player.characterName || player.playerName || player.playerId || ''
+  const full = player.playerId ? mpStore.players[player.playerId] : null
+  const merged = full ? { ...player, ...full } : player
+  return merged.characterName || merged.playerName || merged.playerId || ''
 }
 
 const turnProgressEntries = computed(() => {
