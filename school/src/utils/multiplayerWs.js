@@ -305,7 +305,8 @@ function _mapHandshakeRejection(event) {
 /**
  * 断开连接
  */
-export function disconnect() {
+export function disconnect(options = {}) {
+  const restoreWorldbook = options.restoreWorldbook !== false
   clearTimeout(reconnectTimer)
   clearTimeout(stableResetTimer)
   reconnectAttempts = MAX_RECONNECT_ATTEMPTS
@@ -329,6 +330,12 @@ export function disconnect() {
 
   const mpStore = useMultiplayerStore()
   mpStore.reset()
+
+  if (restoreWorldbook) {
+    import('./multiplayerSync')
+      .then(({ restorePendingWorldbookIfNeeded }) => restorePendingWorldbookIfNeeded())
+      .catch((e) => console.warn('[MultiplayerWs] Failed to restore pending worldbook:', e))
+  }
 }
 
 /**
@@ -797,7 +804,7 @@ function handleMessage(msg) {
 
     case 'switch_to_single_player':
       console.warn('[MultiplayerWs] Switching to single-player:', msg.data?.reason || 'vote')
-      disconnect()
+      disconnect({ restoreWorldbook: false })
       mpStore.connectionError = '房主断线投票结果：已转为单人模式'
       window.dispatchEvent(new CustomEvent('mp:switch_to_single_player', { detail: msg.data || {} }))
       break

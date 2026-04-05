@@ -39,6 +39,8 @@ mpStore.loadBackups()
 
 const showMenu = () => {
   currentView.value = 'menu'
+  // 返回菜单时重新加载备份元数据，确保按钮状态正确
+  mpStore.loadBackups()
 }
 
 const handleOpenLobby = () => {
@@ -210,8 +212,8 @@ async function resetGame() {
         <button class="menu-btn" @click="currentView = 'load'">读取存档</button>
         <button class="menu-btn" @click="currentView = 'settings'">游戏设置</button>
         <button class="menu-btn mp-btn" @click="currentView = 'multiplayer'">联机模式</button>
-        <button v-if="mpStore.worldbookBackups.length > 0" class="menu-btn wb-restore-btn" @click="showWorldbookBackups = true">恢复世界书</button>
       </div>
+      <button v-if="mpStore.worldbookBackups.length > 0" class="menu-btn wb-restore-btn wb-restore-standalone" @click="showWorldbookBackups = true">恢复世界书</button>
 
     </div>
 
@@ -483,6 +485,12 @@ async function resetGame() {
     width: 220px;
     letter-spacing: 2px;
   }
+
+  .wb-restore-standalone {
+    bottom: 8%;
+    padding: 10px 30px;
+    width: 220px;
+  }
 }
 
 .fullscreen-circle-btn {
@@ -556,6 +564,14 @@ async function resetGame() {
   font-size: 0.85rem;
 }
 
+.wb-restore-standalone {
+  position: absolute;
+  left: 50%;
+  bottom: 12%;
+  transform: translateX(-50%);
+  padding: 12px 36px;
+}
+
 .menu-btn.wb-restore-btn:hover {
   background: linear-gradient(135deg,
     rgba(90, 160, 130, 0.4) 0%,
@@ -566,6 +582,14 @@ async function resetGame() {
     0 8px 30px rgba(90, 160, 130, 0.2),
     0 4px 15px rgba(0, 0, 0, 0.3),
     inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.wb-restore-standalone:hover {
+  transform: translateX(-50%);
+}
+
+.wb-restore-standalone:active {
+  transform: translateX(-50%);
 }
 
 .reset-btn {

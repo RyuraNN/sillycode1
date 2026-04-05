@@ -10,6 +10,37 @@ import { setItem, getItem, removeItem } from './indexedDB'
 import { sendLocationChange, sendPlayerUpdate, sendNpcMemorySync, sendNpcChatSync, sendWorldbookSyncComplete } from './multiplayerWs'
 
 const WB_BACKUP_KEY_PREFIX = 'wb_backup_'
+const WB_PENDING_RESTORE_KEY = 'school_pending_worldbook_restore'
+
+function getPendingWorldbookRestore() {
+  try {
+    const stored = localStorage.getItem(WB_PENDING_RESTORE_KEY)
+    if (!stored) return null
+    const parsed = JSON.parse(stored)
+    if (!parsed?.backupId) return null
+    return parsed
+  } catch (e) {
+    console.warn('[MultiplayerSync] Failed to read pending worldbook restore:', e)
+    return null
+  }
+}
+
+function setPendingWorldbookRestore(payload) {
+  if (!payload?.backupId) return
+  try {
+    localStorage.setItem(WB_PENDING_RESTORE_KEY, JSON.stringify(payload))
+  } catch (e) {
+    console.warn('[MultiplayerSync] Failed to save pending worldbook restore:', e)
+  }
+}
+
+export function clearPendingWorldbookRestore() {
+  try {
+    localStorage.removeItem(WB_PENDING_RESTORE_KEY)
+  } catch (e) {
+    console.warn('[MultiplayerSync] Failed to clear pending worldbook restore:', e)
+  }
+}
 
 // ==================== 联机同步条目过滤 ====================
 
@@ -216,6 +247,9 @@ export async function createWorldbookBackup(source = 'manual', extra = {}) {
  */
 export async function restoreWorldbookBackup(backupId) {
   const mpStore = useMultiplayerStore()
+  if (!mpStore.worldbookBackups.length) {
+    mpStore.loadBackups()
+  }
   const meta = mpStore.worldbookBackups.find(b => b.id === backupId)
   if (!meta) {
     console.error('[MultiplayerSync] Backup not found:', backupId)
@@ -234,6 +268,7 @@ export async function restoreWorldbookBackup(backupId) {
 
     // 应用备份数据
     await applyWorldbookSnapshot(snapshot)
+    clearPendingWorldbookRestore()
 
     console.log(`[MultiplayerSync] Worldbook restored from backup: ${backupId}`)
     return true
@@ -241,6 +276,24 @@ export async function restoreWorldbookBackup(backupId) {
     console.error('[MultiplayerSync] Restore failed:', e)
     return false
   }
+}
+
+export async function restorePendingWorldbookIfNeeded() {
+  const pending = getPendingWorldbookRestore()
+  if (!pending?.backupId) return false
+
+  const mpStore = useMultiplayerStore()
+  if (!mpStore.worldbookBackups.length) {
+    mpStore.loadBackups()
+  }
+
+  const meta = mpStore.worldbookBackups.find(b => b.id === pending.backupId)
+  if (!meta) {
+    clearPendingWorldbookRestore()
+    return false
+  }
+
+  return restoreWorldbookBackup(pending.backupId)
 }
 
 /**
@@ -359,10 +412,16 @@ export async function checkAndSyncWorldbook(hostHash) {
 export async function acceptHostWorldbook(hostSnapshot, extra = {}) {
   try {
     // 先备份当前世界书
-    await createWorldbookBackup('multiplayer_sync', {
+    const backup = await createWorldbookBackup('multiplayer_sync', {
       roomId: extra.roomId,
       hostName: extra.hostName,
       label: `联机同步前备份 (房间: ${extra.roomId || '?'}, 房主: ${extra.hostName || '?'})`,
+    })
+    setPendingWorldbookRestore({
+      backupId: backup.id,
+      roomId: extra.roomId || null,
+      hostName: extra.hostName || null,
+      createdAt: Date.now(),
     })
 
     // 合并房主的同步条目到本地世界书（保留本地非同步条目）

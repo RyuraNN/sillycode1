@@ -5,6 +5,7 @@ import SplashScreen from './components/SplashScreen.vue'
 import { useGameStore } from './stores/gameStore'
 import { requestPersistence, clearAllData } from './utils/indexedDB'
 import { loadCoursePoolFromWorldbook } from './data/coursePoolData'
+import { restorePendingWorldbookIfNeeded } from './utils/multiplayerSync'
 import { isWorldbookAvailable, getCurrentBookName } from './utils/worldbookHelper'
 import { getErrorMessage } from './utils/errorUtils'
 import { handleAuthCallback, isAuthenticated as checkAuth, getAuthInfo } from './utils/multiplayerAuth'
@@ -112,6 +113,12 @@ async function doInitialize() {
       await requestPersistence()
     } catch (e) {
       console.warn('[App] requestPersistence failed:', e)
+    }
+
+    try {
+      await restorePendingWorldbookIfNeeded()
+    } catch (e) {
+      console.warn('[App] restorePendingWorldbookIfNeeded failed:', e)
     }
     
     // 初始化时从本地存储加载存档
