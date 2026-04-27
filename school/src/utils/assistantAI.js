@@ -10,6 +10,18 @@ import { buildApiRequest, extractReply, PROVIDER_PRESETS, resolveVertexRequestMo
 const ASSISTANT_API_TIMEOUT_MS = 120000
 const WORLDBOOK_FETCH_TIMEOUT_MS = 10000
 
+function redactEndpointForLog(endpoint) {
+  try {
+    const url = new URL(endpoint)
+    for (const key of ['key', 'api_key', 'access_token', 'token']) {
+      if (url.searchParams.has(key)) url.searchParams.set(key, '[redacted]')
+    }
+    return url.toString()
+  } catch {
+    return String(endpoint || '').replace(/([?&](?:key|api_key|access_token|token)=)[^&]+/gi, '$1[redacted]')
+  }
+}
+
 function withTimeout(promise, timeoutMs, label = 'Operation') {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return Promise.resolve(promise)
 
@@ -439,7 +451,7 @@ ${mainAIResponse}
     messages
   )
 
-  console.log('[AssistantAI] Calling API:', endpoint, '(provider:', provider, ')')
+  console.log('[AssistantAI] Calling API:', redactEndpointForLog(endpoint), '(provider:', provider, ')')
 
   // Token 估算调试日志
   if (gameStore.settings.debugMode) {

@@ -6,6 +6,9 @@
 import { getApiBaseUrl } from './multiplayerWs'
 
 const AUTH_TOKEN_KEY = 'mp_auth_token'
+const AUTH_SYNC_KEY = 'mp_auth_sync'
+const AUTH_CHANGE_EVENT = 'mp-auth-change'
+const AUTH_BROADCAST_CHANNEL = 'school-mp-auth'
 
 function createOAuthNonce() {
   const secureCrypto = globalThis.crypto
@@ -88,6 +91,108 @@ export function getAuthInfo() {
   }
 }
 
+function emitAuthChange(reason = 'updated') {
+  const detail = {
+    reason,
+    authenticated: isAuthenticated(),
+    authInfo: getAuthInfo(),
+    at: Date.now(),
+  }
+
+  try {
+    window.dispatchEvent(new CustomEvent(AUTH_CHANGE_EVENT, { detail }))
+  } catch {}
+
+  try {
+    localStorage.setItem(AUTH_SYNC_KEY, JSON.stringify({ reason, at: detail.at, nonce: createOAuthNonce() }))
+    localStorage.removeItem(AUTH_SYNC_KEY)
+  } catch {}
+
+  try {
+    if ('BroadcastChannel' in globalThis) {
+      const channel = new BroadcastChannel(AUTH_BROADCAST_CHANNEL)
+      channel.postMessage(detail)
+      channel.close()
+    }
+  } catch {}
+}
+
+export function subscribeAuthChanges(callback) {
+  const onLocalEvent = (event) => callback(event.detail || { reason: 'local' })
+  const onStorage = (event) => {
+    if (event.key === AUTH_TOKEN_KEY || event.key === AUTH_SYNC_KEY) {
+      callback({ reason: 'storage', at: Date.now() })
+    }
+  }
+
+  let channel = null
+  const onBroadcast = (event) => callback(event.data || { reason: 'broadcast' })
+
+  window.addEventListener(AUTH_CHANGE_EVENT, onLocalEvent)
+  window.addEventListener('storage', onStorage)
+
+  try {
+    if ('BroadcastChannel' in globalThis) {
+      channel = new BroadcastChannel(AUTH_BROADCAST_CHANNEL)
+      channel.addEventListener('message', onBroadcast)
+    }
+  } catch {
+    channel = null
+  }
+
+  return () => {
+    window.removeEventListener(AUTH_CHANGE_EVENT, onLocalEvent)
+    window.removeEventListener('storage', onStorage)
+    if (channel) {
+      channel.removeEventListener('message', onBroadcast)
+      channel.close()
+    }
+  }
+}
+
+export function createDiscordLoginSession() {
+  const apiBase = getApiBaseUrl()
+  const nonce = createOAuthNonce()
+  return {
+    nonce,
+    authUrl: `${apiBase}/auth/discord?nonce=${encodeURIComponent(nonce)}`,
+  }
+}
+
+export async function pollDiscordLoginStatus(nonce) {
+  const apiBase = getApiBaseUrl()
+  const res = await fetch(`${apiBase}/auth/poll?nonce=${encodeURIComponent(nonce)}`)
+  if (!res.ok) {
+    throw new Error(`Poll request failed: ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function verifyStoredAuth() {
+  const token = getAuthToken()
+  if (!token) return false
+
+  if (!isAuthenticated()) {
+    logout('expired')
+    return false
+  }
+
+  try {
+    const res = await fetch(`${getApiBaseUrl()}/auth/verify`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (res.ok) return true
+    if (res.status === 401 || res.status === 403) {
+      logout('invalid')
+      return false
+    }
+  } catch (err) {
+    console.warn('[Auth] Remote verification failed, keeping local auth state:', err)
+  }
+
+  return isAuthenticated()
+}
+
 /**
  * 发起 Discord 登录（弹窗 + 轮询模式，兼容 iframe / file:// 协议）
  * @returns {Promise<string>} JWT token
@@ -102,13 +207,13 @@ export function startDiscordLogin() {
         return ''
       }
     })()
-    const nonce = createOAuthNonce()
+    const { nonce, authUrl } = createDiscordLoginSession()
 
     const w = 500, h = 700
     const left = (screen.width - w) / 2
     const top = (screen.height - h) / 2
     const popup = window.open(
-      `${apiBase}/auth/discord?nonce=${nonce}`,
+      authUrl,
       'discord_oauth',
       `width=${w},height=${h},left=${left},top=${top},menubar=no,toolbar=no,status=no`
     )
@@ -118,7 +223,7 @@ export function startDiscordLogin() {
       return
     }
 
-    console.log('[Auth] Popup opened, nonce:', nonce, 'polling:', `${apiBase}/auth/poll?nonce=${nonce}`)
+    console.log('[Auth] Popup opened, polling for OAuth completion')
     let settled = false
     let consecutivePollErrors = 0
 
@@ -148,13 +253,8 @@ export function startDiscordLogin() {
     const pollOnce = async () => {
       if (settled) return
       try {
-        const res = await fetch(`${apiBase}/auth/poll?nonce=${nonce}`)
-        if (!res.ok) {
-          throw new Error(`Poll request failed: ${res.status}`)
-        }
-
-        const data = await res.json()
-        console.log('[Auth] Poll data:', data)
+        const data = await pollDiscordLoginStatus(nonce)
+        console.log('[Auth] Poll status:', data.status || 'unknown')
         consecutivePollErrors = 0
 
         if (data.status === 'pending') return
@@ -219,13 +319,15 @@ export function startDiscordLogin() {
  */
 export function handleAuthCallback(token) {
   localStorage.setItem(AUTH_TOKEN_KEY, token)
+  emitAuthChange('login')
 }
 
 /**
  * 登出（清除 token）
  */
-export function logout() {
+export function logout(reason = 'logout') {
   localStorage.removeItem(AUTH_TOKEN_KEY)
+  emitAuthChange(reason)
 }
 
 /**

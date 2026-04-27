@@ -28,6 +28,15 @@ function corsHeaders(origin, env) {
   }
 }
 
+function configuredAllowedOrigins(env) {
+  const raw = [env?.MP_ALLOWED_ORIGIN, env?.MP_ALLOWED_ORIGINS].filter(Boolean).join(',')
+  return raw.split(',').map(s => s.trim()).filter(Boolean)
+}
+
+function primaryAllowedOrigin(env) {
+  return configuredAllowedOrigins(env)[0] || null
+}
+
 /** 检查 Origin 是否在黑名单中（env.MP_BLOCKED_ORIGINS，逗号分隔） */
 function isOriginBlocked(origin, env) {
   const blocked = env?.MP_BLOCKED_ORIGINS
@@ -48,6 +57,8 @@ function isOriginBlocked(origin, env) {
 /** 动态回显 Origin（黑名单拦截，其余放行） */
 function getAllowedOrigin(origin, env) {
   if (!origin || origin === 'null') return '*' // iframe/file:// 发送 Origin: null
+  const allowlist = configuredAllowedOrigins(env)
+  if (allowlist.length > 0) return allowlist.includes(origin) ? origin : 'blocked'
   if (origin.includes('localhost') || origin.includes('127.0.0.1')) return origin
   if (isOriginBlocked(origin, env)) return 'blocked'
   return origin
@@ -55,6 +66,8 @@ function getAllowedOrigin(origin, env) {
 
 function isOriginAllowed(origin, env) {
   if (!origin || origin === 'null') return true
+  const allowlist = configuredAllowedOrigins(env)
+  if (allowlist.length > 0) return allowlist.includes(origin)
   if (origin.includes('localhost') || origin.includes('127.0.0.1')) return true
   if (isOriginBlocked(origin, env)) return false
   return true
@@ -63,8 +76,10 @@ function isOriginAllowed(origin, env) {
 function generateRoomId() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
   let id = ''
+  const bytes = new Uint8Array(6)
+  crypto.getRandomValues(bytes)
   for (let i = 0; i < 6; i++) {
-    id += chars[Math.floor(Math.random() * chars.length)]
+    id += chars[bytes[i] % chars.length]
   }
   return id
 }
@@ -138,6 +153,19 @@ export default {
         return json({ rooms }, 200, origin, env)
       }
 
+      // ── REST API: 申请 WebSocket 入场票据 ──
+      if (path.startsWith('/api/rooms/') && path.endsWith('/join-ticket') && request.method === 'POST') {
+        const roomId = path.slice('/api/rooms/'.length, -'/join-ticket'.length)
+        if (!roomId) return json({ error: 'Missing room ID' }, 400, origin, env)
+        const body = await request.json().catch(() => ({}))
+        const authHeader = request.headers.get('Authorization')
+        const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null
+        const stub = env.SCHOOL_ROOM.get(env.SCHOOL_ROOM.idFromName(roomId))
+        const result = await stub.createJoinTicket({ ...body, token })
+        if (result?.error) return json({ error: result.error }, result.status || 400, origin, env)
+        return json(result, 200, origin, env)
+      }
+
       // ── REST API: 房间详情 ──
       if (path.startsWith('/api/rooms/') && request.method === 'GET') {
         const roomId = path.split('/api/rooms/')[1]
@@ -190,25 +218,27 @@ async function handleAuthCallback(url, env, workerBase) {
   const code = url.searchParams.get('code')
   const state = url.searchParams.get('state')
   const error = url.searchParams.get('error')
-  const frontendBase = env.MP_ALLOWED_ORIGIN
-
-  // 用户拒绝授权
-  if (error) {
-    return authResultPage(null, error, null)
-  }
+  const frontendBase = primaryAllowedOrigin(env)
+  const targetOrigin = frontendBase
 
   // HMAC 验证 state（无需存储，自验证）
-  if (!state) return authResultPage(null, 'invalid_state', null)
+  if (!state) return authResultPage(null, 'invalid_state', null, targetOrigin)
   const parts = state.split('|')
-  if (parts.length !== 3) return authResultPage(null, 'invalid_state', null)
+  if (parts.length !== 3) return authResultPage(null, 'invalid_state', null, targetOrigin)
   const [nonceFromState, stateId, sig] = parts
   const expectedSig = await hmacSign(`${nonceFromState}|${stateId}`, env.JWT_SECRET)
-  if (sig !== expectedSig) return authResultPage(null, 'invalid_state', null)
+  if (sig !== expectedSig) return authResultPage(null, 'invalid_state', null, targetOrigin)
   const nonce = nonceFromState || ''
+
+  // 用户拒绝授权时也写入 nonce 轮询结果，否则发起登录的面板会一直等到超时。
+  if (error) {
+    if (nonce) await getRoomIndex(env).storeAuthToken(nonce, { error })
+    return authResultPage(null, error, nonce, targetOrigin)
+  }
 
   if (!code) {
     if (nonce) await getRoomIndex(env).storeAuthToken(nonce, { error: 'missing_code' })
-    return authResultPage(null, 'missing_code', nonce)
+    return authResultPage(null, 'missing_code', nonce, targetOrigin)
   }
 
   try {
@@ -229,7 +259,13 @@ async function handleAuthCallback(url, env, workerBase) {
     if (!tokenRes.ok) {
       const err = await tokenRes.text()
       console.error('[Auth] Token exchange failed:', err)
-      return Response.redirect(`${frontendBase}/#/mp-auth?error=token_failed`, 302)
+      if (nonce) {
+        await getRoomIndex(env).storeAuthToken(nonce, { error: 'token_failed' })
+        return authResultPage(null, 'token_failed', nonce, targetOrigin)
+      }
+      return frontendBase
+        ? Response.redirect(`${frontendBase}/#/mp-auth?error=token_failed`, 302)
+        : authResultPage(null, 'token_failed', null, targetOrigin)
     }
 
     const tokenData = await tokenRes.json()
@@ -240,7 +276,13 @@ async function handleAuthCallback(url, env, workerBase) {
       headers: { Authorization: `Bearer ${accessToken}` },
     })
     if (!userRes.ok) {
-      return Response.redirect(`${frontendBase}/#/mp-auth?error=user_fetch_failed`, 302)
+      if (nonce) {
+        await getRoomIndex(env).storeAuthToken(nonce, { error: 'user_fetch_failed' })
+        return authResultPage(null, 'user_fetch_failed', nonce, targetOrigin)
+      }
+      return frontendBase
+        ? Response.redirect(`${frontendBase}/#/mp-auth?error=user_fetch_failed`, 302)
+        : authResultPage(null, 'user_fetch_failed', null, targetOrigin)
     }
     const user = await userRes.json()
 
@@ -285,11 +327,11 @@ async function handleAuthCallback(url, env, workerBase) {
     if (nonce) {
       await getRoomIndex(env).storeAuthToken(nonce, { token })
     }
-    return authResultPage(token, null, nonce)
+    return authResultPage(token, null, nonce, targetOrigin)
   } catch (e) {
     console.error('[Auth] OAuth callback error:', e)
     if (nonce) { try { await getRoomIndex(env).storeAuthToken(nonce, { error: 'internal' }) } catch {} }
-    return authResultPage(null, 'internal', nonce)
+    return authResultPage(null, 'internal', nonce, targetOrigin)
   }
 }
 
@@ -326,21 +368,35 @@ async function hmacSign(data, secret) {
 /**
  * 返回一个 HTML 页面，通过 postMessage 将 token/error 传回父窗口（弹窗 OAuth 流程）
  */
-function authResultPage(token, error, nonce = null) {
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[ch]))
+}
+
+function authResultPage(token, error, nonce = null, targetOrigin = null) {
   const data = token
     ? `{ type: 'mp-auth-callback', nonce: ${JSON.stringify(nonce)}, token: ${JSON.stringify(token)} }`
     : `{ type: 'mp-auth-callback', nonce: ${JSON.stringify(nonce)}, error: ${JSON.stringify(error || 'unknown')} }`
+  const safeError = escapeHtml(error || '')
+  const postMessageScript = targetOrigin
+    ? `window.opener.postMessage(${data}, ${JSON.stringify(targetOrigin)});`
+    : ''
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Discord 登录</title>
 <style>body{font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#2b2d31;color:#dbdee1}
 .card{text-align:center;padding:32px;border-radius:12px;background:#313338}
 .ok{color:#57f287}.err{color:#ed4245}</style></head><body>
 <div class="card">
-${token ? '<p class="ok">\u2714 \u767b\u5f55\u6210\u529f\uff0c\u6b63\u5728\u8fd4\u56de...</p>' : '<p class="err">\u2716 \u767b\u5f55\u5931\u8d25: ' + (error || '') + '</p>'}
+${token ? '<p class="ok">\u2714 \u767b\u5f55\u6210\u529f\uff0c\u6b63\u5728\u8fd4\u56de...</p>' : '<p class="err">\u2716 \u767b\u5f55\u5931\u8d25: ' + safeError + '</p>'}
 </div>
 <script>
-if (window.opener) {
-  window.opener.postMessage(${data}, '*');
+if (window.opener && ${JSON.stringify(!!targetOrigin)}) {
+  ${postMessageScript}
   setTimeout(() => window.close(), 1500);
 } else {
   document.querySelector('.card').innerHTML += '<p style="margin-top:12px;font-size:14px;color:#949ba4">' +

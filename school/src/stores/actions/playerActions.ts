@@ -8,6 +8,80 @@ import { generateCharId } from '../../data/relationshipData'
 import { updatePartTimeWorldbookEntry } from '../../utils/partTimeWorldbook'
 import { syncLocationChange } from '../../utils/multiplayerSync'
 
+const BLOCKED_GAME_DATA_KEYS = new Set(['__proto__', 'prototype', 'constructor'])
+const PATH_ROOT_ALIASES: Record<string, string[]> = {
+  '玩家': ['player'],
+  '社团': ['world', 'allClubs'],
+  '世界状态': ['world', 'worldState'],
+  'clubs': ['world', 'allClubs'],
+  'allClubs': ['world', 'allClubs'],
+  'worldState': ['world', 'worldState']
+}
+
+const DELTA_ALLOWED_EXACT = new Set([
+  'player.money',
+  'player.gold',
+  'player.hp',
+  'player.mp',
+  'player.health',
+  'player.exp',
+  'player.totalExp',
+  'player.freePoints',
+  'player.level',
+  'world.worldState.economy'
+])
+
+const DELTA_ALLOWED_PREFIXES = [
+  'player.attributes.',
+  'player.potentials.',
+  'player.subjects.',
+  'player.skills.',
+  'player.subjectExps.',
+  'player.skillExps.',
+  'player.relationships.'
+]
+
+const SET_ALLOWED_EXACT = new Set([
+  'player.currentGoal',
+  'player.location',
+  'player.relationships.hasLover',
+  'world.worldState.weather.current.weather',
+  'world.worldState.weather.current.weatherName',
+  'world.worldState.weather.current.icon',
+  'world.worldState.weather.current.temperature',
+  'world.worldState.weather.current.tempHigh',
+  'world.worldState.weather.current.tempLow',
+  'world.worldState.weather.season',
+  'world.worldState.weather.lastUpdateDate'
+])
+
+const SET_ALLOWED_PREFIXES = [
+  'player.flags.'
+]
+
+function normalizeGameDataPath(path: string): string[] | null {
+  if (typeof path !== 'string') return null
+  const rawParts = path.split('.').map(p => p.trim()).filter(Boolean)
+  if (rawParts.length === 0 || rawParts.some(p => BLOCKED_GAME_DATA_KEYS.has(p))) return null
+
+  const alias = PATH_ROOT_ALIASES[rawParts[0]]
+  return alias ? [...alias, ...rawParts.slice(1)] : rawParts
+}
+
+function isAllowedDeltaPath(parts: string[]): boolean {
+  const canonical = parts.join('.')
+  if (DELTA_ALLOWED_EXACT.has(canonical)) return true
+  if (DELTA_ALLOWED_PREFIXES.some(prefix => canonical.startsWith(prefix))) return true
+  return /^world\.allClubs\.[^.]+\.(activity|completedRequests|morale|reputation|funds)$/.test(canonical)
+}
+
+function isAllowedSetPath(parts: string[]): boolean {
+  const canonical = parts.join('.')
+  if (SET_ALLOWED_EXACT.has(canonical)) return true
+  if (SET_ALLOWED_PREFIXES.some(prefix => canonical.startsWith(prefix))) return true
+  return /^world\.allClubs\.[^.]+\.(status|currentGoal|description)$/.test(canonical)
+}
+
 export const playerActions = {
   /**
    * 更新玩家名字
@@ -350,6 +424,11 @@ export const playerActions = {
    */
   applyDeltaUpdate(this: any, path: string, delta: number) {
     if (isNaN(delta)) return
+    const parts = normalizeGameDataPath(path)
+    if (!parts || !isAllowedDeltaPath(parts)) {
+      console.warn(`[GameStore] Blocked unsafe delta path: ${path}`)
+      return
+    }
 
     if (this.player.talents.includes('t9')) {
       const isMoodUpdate = path.includes('mood') || path.includes('心境')
@@ -359,20 +438,11 @@ export const playerActions = {
       }
     }
 
-    const parts = path.split('.')
     let current: any = this
     let targetKey = parts[parts.length - 1]
-    
-    const pathMap: Record<string, string> = {
-      '玩家': 'player',
-      '社团': 'allClubs',
-      '世界状态': 'worldState',
-      'clubs': 'allClubs'
-    }
 
     for (let i = 0; i < parts.length - 1; i++) {
-      let part = parts[i]
-      part = pathMap[part] || part
+      const part = parts[i]
       
       if (targetKey === 'energy' && part === 'attributes' && current === this.player) {
          this.player.mp = Math.max(0, this.player.mp + delta)
@@ -421,20 +491,17 @@ export const playerActions = {
    * 应用直接设置更新
    */
   applySetUpdate(this: any, path: string, value: any) {
-    const parts = path.split('.')
-    let current: any = this
-    let targetKey = parts[parts.length - 1]
-    
-    const pathMap: Record<string, string> = {
-      '玩家': 'player',
-      '社团': 'allClubs',
-      '世界状态': 'worldState',
-      'clubs': 'allClubs'
+    const parts = normalizeGameDataPath(path)
+    if (!parts || !isAllowedSetPath(parts)) {
+      console.warn(`[GameStore] Blocked unsafe set path: ${path}`)
+      return
     }
 
+    let current: any = this
+    let targetKey = parts[parts.length - 1]
+
     for (let i = 0; i < parts.length - 1; i++) {
-      let part = parts[i]
-      part = pathMap[part] || part
+      const part = parts[i]
       
       if (current[part] === undefined) {
          if (current === this.world.allClubs) {

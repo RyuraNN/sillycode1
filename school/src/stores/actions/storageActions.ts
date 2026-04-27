@@ -956,14 +956,31 @@ export const storageActions = {
         // 设置：合并导入（保留本地 API Key）
         if (g.settings) {
           const localApiKey = this.settings?.assistantAI?.apiKey || ''
+          const localEmbeddingApiKey = this.settings?.ragSystem?.embedding?.apiKey || ''
+          const localRerankApiKey = this.settings?.ragSystem?.rerank?.apiKey || ''
           const defaults = createInitialState().settings
           const imported = validateAndRepairSettings(g.settings)
           this.settings = { ...defaults, ...imported }
           this.settings.summarySystem = { ...defaults.summarySystem, ...(imported.summarySystem || {}) }
           this.settings.assistantAI = { ...defaults.assistantAI, ...(imported.assistantAI || {}) }
+          this.settings.ragSystem = { ...defaults.ragSystem, ...(imported.ragSystem || {}) }
+          this.settings.ragSystem.embedding = {
+            ...defaults.ragSystem.embedding,
+            ...(imported.ragSystem?.embedding || {})
+          }
+          this.settings.ragSystem.rerank = {
+            ...defaults.ragSystem.rerank,
+            ...(imported.ragSystem?.rerank || {})
+          }
           // 恢复本地 API Key（导出时已脱敏）
           if (localApiKey) {
             this.settings.assistantAI.apiKey = localApiKey
+          }
+          if (localEmbeddingApiKey) {
+            this.settings.ragSystem.embedding.apiKey = localEmbeddingApiKey
+          }
+          if (localRerankApiKey) {
+            this.settings.ragSystem.rerank.apiKey = localRerankApiKey
           }
           await setItem('school_game_settings', JSON.parse(JSON.stringify(this.settings)))
           console.log('[GameStore] Restored settings (API key preserved)')

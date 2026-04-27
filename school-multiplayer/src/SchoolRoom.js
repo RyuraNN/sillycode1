@@ -4,7 +4,7 @@
  * 负责：连接管理、消息广播、状态同步、对话组协调、NPC记忆同步
  */
 import { DurableObject } from 'cloudflare:workers'
-import { verifyJWT } from './jwtUtils.js'
+import { signJWT, verifyJWT } from './jwtUtils.js'
 
 /** 消息频率限制：每个连接每秒最多 20 条 */
 const RATE_LIMIT_PER_SECOND = 20
@@ -14,6 +14,69 @@ const MAX_CHAT_LENGTH = 2000
 const HOST_DISCONNECT_TIMEOUT = 60000
 /** 投票超时 (ms) */
 const VOTE_TIMEOUT = 30000
+const JOIN_TICKET_TTL_SECONDS = 60
+const ROOM_PASSWORD_ALGORITHM = 'sha-256:v1'
+const TEXT_ENCODER = new TextEncoder()
+
+function bytesToHex(bytes) {
+  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
+}
+
+function randomHex(byteLength = 16) {
+  const bytes = new Uint8Array(byteLength)
+  crypto.getRandomValues(bytes)
+  return bytesToHex(bytes)
+}
+
+async function sha256Hex(value) {
+  const digest = await crypto.subtle.digest('SHA-256', TEXT_ENCODER.encode(String(value)))
+  return bytesToHex(new Uint8Array(digest))
+}
+
+function constantTimeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+
+function randomInt(max) {
+  if (!Number.isInteger(max) || max <= 0) return 0
+  const bytes = new Uint32Array(1)
+  crypto.getRandomValues(bytes)
+  return bytes[0] % max
+}
+
+async function createPasswordFields(password) {
+  const passwordText = String(password || '')
+  if (!passwordText) {
+    return { password: null, passwordHash: null, passwordSalt: null, passwordAlgorithm: ROOM_PASSWORD_ALGORITHM }
+  }
+  const salt = randomHex(16)
+  return {
+    password: null,
+    passwordHash: await sha256Hex(`${salt}:${passwordText}`),
+    passwordSalt: salt,
+    passwordAlgorithm: ROOM_PASSWORD_ALGORITHM
+  }
+}
+
+function hasRoomPassword(settings) {
+  return !!(settings?.passwordHash || settings?.password)
+}
+
+function redactRoomConfig(config) {
+  if (!config) return null
+  const redacted = JSON.parse(JSON.stringify(config))
+  if (redacted.settings) {
+    redacted.settings.hasPassword = hasRoomPassword(redacted.settings)
+    delete redacted.settings.password
+    delete redacted.settings.passwordHash
+    delete redacted.settings.passwordSalt
+    delete redacted.settings.passwordAlgorithm
+  }
+  return redacted
+}
 
 export class SchoolRoom extends DurableObject {
   constructor(ctx, env) {
@@ -92,6 +155,23 @@ export class SchoolRoom extends DurableObject {
         hash TEXT,
         updated_at INTEGER
       );
+      CREATE TABLE IF NOT EXISTS worldbook_spot_checks (
+        entry_key TEXT PRIMARY KEY,
+        content_hash TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS player_auth (
+        player_id TEXT PRIMARY KEY,
+        secret_hash TEXT NOT NULL,
+        discord_id TEXT,
+        created_at INTEGER,
+        updated_at INTEGER
+      );
+      CREATE TABLE IF NOT EXISTS join_tickets (
+        jti TEXT PRIMARY KEY,
+        player_id TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        used_at INTEGER
+      );
       CREATE TABLE IF NOT EXISTS npc_chat_snippets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         npc_name TEXT NOT NULL,
@@ -123,9 +203,87 @@ export class SchoolRoom extends DurableObject {
     )
   }
 
+  async verifyRoomPassword(config, password) {
+    const settings = config?.settings
+    if (!hasRoomPassword(settings)) return true
+    if (!password) return false
+
+    if (settings.passwordHash && settings.passwordSalt) {
+      const candidate = await sha256Hex(`${settings.passwordSalt}:${String(password)}`)
+      return constantTimeEqual(candidate, settings.passwordHash)
+    }
+
+    // Legacy rooms may have plaintext passwords persisted by older builds.
+    if (settings.password && constantTimeEqual(String(password), String(settings.password))) {
+      Object.assign(settings, await createPasswordFields(password))
+      this.saveConfig(config)
+      return true
+    }
+
+    return false
+  }
+
+  async registerOrVerifyPlayerSecret(playerId, playerSecret, discordId = null) {
+    if (!playerId || !playerSecret || String(playerSecret).length < 32) {
+      return { ok: false, error: 'Missing player credential' }
+    }
+
+    const secretHash = await sha256Hex(playerSecret)
+    const now = Date.now()
+    const row = [...this.ctx.storage.sql.exec(
+      `SELECT secret_hash, discord_id FROM player_auth WHERE player_id = ?`,
+      playerId
+    )][0]
+
+    if (!row) {
+      this.ctx.storage.sql.exec(
+        `INSERT INTO player_auth (player_id, secret_hash, discord_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        playerId, secretHash, discordId || null, now, now
+      )
+      return { ok: true }
+    }
+
+    if (!constantTimeEqual(row.secret_hash, secretHash)) {
+      return { ok: false, error: 'Player identity mismatch' }
+    }
+
+    if (row.discord_id && discordId && row.discord_id !== discordId) {
+      return { ok: false, error: 'Discord identity mismatch' }
+    }
+
+    if (!row.discord_id && discordId) {
+      this.ctx.storage.sql.exec(
+        `UPDATE player_auth SET discord_id = ?, updated_at = ? WHERE player_id = ?`,
+        discordId, now, playerId
+      )
+    } else {
+      this.ctx.storage.sql.exec(
+        `UPDATE player_auth SET updated_at = ? WHERE player_id = ?`,
+        now, playerId
+      )
+    }
+
+    return { ok: true }
+  }
+
+  consumeJoinTicket(jti, playerId) {
+    if (!jti || !playerId) return false
+    const now = Date.now()
+    this.ctx.storage.sql.exec(`DELETE FROM join_tickets WHERE expires_at < ? OR used_at IS NOT NULL`, now)
+    const row = [...this.ctx.storage.sql.exec(
+      `SELECT player_id, expires_at, used_at FROM join_tickets WHERE jti = ?`,
+      jti
+    )][0]
+    if (!row || row.used_at || row.expires_at < now || row.player_id !== playerId) return false
+    this.ctx.storage.sql.exec(`UPDATE join_tickets SET used_at = ? WHERE jti = ?`, now, jti)
+    return true
+  }
+
   // ── RPC 方法 (Worker 调用) ──
 
   async initRoom(roomId, body) {
+    const passwordFields = await createPasswordFields(body.settings?.password || '')
     const config = {
       roomId,
       roomName: body.roomName || '未命名房间',
@@ -135,9 +293,10 @@ export class SchoolRoom extends DurableObject {
       settings: {
         maxPlayers: body.settings?.maxPlayers || 10,
         isPublic: body.settings?.isPublic !== false,
-        password: body.settings?.password || null,
+        ...passwordFields,
         gameMode: body.settings?.gameMode || 'normal',
         difficulty: body.settings?.difficulty || 'normal',
+        trustPolicy: body.settings?.trustPolicy || 'open',
         expMultiplier: (typeof body.settings?.expMultiplier === 'number' && Number.isFinite(body.settings.expMultiplier) && body.settings.expMultiplier > 0)
           ? body.settings.expMultiplier
           : 1,
@@ -148,6 +307,9 @@ export class SchoolRoom extends DurableObject {
       roomRunId: body.roomRunId || null,
     }
     this.saveConfig(config)
+    if (body.hostId && body.hostPlayerSecret) {
+      await this.registerOrVerifyPlayerSecret(body.hostId, body.hostPlayerSecret, null)
+    }
 
     // 保存房主的世界书 hash
     if (body.worldbookHash) {
@@ -161,8 +323,9 @@ export class SchoolRoom extends DurableObject {
   async getRoomInfo() {
     const config = this.getConfig()
     if (!config) return null
+    const publicConfig = redactRoomConfig(config)
     return {
-      ...config,
+      ...publicConfig,
       playerCount: this.sessions.size,
       players: [...this.sessions.values()].map(s => ({
         playerId: s.playerId,
@@ -175,51 +338,115 @@ export class SchoolRoom extends DurableObject {
     }
   }
 
+  async createJoinTicket(body) {
+    const config = this.getConfig()
+    if (!config) return { error: 'Room not found', status: 404 }
+    if (!this.env.JWT_SECRET) return { error: 'Server is missing JWT secret', status: 500 }
+
+    const playerId = String(body.playerId || '').trim()
+    if (!playerId) return { error: 'Missing playerId', status: 400 }
+
+    let discordAuth = null
+    if (body.token) {
+      const result = await verifyJWT(body.token, this.env.JWT_SECRET)
+      if (!result.valid) return { error: 'Invalid auth token', status: 401 }
+      discordAuth = result.payload
+    }
+
+    if (!(await this.verifyRoomPassword(config, body.password))) {
+      return { error: 'Wrong password', status: 403 }
+    }
+
+    const trustPolicy = config?.settings?.trustPolicy || 'open'
+    const playerTrust = discordAuth ? (discordAuth.verified ? 'verified' : discordAuth.guildMember ? 'member' : 'logged_in') : 'anonymous'
+    const TRUST_ORDER = ['anonymous', 'logged_in', 'member', 'verified']
+    const playerTrustIdx = TRUST_ORDER.indexOf(playerTrust)
+    const minTrustMap = { strict: 3, relaxed: 2, open: 0 }
+    const minTrustIdx = minTrustMap[trustPolicy] ?? 0
+    if (playerTrustIdx < minTrustIdx) {
+      const labels = { strict: '仅限已验证成员', relaxed: '仅限服务器成员', open: '开放' }
+      return { error: `房间准入要求: ${labels[trustPolicy] || trustPolicy}`, status: 403 }
+    }
+
+    const identity = await this.registerOrVerifyPlayerSecret(playerId, body.playerSecret, discordAuth?.discordId || null)
+    if (!identity.ok) return { error: identity.error || 'Player identity mismatch', status: 403 }
+
+    const alreadyConnected = [...this.sessions.values()].some(s => s.playerId === playerId)
+    if (config?.settings?.maxPlayers && this.sessions.size >= config.settings.maxPlayers && !alreadyConnected) {
+      return { error: 'Room is full', status: 403 }
+    }
+
+    const jti = crypto.randomUUID()
+    const expiresAt = Date.now() + JOIN_TICKET_TTL_SECONDS * 1000
+    this.ctx.storage.sql.exec(
+      `INSERT OR REPLACE INTO join_tickets (jti, player_id, expires_at, used_at) VALUES (?, ?, ?, NULL)`,
+      jti, playerId, expiresAt
+    )
+
+    const ticket = await signJWT({
+      type: 'room_join',
+      jti,
+      roomId: config.roomId,
+      playerId,
+      playerName: String(body.playerName || 'Anonymous'),
+      characterName: String(body.characterName || ''),
+      role: String(body.role || 'student'),
+      classId: String(body.classId || ''),
+      avatar: String(body.avatar || ''),
+      spectatorOnly: body.spectatorOnly === true,
+      features: body.features || { assistantAI: false, rag: false, summary: false },
+      discordAuth: discordAuth ? {
+        discordId: discordAuth.discordId,
+        username: discordAuth.username,
+        verified: !!discordAuth.verified,
+        guildMember: !!discordAuth.guildMember
+      } : null
+    }, this.env.JWT_SECRET, JOIN_TICKET_TTL_SECONDS)
+
+    return { ticket, expiresIn: JOIN_TICKET_TTL_SECONDS, roomInfo: redactRoomConfig(config) }
+  }
+
   // ── WebSocket 连接 ──
 
   async fetch(request) {
     const url = new URL(request.url)
-    const playerId = url.searchParams.get('playerId')
-    const playerName = url.searchParams.get('playerName') || 'Anonymous'
-    const characterName = url.searchParams.get('characterName') || ''
-    const role = url.searchParams.get('role') || 'student'
-    const classId = url.searchParams.get('classId') || ''
-    const avatar = url.searchParams.get('avatar') || ''
-    const spectatorOnly = url.searchParams.get('spectatorOnly') === 'true'
-
-    if (!playerId) {
-      return new Response('Missing playerId', { status: 400 })
-    }
-
-    // 解析 JWT token（可选，用于 Discord 身份验证）
-    let discordAuth = null
-    const token = url.searchParams.get('token')
-    if (token && this.env.JWT_SECRET) {
-      const result = await verifyJWT(token, this.env.JWT_SECRET)
-      if (result.valid) {
-        discordAuth = result.payload
-      }
-    }
-
-    // 解析玩家 features（assistantAI/RAG/summary 状态）
-    let features = null
-    const featuresParam = url.searchParams.get('features')
-    if (featuresParam) {
-      try { features = JSON.parse(featuresParam) } catch {}
-    }
-
     const config = this.getConfig()
-
-    // 检查密码
-    if (config?.settings?.password) {
-      const pw = url.searchParams.get('password')
-      if (pw !== config.settings.password) {
-        return new Response(JSON.stringify({ error: 'Wrong password' }), { status: 403 })
-      }
+    if (!config) {
+      return new Response(JSON.stringify({ error: 'Room not found' }), { status: 404 })
     }
+
+    const ticket = url.searchParams.get('ticket')
+    if (!ticket || !this.env.JWT_SECRET) {
+      return new Response(JSON.stringify({ error: 'Missing join ticket' }), { status: 401 })
+    }
+
+    const ticketResult = await verifyJWT(ticket, this.env.JWT_SECRET)
+    if (!ticketResult.valid) {
+      return new Response(JSON.stringify({ error: 'Invalid join ticket' }), { status: 401 })
+    }
+
+    const ticketPayload = ticketResult.payload
+    if (
+      ticketPayload.type !== 'room_join' ||
+      ticketPayload.roomId !== config.roomId ||
+      !this.consumeJoinTicket(ticketPayload.jti, ticketPayload.playerId)
+    ) {
+      return new Response(JSON.stringify({ error: 'Expired join ticket' }), { status: 401 })
+    }
+
+    const playerId = ticketPayload.playerId
+    const playerName = ticketPayload.playerName || 'Anonymous'
+    const characterName = ticketPayload.characterName || ''
+    const role = ticketPayload.role || 'student'
+    const classId = ticketPayload.classId || ''
+    const avatar = ticketPayload.avatar || ''
+    const spectatorOnly = ticketPayload.spectatorOnly === true
+    const features = ticketPayload.features || null
+    const discordAuth = ticketPayload.discordAuth || null
 
     // 检查人数限制
-    if (config?.settings?.maxPlayers && this.sessions.size >= config.settings.maxPlayers) {
+    const alreadyConnected = [...this.sessions.values()].some(s => s.playerId === playerId)
+    if (config?.settings?.maxPlayers && this.sessions.size >= config.settings.maxPlayers && !alreadyConnected) {
       return new Response(JSON.stringify({ error: 'Room is full' }), { status: 403 })
     }
 
@@ -311,7 +538,7 @@ export class SchoolRoom extends DurableObject {
     server.send(JSON.stringify({
       type: 'welcome',
       data: {
-        roomInfo: config,
+        roomInfo: redactRoomConfig(config),
         players: [...this.sessions.values()].map(s => ({
           playerId: s.playerId,
           playerName: s.playerName,
@@ -1180,9 +1407,10 @@ export class SchoolRoom extends DurableObject {
 
   handleSaveRequest(ws, session, data) {
     // 转发给房主
-    const hostSession = [...this.sessions.values()].find(s => s.playerId === this.hostId)
+    const hostId = this.getConfig()?.hostId
+    const hostSession = [...this.sessions.values()].find(s => s.playerId === hostId)
     if (!hostSession) return
-    this.sendToPlayer(this.hostId, JSON.stringify({
+    this.sendToPlayer(hostId, JSON.stringify({
       type: 'save_request',
       data: { requesterId: session.playerId, requesterName: session.playerName },
       from: session.playerId,
@@ -1192,7 +1420,8 @@ export class SchoolRoom extends DurableObject {
 
   handleSaveChunk(ws, session, data) {
     // 仅房主可以转发存档块
-    if (session.playerId !== this.hostId) return
+    const hostId = this.getConfig()?.hostId
+    if (session.playerId !== hostId) return
     if (!data?.targetPlayerId) return
     this.sendToPlayer(data.targetPlayerId, JSON.stringify({
       type: 'save_chunk',
@@ -1204,7 +1433,8 @@ export class SchoolRoom extends DurableObject {
 
   handleOfflineGrowth(ws, session, data) {
     // 仅房主可以转发离线成长数据
-    if (session.playerId !== this.hostId) return
+    const hostId = this.getConfig()?.hostId
+    if (session.playerId !== hostId) return
     if (!data?.targetPlayerId) return
     this.sendToPlayer(data.targetPlayerId, JSON.stringify({
       type: 'offline_growth',
@@ -1582,7 +1812,7 @@ export class SchoolRoom extends DurableObject {
     }
 
     // 平票随机选
-    const winner = winners[Math.floor(Math.random() * winners.length)]
+    const winner = winners[randomInt(winners.length)]
 
     // 如果选举新房主，随机选一个在线玩家
     let newHostId = null
@@ -1590,7 +1820,7 @@ export class SchoolRoom extends DurableObject {
     if (winner === 'new_host') {
       const onlineSessions = [...this.sessions.values()].filter(s => !s.spectatorOnly)
       if (onlineSessions.length > 0) {
-        const chosen = onlineSessions[Math.floor(Math.random() * onlineSessions.length)]
+        const chosen = onlineSessions[randomInt(onlineSessions.length)]
         newHostId = chosen.playerId
         newHostName = chosen.playerName
         const config = this.getConfig()

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import HomeLayout from './components/HomeLayout.vue'
 import SplashScreen from './components/SplashScreen.vue'
 import { useGameStore } from './stores/gameStore'
@@ -8,7 +8,13 @@ import { loadCoursePoolFromWorldbook } from './data/coursePoolData'
 import { restorePendingWorldbookIfNeeded } from './utils/multiplayerSync'
 import { isWorldbookAvailable, getCurrentBookName } from './utils/worldbookHelper'
 import { getErrorMessage } from './utils/errorUtils'
-import { handleAuthCallback, isAuthenticated as checkAuth, getAuthInfo } from './utils/multiplayerAuth'
+import {
+  handleAuthCallback,
+  isAuthenticated as checkAuth,
+  getAuthInfo,
+  subscribeAuthChanges,
+  verifyStoredAuth,
+} from './utils/multiplayerAuth'
 
 const isLoggedIn = ref(false)
 const authInfo = ref(null)
@@ -33,10 +39,38 @@ function onEnterGame() {
   showSplashScreen.value = false
 }
 
-function onAuthChange() {
+async function refreshAuthState({ verify = false } = {}) {
+  if (verify) {
+    await verifyStoredAuth()
+  }
   isLoggedIn.value = checkAuth()
   authInfo.value = getAuthInfo()
 }
+
+function onAuthChange() {
+  refreshAuthState({ verify: true })
+}
+
+function onOAuthMessage(event) {
+  const data = event.data || {}
+  if (data.type !== 'mp-auth-callback') return
+
+  if (data.token) {
+    handleAuthCallback(data.token)
+  } else if (data.error) {
+    console.warn('[App] Discord auth error:', data.error)
+  }
+
+  refreshAuthState({ verify: !!data.token })
+}
+
+function onAuthFocusOrVisible() {
+  if (document.visibilityState && document.visibilityState !== 'visible') return
+  refreshAuthState({ verify: true })
+}
+
+let unsubscribeAuthChanges = null
+let authRefreshTimer = null
 
 /**
  * 检测世界书 API 是否已就绪（名称 + 内容都已加载）
@@ -233,6 +267,18 @@ async function onSkipCacheAndContinue() {
 }
 
 onMounted(async () => {
+  window.addEventListener('message', onOAuthMessage)
+  window.addEventListener('focus', onAuthFocusOrVisible)
+  document.addEventListener('visibilitychange', onAuthFocusOrVisible)
+  unsubscribeAuthChanges = subscribeAuthChanges(() => {
+    refreshAuthState({ verify: true })
+  })
+  authRefreshTimer = setInterval(() => {
+    if (showSplashScreen.value) {
+      refreshAuthState({ verify: true })
+    }
+  }, 30000)
+
   // 处理 Discord OAuth 回调
   const hash = window.location.hash
   if (hash.includes('mp-auth')) {
@@ -249,8 +295,7 @@ onMounted(async () => {
     history.replaceState(null, '', window.location.pathname)
   }
   // 初始化登录状态
-  isLoggedIn.value = checkAuth()
-  authInfo.value = getAuthInfo()
+  await refreshAuthState({ verify: true })
 
   // 自动轮询等待世界书就绪（逐步递增间隔，最多约 30 秒）
   // SillyTavern 加载世界书条目内容需要时间，不能仅凭名称就判定就绪
@@ -279,6 +324,20 @@ onMounted(async () => {
   console.log('[App] Worldbook not ready after polling, showing wait modal')
   showWorldbookWaitModal.value = true
   isInitializing.value = false
+})
+
+onUnmounted(() => {
+  window.removeEventListener('message', onOAuthMessage)
+  window.removeEventListener('focus', onAuthFocusOrVisible)
+  document.removeEventListener('visibilitychange', onAuthFocusOrVisible)
+  if (unsubscribeAuthChanges) {
+    unsubscribeAuthChanges()
+    unsubscribeAuthChanges = null
+  }
+  if (authRefreshTimer) {
+    clearInterval(authRefreshTimer)
+    authRefreshTimer = null
+  }
 })
 
 // 监听夜间模式变化

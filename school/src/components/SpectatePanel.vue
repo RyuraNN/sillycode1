@@ -117,7 +117,7 @@ function denyRequest() {
     <div ref="logContainer" class="sp-log">
       <div v-if="spectateLog.length === 0" class="sp-empty">等待对方发送消息...</div>
       <div v-for="(entry, i) in spectateLog" :key="i" class="sp-log-entry" :class="entry.type">
-        <div class="sp-log-content" v-html="entry.content"></div>
+        <div class="sp-log-content" v-text="entry.content"></div>
       </div>
     </div>
   </div>
@@ -244,6 +244,7 @@ function denyRequest() {
   border-radius: 8px;
   font-size: 0.85rem;
   line-height: 1.5;
+  white-space: pre-wrap;
 }
 
 .sp-log-entry.player {

@@ -2,7 +2,13 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { detectCardEdition, getEditionLabel, GAME_VERSION } from '../utils/editionDetector'
 import { isBlacklistedDomain } from '../utils/domainBlacklist'
-import { startDiscordLogin, logout } from '../utils/multiplayerAuth'
+import {
+  createDiscordLoginSession,
+  handleAuthCallback,
+  pollDiscordLoginStatus,
+  startDiscordLogin,
+  logout,
+} from '../utils/multiplayerAuth'
 
 const props = defineProps({
   loadResults: {
@@ -23,8 +29,49 @@ const emit = defineEmits(['enter', 'auth-change'])
 
 const isLoggingIn = ref(false)
 const loginError = ref('')
+const externalLoginUrl = ref('')
+const isWaitingExternalLogin = ref(false)
+let externalLoginNonce = ''
+let externalLoginTimer = null
+let externalLoginTimeout = null
+
+function stopExternalLoginPolling() {
+  if (externalLoginTimer) {
+    clearInterval(externalLoginTimer)
+    externalLoginTimer = null
+  }
+  if (externalLoginTimeout) {
+    clearTimeout(externalLoginTimeout)
+    externalLoginTimeout = null
+  }
+  externalLoginNonce = ''
+  isWaitingExternalLogin.value = false
+}
+
+async function pollExternalLoginOnce() {
+  if (!externalLoginNonce) return
+  try {
+    const data = await pollDiscordLoginStatus(externalLoginNonce)
+    if (data.status === 'pending') return
+
+    if (data.status === 'ok' && data.token) {
+      handleAuthCallback(data.token)
+      loginError.value = ''
+      externalLoginUrl.value = ''
+      stopExternalLoginPolling()
+      emit('auth-change')
+      return
+    }
+
+    loginError.value = data.error || '外部登录失败'
+    stopExternalLoginPolling()
+  } catch (e) {
+    console.warn('[SplashScreen] External auth poll failed:', e)
+  }
+}
 
 async function handleLogin() {
+  stopExternalLoginPolling()
   isLoggingIn.value = true
   loginError.value = ''
   try {
@@ -37,7 +84,36 @@ async function handleLogin() {
   }
 }
 
+function handleExternalLogin() {
+  stopExternalLoginPolling()
+  loginError.value = ''
+
+  const session = createDiscordLoginSession()
+  externalLoginNonce = session.nonce
+  externalLoginUrl.value = session.authUrl
+  isWaitingExternalLogin.value = true
+
+  window.open(session.authUrl, '_blank', 'noopener,noreferrer')
+  pollExternalLoginOnce()
+  externalLoginTimer = setInterval(pollExternalLoginOnce, 2000)
+  externalLoginTimeout = setTimeout(() => {
+    loginError.value = '外部登录等待超时，请重新发起登录'
+    stopExternalLoginPolling()
+  }, 300000)
+}
+
+async function copyExternalLoginUrl() {
+  if (!externalLoginUrl.value) return
+  try {
+    await navigator.clipboard.writeText(externalLoginUrl.value)
+    loginError.value = '登录链接已复制，请在浏览器中打开'
+  } catch {
+    loginError.value = '复制失败，请点击下方链接打开'
+  }
+}
+
 function handleLogout() {
+  stopExternalLoginPolling()
   logout()
   emit('auth-change')
 }
@@ -74,6 +150,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (countdownTimer) clearInterval(countdownTimer)
+  stopExternalLoginPolling()
 })
 
 const dataModules = [
@@ -166,6 +243,23 @@ const announcements = [
             </svg>
             {{ isLoggingIn ? '正在登录...' : '使用 Discord 登录' }}
           </button>
+          <div class="external-auth-actions">
+            <button class="external-login-btn" @click="handleExternalLogin" :disabled="isLoggingIn || isWaitingExternalLogin">
+              {{ isWaitingExternalLogin ? '等待外部登录...' : '外部浏览器登录' }}
+            </button>
+            <button v-if="externalLoginUrl" class="copy-login-btn" @click="copyExternalLoginUrl">
+              复制登录链接
+            </button>
+          </div>
+          <a
+            v-if="externalLoginUrl"
+            class="external-login-link"
+            :href="externalLoginUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            打不开弹窗时点击这里继续登录
+          </a>
           <p v-if="loginError" class="auth-error">{{ loginError }}</p>
         </div>
         <div v-else class="auth-logged-in">
@@ -377,6 +471,45 @@ const announcements = [
   transform: translateY(-1px);
 }
 
+.external-auth-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.external-login-btn,
+.copy-login-btn {
+  font-size: 12px;
+  color: #6b4226;
+  background: rgba(201, 169, 110, 0.12);
+  border: 1px solid #dcc89e;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.external-login-btn:hover,
+.copy-login-btn:hover {
+  background: rgba(201, 169, 110, 0.22);
+}
+
+.external-login-btn:disabled {
+  color: #999;
+  cursor: not-allowed;
+  background: rgba(153, 153, 153, 0.12);
+}
+
+.external-login-link {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #8b4513;
+  text-decoration: underline;
+}
+
 .discord-icon {
   flex-shrink: 0;
 }
@@ -550,6 +683,22 @@ body.dark-mode .auth-hint {
 
 body.dark-mode .auth-logged-in {
   background: rgba(93, 164, 232, 0.1);
+}
+
+body.dark-mode .external-login-btn,
+body.dark-mode .copy-login-btn {
+  color: #b8c4d4;
+  background: rgba(93, 164, 232, 0.08);
+  border-color: #4d5a70;
+}
+
+body.dark-mode .external-login-btn:hover,
+body.dark-mode .copy-login-btn:hover {
+  background: rgba(93, 164, 232, 0.16);
+}
+
+body.dark-mode .external-login-link {
+  color: #7ab8f5;
 }
 
 body.dark-mode .auth-username {

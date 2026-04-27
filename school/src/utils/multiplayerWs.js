@@ -24,14 +24,20 @@ let hasReceivedWelcome = false
 let isAutoReconnectAttempt = false
 
 const SAVED_SESSION_KEY = 'mp_saved_session'
+const PLAYER_SECRET_KEY = 'school_multiplayer_secret'
 
 /** 保存当前会话信息到 localStorage（用于意外断线后重连） */
 function saveSessionToStorage() {
   if (!currentRoomId || !currentPlayerInfo) return
   try {
+    const {
+      password: _password,
+      token: _token,
+      ...safePlayerInfo
+    } = currentPlayerInfo
     localStorage.setItem(SAVED_SESSION_KEY, JSON.stringify({
       roomId: currentRoomId,
-      playerInfo: currentPlayerInfo,
+      playerInfo: safePlayerInfo,
       wsUrl: WS_BASE_URL,
       apiUrl: API_BASE_URL,
       savedAt: Date.now(),
@@ -85,6 +91,10 @@ export function getSavedSession() {
       clearSavedSession()
       return null
     }
+    if (session.playerInfo) {
+      delete session.playerInfo.password
+      delete session.playerInfo.token
+    }
     return session
   } catch {
     return null
@@ -132,6 +142,15 @@ export function getOrCreatePlayerId() {
   return id
 }
 
+export function getOrCreatePlayerSecret() {
+  let secret = localStorage.getItem(PLAYER_SECRET_KEY)
+  if (!secret) {
+    secret = _generatePlayerSecret()
+    localStorage.setItem(PLAYER_SECRET_KEY, secret)
+  }
+  return secret
+}
+
 function _generatePlayerId() {
   const c = globalThis.crypto
   if (c?.randomUUID) return c.randomUUID()
@@ -146,6 +165,16 @@ function _generatePlayerId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
 }
 
+function _generatePlayerSecret() {
+  const c = globalThis.crypto
+  if (c?.getRandomValues) {
+    const bytes = new Uint8Array(32)
+    c.getRandomValues(bytes)
+    return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
+}
+
 // ── REST API ──
 
 /**
@@ -154,10 +183,14 @@ function _generatePlayerId() {
  * @returns {Promise<{roomId: string, roomName: string}>}
  */
 export async function createRoom(options) {
+  const body = {
+    ...options,
+    hostPlayerSecret: options.hostId ? getOrCreatePlayerSecret() : undefined
+  }
   const res = await fetch(`${API_BASE_URL}/api/rooms`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(options)
+    body: JSON.stringify(body)
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
@@ -190,14 +223,47 @@ export async function getRoomInfo(roomId) {
   return res.json()
 }
 
+async function requestJoinTicket(roomId, playerInfo) {
+  const headers = { 'Content-Type': 'application/json' }
+  if (playerInfo.token) {
+    headers.Authorization = `Bearer ${playerInfo.token}`
+  }
+
+  const res = await fetch(`${API_BASE_URL}/api/rooms/${roomId}/join-ticket`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      playerId: playerInfo.playerId,
+      playerSecret: getOrCreatePlayerSecret(),
+      playerName: playerInfo.playerName,
+      characterName: playerInfo.characterName || '',
+      role: playerInfo.role || 'student',
+      classId: playerInfo.classId || '',
+      avatar: playerInfo.avatar || '',
+      password: playerInfo.password || undefined,
+      features: playerInfo.features || undefined,
+      spectatorOnly: playerInfo.spectatorOnly || false,
+    })
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err.error || 'Failed to obtain join ticket')
+  }
+
+  const data = await res.json()
+  if (!data.ticket) throw new Error('Join ticket missing')
+  return data.ticket
+}
+
 // ── WebSocket 连接 ──
 
 /**
  * 连接到房间
  * @param {string} roomId
- * @param {Object} playerInfo { playerId, playerName, role, classId, avatar, password? }
+ * @param {Object} playerInfo { playerId, playerName, role, classId, avatar, password?, token? }
  */
-export function connectToRoom(roomId, playerInfo, options = {}) {
+export async function connectToRoom(roomId, playerInfo, options = {}) {
   const mpStore = useMultiplayerStore()
 
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -211,30 +277,16 @@ export function connectToRoom(roomId, playerInfo, options = {}) {
   currentRoomId = roomId
   currentPlayerInfo = playerInfo
 
-  const params = new URLSearchParams({
-    playerId: playerInfo.playerId,
-    playerName: playerInfo.playerName,
-    characterName: playerInfo.characterName || '',
-    role: playerInfo.role || 'student',
-    classId: playerInfo.classId || '',
-    avatar: playerInfo.avatar || '',
-  })
-  if (playerInfo.password) {
-    params.set('password', playerInfo.password)
-  }
-  // Discord JWT token
-  if (playerInfo.token) {
-    params.set('token', playerInfo.token)
-  }
-  // 玩家系统 features
-  if (playerInfo.features) {
-    params.set('features', JSON.stringify(playerInfo.features))
-  }
-  // 纯观战者模式
-  if (playerInfo.spectatorOnly) {
-    params.set('spectatorOnly', 'true')
+  let ticket
+  try {
+    ticket = await requestJoinTicket(roomId, playerInfo)
+  } catch (e) {
+    mpStore.isConnecting = false
+    mpStore.connectionError = e.message || '无法获取联机入场凭证'
+    return
   }
 
+  const params = new URLSearchParams({ ticket })
   const url = `${WS_BASE_URL}/ws/room/${roomId}?${params}`
 
   hasReceivedWelcome = false

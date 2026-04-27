@@ -7,7 +7,7 @@ import { useCharacterPool } from '../composables/useCharacterPool'
 import { useBatchComplete } from '../composables/useBatchComplete'
 import { useAIImport } from '../composables/useAIImport'
 import { useAutoClubGenerate } from '../composables/useAutoClubGenerate'
-import { saveRosterBackup, saveFullCharacterPool, getSnapshotData, saveSnapshotData } from '../utils/indexedDB'
+import { saveRosterBackup, saveFullCharacterPool, getSnapshotData, saveSnapshotData, saveNpcRelationships } from '../utils/indexedDB'
 import { updateClassDataInWorldbook, updateAcademicDataInWorldbook, updateTagDataInWorldbook, updateStaffRosterInWorldbook, ensureClubExistsInWorldbook, syncClubWorldbookState, createClubInWorldbook, addNpcToClubInWorldbook, batchUpdateClubsInWorldbook, removeClubFromWorldbook } from '../utils/worldbookParser'
 import { saveSocialData } from '../utils/socialRelationshipsWorldbook'
 import { saveImpressionDataImmediate } from '../utils/impressionWorldbook'
@@ -297,6 +297,20 @@ const getSnapshotLabel = (id) => {
 // 从备份恢复运行时关系数据，并重新写入 IndexedDB
 const cloneRelationships = () => JSON.parse(JSON.stringify(gameStore.world.npcRelationships || {}))
 
+const getActiveRunId = () => gameStore.meta.currentRunId || ''
+
+const isRuntimeRelationshipRun = () => {
+  const runId = getActiveRunId()
+  return Boolean(runId && runId !== 'temp_editing')
+}
+
+const persistCurrentRunRelationships = async () => {
+  const runId = getActiveRunId()
+  if (!runId || runId === 'temp_editing') return false
+  await saveNpcRelationships(runId, cloneRelationships())
+  return true
+}
+
 const persistRuntimeRelationshipChanges = async (syncWorldbook = false) => {
   if (snapshotRelSource.value) {
     clearPendingSocialData()
@@ -305,6 +319,29 @@ const persistRuntimeRelationshipChanges = async (syncWorldbook = false) => {
   await flushPendingSocialData()
   if (syncWorldbook) {
     await syncRelationshipsToWorldbook()
+  }
+}
+
+const buildSocialWorldbookData = (rels) => {
+  const worldbookData = {}
+  for (const [name, charData] of Object.entries(rels || {})) {
+    worldbookData[name] = {
+      personality: charData?.personality,
+      relationships: charData?.relations || {},
+      goals: charData?.goals,
+      priorities: charData?.priorities
+    }
+  }
+  return worldbookData
+}
+
+const applyPersonalityMapToRuntimeRelationships = (socialMap) => {
+  const rels = gameStore.world.npcRelationships
+  if (!rels) return
+  for (const [name, data] of Object.entries(socialMap || {})) {
+    if (rels[name] && data?.personality) {
+      rels[name].personality = deepClone(data.personality)
+    }
   }
 }
 
@@ -411,20 +448,18 @@ const handleClose = async () => {
   emit('close')
 }
 
-// 将面板编辑的关系数据同步回 [Social_Data] 世界书
+// 将面板编辑的关系数据持久化；运行中只写当前存档，非运行编辑才写 [Social_Data] 初始模板
 async function syncRelationshipsToWorldbook() {
   const rels = gameStore.world.npcRelationships
   if (!rels) return
-  const worldbookData = {}
-  for (const [name, charData] of Object.entries(rels)) {
-    worldbookData[name] = {
-      personality: charData.personality,
-      relationships: charData.relations,
-      goals: charData.goals,
-      priorities: charData.priorities
-    }
+  if (isRuntimeRelationshipRun()) {
+    await persistCurrentRunRelationships()
+    await saveImpressionDataImmediate()
+    console.warn('[RelEditor] Skipped Social_Data sync during active run; saved relationships to current save only.')
+    return false
   }
-  await saveSocialData(worldbookData)
+  await saveSocialData(buildSocialWorldbookData(rels))
+  return true
 }
 
 // ==================== 初始化 ====================
@@ -712,7 +747,14 @@ const handleSave = async () => {
         socialMap[c.name] = { personality: c.personality }
       }
     })
-    await saveSocialData(socialMap)
+    if (Object.keys(socialMap).length > 0) {
+      if (isRuntimeRelationshipRun()) {
+        applyPersonalityMapToRuntimeRelationships(socialMap)
+        await persistCurrentRunRelationships()
+      } else {
+        await saveSocialData(socialMap)
+      }
+    }
 
     // 7. 同步印象数据
     await saveImpressionDataImmediate()
@@ -720,7 +762,9 @@ const handleSave = async () => {
     // 8. 更新游戏store
     gameStore.world.allClassData = deepClone(fullRosterSnapshot.value)
 
-    showMessage('保存成功！数据已同步到世界书。')
+    showMessage(isRuntimeRelationshipRun()
+      ? '保存成功！运行期关系已保存到当前存档。'
+      : '保存成功！数据已同步到世界书。')
   } catch (e) {
     console.error('[RosterFilter] Save error:', e)
     showMessage(`保存失败: ${getErrorMessage(e)}`)

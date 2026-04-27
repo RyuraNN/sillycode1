@@ -36,7 +36,7 @@ function serializeForStorage(obj: any): any {
 
   const serialized: any = {}
   for (const key in obj) {
-    if (!obj.hasOwnProperty(key)) continue
+    if (!Object.prototype.hasOwnProperty.call(obj, key)) continue
     const value = obj[key]
 
     // 跳过函数、Symbol、undefined
@@ -74,7 +74,7 @@ function deserializeFromStorage(obj: any): any {
 
   const deserialized: any = {}
   for (const key in obj) {
-    if (!obj.hasOwnProperty(key)) continue
+    if (!Object.prototype.hasOwnProperty.call(obj, key)) continue
     deserialized[key] = deserializeFromStorage(obj[key])
   }
 

@@ -22,6 +22,7 @@ import { getErrorMessage } from '../utils/errorUtils'
 import { parseGameData, applyGameData, mergeGameData, deepMerge, generateDetailedChanges } from '../utils/gameDataParser'
 import { cleanSystemTags, parseInsertImageTags, insertImagesAtAnchors } from '../utils/contentCleaner'
 import { formatDebugContent, parseDebugData, parseDebugTag } from '../utils/debugFormatter'
+import { decodeDataAttribute, renderContentWithSafeImageRefs } from '../utils/safeHtml'
 import { useMultiplayerStore } from '../stores/multiplayerStore'
 import {
   isConversationHost,
@@ -381,43 +382,11 @@ const processMessageContent = (log, index) => {
     return formatDebugContent(content)
   }
 
-  // 替换图片引用
-  content = content.replace(/<image-ref\s+([^>]+)\/?>/g, (match, attrsStr) => {
-    const attrs = {}
-    const attrRegex = /(\w+)="([^"]*)"/g
-    let m
-    while ((m = attrRegex.exec(attrsStr)) !== null) {
-      attrs[m[1]] = m[2]
-    }
-    
-    const id = attrs.id
-    const prompt = attrs.prompt || ''
-    const history = attrs.history || ''
-    
-    const url = imageCacheMap.get(id)
-    if (url) {
-      return `
-        <div class="image-container" style="position: relative; display: inline-block; max-width: 100%; margin: 10px 0;">
-          <img src="${url}" class="generated-image" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); display: block;" />
-          <div class="image-trigger" 
-               data-img-id="${id}" 
-               data-prompt="${encodeURIComponent(prompt)}" 
-               data-history="${history}"
-               data-log-index="${index}"
-               data-original-tag="${encodeURIComponent(match)}"
-               style="position: absolute; top: 0; right: 0; width: 40%; height: 40%; z-index: 10; cursor: pointer; -webkit-tap-highlight-color: transparent;">
-          </div>
-        </div>`
-    } else {
-      queueImageLoad(id)
-      return `<div class="image-loading-placeholder" style="padding: 20px; text-align: center; border: 1px dashed #ccc; border-radius: 8px; margin: 10px 0; background: rgba(0,0,0,0.05);">
-                <span class="img-spinner"></span>
-                <span style="vertical-align: middle; color: #5d4037; font-size: 0.9em;">图片加载中...</span>
-              </div>`
-    }
+  return renderContentWithSafeImageRefs(content, {
+    logIndex: index,
+    getImageUrl: id => imageCacheMap.get(id),
+    queueImageLoad
   })
-
-  return content
 }
 
 // 处理日志区域点击
@@ -429,10 +398,10 @@ const handleLogClick = (event) => {
   const trigger = event.target.closest('.image-trigger')
   if (trigger) {
     const imgId = trigger.dataset.imgId
-    const prompt = decodeURIComponent(trigger.dataset.prompt)
-    const history = trigger.dataset.history || ''
+    const prompt = decodeDataAttribute(trigger.dataset.prompt)
+    const history = decodeDataAttribute(trigger.dataset.history)
     const logIndex = parseInt(trigger.dataset.logIndex, 10)
-    const originalTag = decodeURIComponent(trigger.dataset.originalTag || '')
+    const originalTag = decodeDataAttribute(trigger.dataset.originalTag)
     
     openImagePanel(imgId, prompt, history, logIndex, originalTag)
     return
@@ -1849,6 +1818,9 @@ const handleAssistantReroll = async () => {
   const savedFloorSummaries = gameStore.player.summaries.filter(
     s => s.floor === currentFloor
   )
+  const savedFloorFacts = (gameStore.player.persistentFacts || []).filter(
+    f => f.sourceFloor === currentFloor
+  )
   
   // 如果有 preVariableSnapshot，先恢复到辅助AI执行前的状态
   if (lastLog.preVariableSnapshot) {
@@ -1859,6 +1831,20 @@ const handleAssistantReroll = async () => {
     for (const saved of savedFloorSummaries) {
       if (!gameStore.player.summaries.some(s => s.floor === saved.floor && s.type === saved.type)) {
         gameStore.player.summaries.push(saved)
+      }
+    }
+    if (savedFloorFacts.length > 0) {
+      if (!Array.isArray(gameStore.player.persistentFacts)) {
+        gameStore.player.persistentFacts = []
+      }
+      for (const saved of savedFloorFacts) {
+        const exists = gameStore.player.persistentFacts.some(f =>
+          f.sourceFloor === saved.sourceFloor &&
+          f.entity === saved.entity &&
+          f.factCategory === saved.factCategory &&
+          f.content === saved.content
+        )
+        if (!exists) gameStore.player.persistentFacts.push(saved)
       }
     }
   }

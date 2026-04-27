@@ -9,6 +9,12 @@ import { calculateTotalHours } from './npcScheduleSystem'
 import { useMultiplayerStore } from '../stores/multiplayerStore'
 import { sendNpcMoveSync, sendNpcRelationshipSync } from './multiplayerWs'
 
+const BLOCKED_OBJECT_KEYS = new Set(['__proto__', 'prototype', 'constructor'])
+
+function isSafeObjectKey(key) {
+  return !BLOCKED_OBJECT_KEYS.has(key)
+}
+
 // 变量名中英文映射表
 export const VARIABLE_NAME_MAP = {
   money: '金钱',
@@ -161,7 +167,7 @@ export const analyzeChanges = (data) => {
 export const deepMerge = (target, source) => {
   if (!target) target = {}
   for (const key in source) {
-    if (source.hasOwnProperty(key)) {
+    if (Object.prototype.hasOwnProperty.call(source, key) && isSafeObjectKey(key)) {
       if (
         source[key] && typeof source[key] === 'object' && !Array.isArray(source[key]) &&
         target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])
@@ -187,7 +193,7 @@ export const mergeGameData = (mainDataList, assistantDataList) => {
   // 辅助函数：将 source 合并到 target，如果 target 已有值则不覆盖
   const mergeIfMissing = (target, source) => {
     for (const key in source) {
-      if (source.hasOwnProperty(key)) {
+      if (Object.prototype.hasOwnProperty.call(source, key) && isSafeObjectKey(key)) {
         if (typeof source[key] === 'object' && source[key] !== null && !Array.isArray(source[key])) {
           if (!target[key]) target[key] = {}
           mergeIfMissing(target[key], source[key])
@@ -209,7 +215,7 @@ export const mergeGameData = (mainDataList, assistantDataList) => {
   for (const data of mainDataList) {
     const mergeOverwrite = (target, source) => {
       for (const key in source) {
-        if (source.hasOwnProperty(key)) {
+        if (Object.prototype.hasOwnProperty.call(source, key) && isSafeObjectKey(key)) {
           if (typeof source[key] === 'object' && source[key] !== null && !Array.isArray(source[key])) {
             if (!target[key]) target[key] = {}
             mergeOverwrite(target[key], source[key])
@@ -659,8 +665,8 @@ export const generateDetailedChanges = (oldState, newState) => {
   }
 
   // 8. 检查时间是否有变化，合并显示
-  const oldTime = oldState.gameTime
-  const newTime = newState.gameTime
+  const oldTime = oldState.world?.gameTime || oldState.gameTime
+  const newTime = newState.world?.gameTime || newState.gameTime
 
   if (oldTime && newTime) {
     const timeChanged =

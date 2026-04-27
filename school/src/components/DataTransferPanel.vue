@@ -403,7 +403,7 @@ const handleImport = async () => {
       // 同步到世界书
       if (syncToWorldbook.value) {
         const { syncRelationshipsToWorldbook } = await import('../utils/relationshipManager')
-        await syncRelationshipsToWorldbook()
+        await syncRelationshipsToWorldbook({ allowRuntimeGlobalWrite: true })
       }
 
       console.log('[DataTransfer] Imported relationships:', Object.keys(data.relationships).length)

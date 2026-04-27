@@ -18,6 +18,28 @@ import { saveNpcRelationships } from './indexedDB'
 let _debounceSaveTimer = null
 const DEBOUNCE_DELAY = 500 // ms
 
+function getActiveRunId(gameStore = useGameStore()) {
+  return gameStore?.meta?.currentRunId || ''
+}
+
+function isRuntimeRelationshipRun(gameStore = useGameStore()) {
+  const runId = getActiveRunId(gameStore)
+  return Boolean(runId && runId !== 'temp_editing')
+}
+
+function buildSocialWorldbookData(relationships = {}) {
+  const worldbookData = {}
+  for (const [name, charData] of Object.entries(relationships)) {
+    worldbookData[name] = {
+      personality: charData?.personality,
+      relationships: charData?.relations || {},
+      goals: charData?.goals,
+      priorities: charData?.priorities
+    }
+  }
+  return worldbookData
+}
+
 /**
  * 防抖保存社交数据到 IndexedDB（按 currentRunId 隔离）
  * 将短时间内的多次写入合并为一次
@@ -498,7 +520,7 @@ export function setRelationship(sourceName, targetName, relationData) {
   // 更新印象列表
   saveImpressionData()
 
-  // 使用防抖机制异步保存到世界书（避免短时间内多次写入导致竞态覆盖）
+  // 使用防抖机制异步保存到当前存档（避免短时间内多次写入导致竞态覆盖）
   const partialData = {}
   partialData[sourceName] = { relationships: { [targetName]: newRelation } }
   debounceSaveSocialData(partialData)
@@ -744,7 +766,7 @@ export function updatePersonality(charName, personality) {
     }
     gameStore.world.npcRelationships[charName].personality = newPersonality
     
-    // 使用防抖机制同步到世界书
+    // 使用防抖机制保存到当前存档
     const partialData = {}
     partialData[charName] = { personality: newPersonality }
     debounceSaveSocialData(partialData)
@@ -763,7 +785,7 @@ export function updateGoals(charName, goals) {
     }
     gameStore.world.npcRelationships[charName].goals = newGoals
 
-    // 使用防抖机制同步到世界书
+    // 使用防抖机制保存到当前存档
     const partialData = {}
     partialData[charName] = { goals: newGoals }
     debounceSaveSocialData(partialData)
@@ -782,7 +804,7 @@ export function updatePriorities(charName, priorities) {
     }
     gameStore.world.npcRelationships[charName].priorities = newPriorities
 
-    // 使用防抖机制同步到世界书
+    // 使用防抖机制保存到当前存档
     const partialData = {}
     partialData[charName] = { priorities: newPriorities }
     debounceSaveSocialData(partialData)
@@ -899,24 +921,32 @@ export async function clearAllRelationships() {
     }
   }
 
-  // 立即保存
+  // 立即保存到当前存档，并刷新当前 run 的印象世界书
   await flushPendingSocialData()
-
-  // 同步到世界书
-  await syncRelationshipsToWorldbook()
+  await saveImpressionDataImmediate()
 
   console.log('[RelationshipManager] Cleared all relationships')
 }
 
 /**
- * 同步关系数据到世界书
+ * 同步关系数据到全局 Social_Data 世界书。
+ * Social_Data 是新游戏的初始关系模板；运行中的关系默认只保存到当前存档。
  */
-export async function syncRelationshipsToWorldbook() {
+export async function syncRelationshipsToWorldbook(options = {}) {
   try {
     const gameStore = useGameStore()
-    await saveSocialData(gameStore.world.npcRelationships)
+    if (isRuntimeRelationshipRun(gameStore) && options.allowRuntimeGlobalWrite !== true) {
+      await flushPendingSocialData()
+      await saveImpressionDataImmediate()
+      console.warn('[RelationshipManager] Skipped Social_Data sync during active run; saved relationships to current save only.')
+      return false
+    }
+
+    await saveSocialData(buildSocialWorldbookData(gameStore.world.npcRelationships || {}))
     console.log('[RelationshipManager] Synced relationships to worldbook')
+    return true
   } catch (e) {
     console.error('[RelationshipManager] Failed to sync to worldbook:', e)
+    return false
   }
 }

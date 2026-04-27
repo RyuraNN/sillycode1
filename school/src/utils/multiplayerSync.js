@@ -45,10 +45,8 @@ export function clearPendingWorldbookRestore() {
 // ==================== 联机同步条目过滤 ====================
 
 const SYNC_ENTRY_PREFIXES = [
-  '[COT]',
   '[数值参考]',
   '[世界观]',
-  '[变量解析]',
   '[AcademicData]',
   '[TagData]',
   '[MapData]',
@@ -60,12 +58,18 @@ const SYNC_ENTRY_PREFIXES = [
   '[商品目录]',
 ]
 
+const SENSITIVE_SYNC_ENTRY_PREFIXES = [
+  '[COT]',
+  '[变量解析]'
+]
+
 /**
  * 判断世界书条目是否应参与联机初始同步（hash 比对 + 快照传输）
  * 仅同步：不带 runId 的班级/社团 + 固定列表条目
  */
 export function isSyncableEntry(entryName) {
   if (!entryName) return false
+  if (SENSITIVE_SYNC_ENTRY_PREFIXES.some(prefix => entryName.startsWith(prefix))) return false
   // 不带 runId 的班级条目: [Class:xxx] 但不匹配 [Class:xxx:runId]
   if (/^\[Class:[\w.-]+\]/.test(entryName) && !/^\[Class:[\w.-]+:[\w.-]+\]/.test(entryName)) return true
   // 不带 runId 的社团条目: [Club:xxx] 但不匹配 [Club:xxx:runId]

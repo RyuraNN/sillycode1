@@ -10,19 +10,17 @@ let isGenerationStopped = false
  */
 function checkTruncation(response) {
   if (!response || response.length < 50) return false
+  const trimmed = response.trim()
 
   // 检查是否以未闭合的标签结尾
-  const unclosedTag = /<[^>]*$/.test(response)
-  const unclosedBracket = /\[[^\]]*$/.test(response)
-
-  // 检查是否以不完整的句子结尾（没有标点符号）
-  const endsWithoutPunctuation = !/[。！？.!?]$/.test(response.trim())
+  const unclosedTag = /<[^>]*$/.test(trimmed)
+  const unclosedBracket = /\[[^\]]*$/.test(trimmed)
+  const openGameData = (trimmed.match(/\[GAME_DATA\]/g) || []).length
+  const closeGameData = (trimmed.match(/\[\/GAME_DATA\]/g) || []).length
 
   // 如果有明显的未闭合标签，判定为截断
   if (unclosedTag || unclosedBracket) return true
-
-  // 如果响应很短且没有标点，也可能是截断
-  if (response.length < 200 && endsWithoutPunctuation) return true
+  if (openGameData > closeGameData) return true
 
   return false
 }
@@ -135,10 +133,12 @@ export async function generateStreaming(userInput, onChunk, customHistory = null
   }
 
   let eventId = null
+  let streamEventName = null
   // 只有在需要流式时才绑定事件监听器
   if (shouldStream && window.eventOn && window.iframe_events) {
     // 使用 INCREMENTALLY 获取增量更新
-    eventId = window.eventOn(window.iframe_events.STREAM_TOKEN_RECEIVED_INCREMENTALLY, eventHandler)
+    streamEventName = window.iframe_events.STREAM_TOKEN_RECEIVED_INCREMENTALLY
+    eventId = window.eventOn(streamEventName, eventHandler)
   } else if (!shouldStream) {
     console.log('[ST Client] Streaming disabled, skipping event listener binding')
   } else {
@@ -183,7 +183,9 @@ export async function generateStreaming(userInput, onChunk, customHistory = null
     return '__ERROR__'
   } finally {
     // 清理事件监听
-    if (window.eventOff && eventId !== null) {
+    if (window.eventRemoveListener && streamEventName) {
+      window.eventRemoveListener(streamEventName, eventHandler)
+    } else if (window.eventOff && eventId !== null) {
       window.eventOff(eventId)
     }
   }

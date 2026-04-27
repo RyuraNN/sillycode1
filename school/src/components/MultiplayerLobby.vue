@@ -650,7 +650,7 @@ async function handleCreate() {
     }
 
     // 创建后立即连接
-    connectToRoom(result.roomId, {
+    await connectToRoom(result.roomId, {
       playerId,
       playerName: playerName.value,
       characterName: gameStore.player?.name || '',
@@ -683,7 +683,7 @@ async function handleJoin() {
     const info = await getRoomInfo(joinRoomId.value.trim().toUpperCase())
     pendingRoomInfo.value = info
     // 直接连接，连接后通过 checkPostConnectFlow 路由到预设/角色创建
-    doConnect()
+    await doConnect()
   } catch (e) {
     errorMessage.value = e.message || '加入房间失败'
     isLoading.value = false
@@ -701,7 +701,7 @@ function skipPresetAndContinue() {
   goToCharacterCreate()
 }
 
-function doConnect() {
+async function doConnect() {
   isLoading.value = true
   const playerId = getOrCreatePlayerId()
 
@@ -722,7 +722,7 @@ function doConnect() {
     if (d.formData?.classId) pClassId = d.formData.classId
   }
 
-  connectToRoom(joinRoomId.value.trim().toUpperCase(), {
+  await connectToRoom(joinRoomId.value.trim().toUpperCase(), {
     playerId,
     playerName: pName,
     characterName: pCharacterName,
@@ -1062,12 +1062,12 @@ const hasEnteredGame = ref(false)
 const savedSession = ref(null)
 
 /** 重连到上次的房间 */
-function handleReconnect() {
+async function handleReconnect() {
   const session = savedSession.value
   if (!session) return
   savedSession.value = null
   clearSavedSessionManual()
-  connectToRoom(session.roomId, session.playerInfo)
+  await connectToRoom(session.roomId, session.playerInfo)
   view.value = 'connecting'
   waitForConnection()
 }
